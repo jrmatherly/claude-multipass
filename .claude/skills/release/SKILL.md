@@ -12,7 +12,7 @@ Preconditions: on `main`, clean tree, `pnpm check` passes, the tap is cloned at 
 2. Bump `version=` in `bin/claude-multipass` and `"version"` in `package.json` to `X.Y.Z` together; `pnpm check` fails when they differ.
 3. Commit: `git commit -am "Release vX.Y.Z"` (the commit-gate hook runs `pnpm check`).
 4. Tag: `git tag -a vX.Y.Z -m "vX.Y.Z"`.
-5. Push with the tag: `git push --follow-tags`. The tag starts `release.yml` (`gh run watch` or the Actions tab); wait for it to finish. It publishes `claude-multipass-app_X.Y.Z_arm64.dmg` and its `.sha256` on the GitHub release. Confirm the DMG is notarized: download it and run `spctl -a -vv -t open --context context:primary-signature <dmg>`, expected `accepted`.
+5. Push with the tag: `git push --follow-tags`. The tag starts `release.yml` (`gh run watch` or the Actions tab); wait for it to finish. It publishes `claude-multipass-app_X.Y.Z_arm64.dmg` and its `.sha256` on the GitHub release (the suffix is the runner's `uname -m`; `macos-latest` is arm64). Confirm the DMG is notarized: download it and run `spctl -a -vv -t open --context context:primary-signature <dmg>`, expected `accepted`.
 6. Compute the tarball digest (GitHub builds the archive from the tag; wait for the push to land):
 
    ```sh

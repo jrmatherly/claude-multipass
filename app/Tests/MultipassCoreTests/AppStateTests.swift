@@ -212,8 +212,15 @@ private func enabledUsage(_ s: AppState) -> AppSettings {
 
 @Test @MainActor func switchSuccessRefreshes() async {
   let (s, r) = await readyState()
+  final class Seen: @unchecked Sendable { var phaseDuringRefresh: Phase? }
+  let seen = Seen()
+  r.onCall = { args in
+    guard args == ["list", "--json"] else { return }
+    await MainActor.run { seen.phaseDuringRefresh = s.phase }
+  }
   await s.switchTo("alpha")
   #expect(r.calls == [["switch", "alpha"], ["list", "--json"]])
+  #expect(seen.phaseDuringRefresh == .switching("alpha"))
   #expect(s.phase == .idle)
   #expect(s.rowError == nil)
 }

@@ -245,6 +245,7 @@ check "sync with no pointers says so" "No Code tab sessions to sync" "$(cda sync
 
 # list with nothing saved
 check "list with no profiles explains" "No saved accounts yet: run claude-multipass save <name> for the signed-in one, add <name> for another" "$(CLAUDE_MULTIPASS_DIR="$tmp/empty" cda list)"
+check "list --json with no profiles is an empty array" "[]" "$(CLAUDE_MULTIPASS_DIR="$tmp/empty" cda list --json | jq -c .profiles)"
 
 # backups prune to the newest ten
 for i in $(seq 1 12); do mkdir -p "$b/login-2020010100000$i-1"; done
