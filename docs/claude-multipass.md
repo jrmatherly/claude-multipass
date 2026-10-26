@@ -59,7 +59,7 @@ Desktop quits, relaunches signed in as that account, and the Code tab lists both
 
 ## Raycast
 
-Three script commands in `raycast/` wrap the tool for Raycast: **Claude Account** (the signed-in name in Root Search), **Claude Account Usage** (opt-in, with the 5-hour and weekly figures) and **Switch Claude Account**. They call `claude-multipass` by name with Homebrew's bin on PATH. Copy them once to a folder you own, `cp -R "$(brew --prefix)/share/claude-multipass/raycast" ~/.config/claude-multipass/raycast` (Homebrew's `share` path is a symlink into a versioned folder that changes on upgrade, and the macOS picker hides `/opt`), then add that folder: Raycast, **Settings, Script Commands, Add Script Directory**, Cmd+Shift+G in the picker, `~/.config/claude-multipass/raycast`. A repo checkout's `raycast/` folder works too. Do not use **Developer, Import Extension**: that imports a packaged extension, not a script directory. Save each account first with `claude-multipass save {{name}}`.
+Three script commands in `raycast/` wrap the tool for Raycast: **Claude Account** (the signed-in name in Root Search), **Claude Account Usage** (opt-in, with the 5-hour and weekly figures) and **Switch Claude Account**. They call `claude-multipass` by name with Homebrew's bin on PATH. Copy them once to a folder you own, `mkdir -p ~/.config/claude-multipass/raycast && cp -R "$(brew --prefix)/share/claude-multipass/raycast/." ~/.config/claude-multipass/raycast` (Homebrew's `share` path is a symlink into a versioned folder that changes on upgrade, and the macOS picker hides `/opt`), then add that folder: Raycast, **Settings, Script Commands, Add Script Directory**, Cmd+Shift+G in the picker, `~/.config/claude-multipass/raycast`. A repo checkout's `raycast/` folder works too. Do not use **Developer, Import Extension**: that imports a packaged extension, not a script directory. Save each account first with `claude-multipass save {{name}}`.
 
 ## Menu bar app
 
@@ -96,7 +96,7 @@ This is the one part of the tool that uses a subscription token outside Anthropi
 | `~/.config/claude-multipass/backups/profile-*/` | Profiles that `remove` or a forced `save` set aside |
 | `~/Library/Application Support/Claude/` | Desktop's data: `config.json`, the cookie files, `claude-code-sessions/<account>/<org>/local_*.json` (the Code tab's list) |
 
-`CLAUDE_MULTIPASS_DIR` moves the profile and backup folders (`XDG_CONFIG_HOME` moves their default parent); `CLAUDE_DESKTOP_DIR` points at another Desktop data folder. A store left by the tool's earlier life as `claude-desktop-account` in a dotfiles repo (`~/.config/dotfiles/claude-desktop-accounts` and its `-backups` sibling) is moved into the new location on the first run that finds it, and the run says so.
+`CLAUDE_MULTIPASS_DIR` moves the profile and backup folders (`XDG_CONFIG_HOME` moves their default parent); `CLAUDE_DESKTOP_DIR` points at another Desktop data folder. A store left by the tool's earlier life as `claude-desktop-account` in a dotfiles repo (`dotfiles/claude-desktop-accounts` and its `-backups` sibling under `XDG_CONFIG_HOME`, `~/.config` by default) is moved into the new location on the first run that finds it, and the run says so. When a `backups` folder already exists in the new location, the legacy `-backups` folder stays where it was and the run warns.
 
 ## When something is off
 

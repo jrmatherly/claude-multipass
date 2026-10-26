@@ -5,6 +5,9 @@
 - The "Save this login as" row keeps showing a failed save's message while the name is edited; it used to vanish on the first keystroke.
 - `list --json` builds its output in memory; a failure midway no longer leaves a temp file behind.
 - `scripts/build-app.sh` names the DMG after the architecture of the machine that built it, not a fixed `arm64`.
+- The Raycast commands print an install hint instead of bash's "command not found" when `claude-multipass` is not on their PATH.
+- The one-time store migration warns when it leaves the legacy `-backups` folder behind because a `backups` folder already exists.
+- The README and docs copy the Raycast folder's contents, so a second copy no longer nests `raycast/raycast`.
 
 ## 0.2.1 (2026-10-26)
 

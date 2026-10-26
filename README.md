@@ -53,7 +53,7 @@ Claude Code transcripts live in `~/.claude/projects`, shared by every account, s
 `raycast/` holds three script commands (current account, usage, switch). Copy them to a folder you own, because Homebrew's `share` path is a symlink into a versioned folder that changes on upgrade and the macOS picker hides `/opt`:
 
 ```sh
-cp -R "$(brew --prefix)/share/claude-multipass/raycast" ~/.config/claude-multipass/raycast
+mkdir -p ~/.config/claude-multipass/raycast && cp -R "$(brew --prefix)/share/claude-multipass/raycast/." ~/.config/claude-multipass/raycast
 ```
 
 Then in Raycast, **Settings, Script Commands, Add Script Directory**, press Cmd+Shift+G in the picker and enter `~/.config/claude-multipass/raycast`.

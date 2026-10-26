@@ -14,7 +14,7 @@ Three Raycast script commands in `raycast/` call the tool by name. `bin/claude-m
 - `pnpm format`: prettier `--write` over the same globs.
 - One file: `bash -n <file> && shellcheck --severity=warning <file> && node_modules/.bin/prettier --check <file>`.
 - `bash test/claude-multipass.sh`: the fixture self-check, exits 1 naming the first failed assertion. It never touches the real Desktop: `CLAUDE_DESKTOP_DIR` and `CLAUDE_MULTIPASS_DIR` point into a temp dir, and `pgrep`, `osascript`, `pkill`, `open`, `fzf`, `security` and `curl` are stubs on PATH (no app quit or launched, no Keychain, no network). The migration case sets `XDG_CONFIG_HOME` to the temp dir, not `HOME`, because tools on PATH read their own config from `HOME`. Details in `.claude/rules/testing.md`.
-- Never run `save`, `add`, `switch`, `remove` or `sync` against the real Desktop folder from an agent: they quit the app and rewrite its login. `.claude/settings.json` asks before `save`, `add`, `switch` and `remove`. `usage` reads the Keychain and prompts the user; leave it to them. `list`, `show` and `current` are read-only.
+- Never run `save`, `add`, `switch`, `remove` or `sync` against the real Desktop folder from an agent: they quit the app and rewrite its login. `.claude/settings.json` asks before `save`, `add`, `switch` and `remove`. `usage` reads the Keychain and prompts the user; leave it to them. `list`, `show` and `current` are read-only, apart from the one-time store migration.
 
 ## Architecture
 
