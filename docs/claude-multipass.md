@@ -57,7 +57,7 @@ Desktop quits, relaunches signed in as that account, and the Code tab lists both
 
 ## Raycast
 
-Three script commands in `raycast/` wrap the tool for Raycast: **Claude Account** (the signed-in name in Root Search), **Claude Account Usage** (opt-in, with the 5-hour and weekly figures) and **Switch Claude Account**. They call `claude-multipass` by name with Homebrew's bin on PATH. Add the directory once: Raycast, **Settings, Script Commands, Add Script Directory**, then pick `$(brew --prefix)/share/claude-multipass/raycast` (a Homebrew install) or the repo's `raycast/` folder. Do not use **Developer, Import Extension**: that imports a packaged extension, not a script directory. Save each account first with `claude-multipass save {{name}}`.
+Three script commands in `raycast/` wrap the tool for Raycast: **Claude Account** (the signed-in name in Root Search), **Claude Account Usage** (opt-in, with the 5-hour and weekly figures) and **Switch Claude Account**. They call `claude-multipass` by name with Homebrew's bin on PATH. Copy them once to a folder you own, `cp -R "$(brew --prefix)/share/claude-multipass/raycast" ~/.config/claude-multipass/raycast` (Homebrew's `share` path is a symlink into a versioned folder that changes on upgrade, and the macOS picker hides `/opt`), then add that folder: Raycast, **Settings, Script Commands, Add Script Directory**, Cmd+Shift+G in the picker, `~/.config/claude-multipass/raycast`. A repo checkout's `raycast/` folder works too. Do not use **Developer, Import Extension**: that imports a packaged extension, not a script directory. Save each account first with `claude-multipass save {{name}}`.
 
 ## Usage headroom
 
