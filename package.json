@@ -1,0 +1,20 @@
+{
+  "name": "claude-multipass",
+  "version": "0.1.0",
+  "packageManager": "pnpm@12.14.0",
+  "description": "Switch the Claude Desktop app between saved claude.ai accounts.",
+  "private": true,
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "check": "test/check.sh",
+    "format": "prettier --log-level warn --ignore-unknown --write \"**/*.{js,cjs,ts,md,json,sh}\" \"bin/*\" \".github/**/*.yml\""
+  },
+  "author": "Jason Matherly",
+  "license": "MIT",
+  "devDependencies": {
+    "prettier": "^3.9.9",
+    "prettier-plugin-sh": "^0.20.0"
+  }
+}

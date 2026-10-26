@@ -1,0 +1,12 @@
+# Files that tools write and rewrite themselves. Reformatting them makes each
+# tool and prettier undo each other's changes, so prettier leaves them alone:
+# - CLAUDE.md (any depth): agent-written edits
+# - .serena/: Serena's project config and memories
+CLAUDE.md
+.serena/
+# Machine-local, also git-ignored: Claude Code's per-machine permission
+# approvals, Remember plugin memory, private notes and run logs
+.claude/settings.local.json
+.remember/
+private/
+logs/

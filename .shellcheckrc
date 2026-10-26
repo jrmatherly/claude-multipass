@@ -1,0 +1,5 @@
+# ShellCheck config for this repo.
+# Optional check: flag UPPERCASE variables that are read but never assigned —
+# the typo/unset-variable bug class (see bin/pull's base_dir, lowercase).
+# Intentional optional env vars get ${VAR:-} to say so.
+enable=check-unassigned-uppercase
