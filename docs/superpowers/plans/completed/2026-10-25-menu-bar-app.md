@@ -8,7 +8,7 @@
 
 **Tech Stack:** bash 3.2, jq, Swift 6.4 toolchain via Command Line Tools (no Xcode), SwiftPM, Swift Testing, SwiftUI + AppKit, `codesign`/`notarytool`/`stapler`, Homebrew cask.
 
-**Spec:** `docs/superpowers/specs/2026-10-25-menu-bar-app.md`
+**Spec:** `docs/superpowers/specs/completed/2026-10-25-menu-bar-app.md`
 
 Revised 2026-10-25 after two three-model adversarial review rounds; each revision's commit message lists the findings and their disposition.
 
