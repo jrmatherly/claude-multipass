@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.0 (unreleased)
+## 0.3.0 (2026-10-26)
 
 - `save` also captures the Claude Code CLI's terminal login (the Keychain item's tokens into a Keychain item of the tool's own, the `oauthAccount` identity into the profile's `cli.json`) when the CLI is signed in as the same account as Desktop, and `switch` restores it under the CLI's own locks, keeping the shared MCP keys. A CLI already on the target account is re-saved, never overwritten. The live CLI login is backed up beside the Desktop backup.
 - `save`, and the re-save on the way out of a switch, keep a profile's earlier CLI login and warn when the CLI is signed in as another account or signed out. `switch` restores the target's CLI login over whatever the live item held (backed up first) and moves Desktop only, with a warning, when the profile has no CLI login, its Keychain item is missing, `~/.claude.json` is absent or corrupt, `CLAUDE_CONFIG_DIR` is set, the item is too large for `security -i`, or a `security` call fails. `switch` warns when a `claude` process is running and when `claude auth status` reports another org after the restore.
