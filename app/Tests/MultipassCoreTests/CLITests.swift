@@ -14,6 +14,7 @@ private func stubScript() throws -> URL {
       switch) echo "refused here" >&2; exit 3;;
       big) head -c 200000 /dev/zero | tr '\\0' x;;
       slow) sleep 5;;
+      hang) (trap '' TERM; sleep 6 &); sleep 6;;
       color) tput setaf 1; echo boom >&2; exit 1;;
       *) echo boom >&2; exit 1;;
     esac
@@ -66,6 +67,15 @@ private func stubScript() throws -> URL {
   let started = Date()
   await #expect(throws: CLIError.timedOut) { try await cli.run(["slow"]) }
   #expect(Date().timeIntervalSince(started) < 3)
+}
+
+@Test func timeoutReleasesAHungGrandchild() async throws {
+  // usage runs each account in a backgrounded subshell; a Keychain prompt
+  // left open keeps that grandchild, and so the pipes, alive.
+  let cli = CLI(executable: try stubScript(), timeout: 1)
+  let started = Date()
+  await #expect(throws: CLIError.timedOut) { try await cli.run(["hang"]) }
+  #expect(Date().timeIntervalSince(started) < 4)
 }
 
 @Test func versionCompare() {

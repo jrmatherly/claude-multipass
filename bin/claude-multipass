@@ -523,9 +523,9 @@ usage_object() {
   case $body in
     error:\ *) jq -n --arg name "$name" --arg error "${body#error: }" '{name: $name, error: $error}' ;;
     *) jq --arg name "$name" '
-      def win: select(.utilization != null)
-        | {utilization} + (if .resets_at then {resetsAt: (.resets_at | sub("(\\.[0-9]+)?(\\+00:00|Z)$"; "Z"))} else {} end);
-      {name: $name} + ((.five_hour // {}) | win | {fiveHour: .}) + ((.seven_day // {}) | win | {sevenDay: .})' <<< "$body" ;;
+      def win(key): if .utilization == null then {} else
+        {(key): ({utilization} + (if .resets_at then {resetsAt: (.resets_at | sub("(\\.[0-9]+)?(\\+00:00|Z)$"; "Z"))} else {} end))} end;
+      {name: $name} + ((.five_hour // {}) | win("fiveHour")) + ((.seven_day // {}) | win("sevenDay"))' <<< "$body" ;;
   esac
 }
 

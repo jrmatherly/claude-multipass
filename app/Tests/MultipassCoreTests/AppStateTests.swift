@@ -125,10 +125,29 @@ private func enabledUsage(_ s: AppState) -> AppSettings {
   r.clearCalls()
   await s.refresh()
   #expect(s.cliStatus == .ready("0.2.0"))
-  #expect(r.calls == [["--version"]])
-  await s.refresh()
   #expect(r.calls == [["--version"], ["list", "--json"]])
   #expect(s.snapshot?.current == "beta")
+}
+
+@Test @MainActor func overlappingRelocatesKeepTheLastRequested() async {
+  // The settings path field applies per keystroke; an earlier probe that
+  // finishes last must not overwrite the status of the path typed later.
+  let slow = FakeRunner()
+  slow.answer("--version", "claude-multipass 0.2.0\n")
+  slow.onCall = { _ in try? await Task.sleep(nanoseconds: 200_000_000) }
+  let s = makeState(nil) { settings in settings.cliPathOverride == "/slow" ? slow : nil }
+  var slowPath = s.settings
+  slowPath.cliPathOverride = "/slow"
+  var missingPath = s.settings
+  missingPath.cliPathOverride = "/missing"
+  let first = slowPath
+  let second = missingPath
+  async let a: Void = s.apply(first)
+  try? await Task.sleep(nanoseconds: 20_000_000)
+  async let b: Void = s.apply(second)
+  _ = await (a, b)
+  #expect(s.cliStatus == .missing)
+  #expect(s.settings.cliPathOverride == "/missing")
 }
 
 @Test @MainActor func applyPathOverrideRelocates() async {

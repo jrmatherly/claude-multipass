@@ -44,6 +44,7 @@ public final class AppState: ObservableObject {
   private let store: SettingsStore
   private let now: () -> Date
   private var runner: CommandRunner?
+  private var probeGeneration = 0
   private var mainTask: Task<Void, Never>?
   private var snapshotTask: Task<Void, Never>?
   private var usageTask: Task<Void, Never>?
@@ -76,32 +77,32 @@ public final class AppState: ObservableObject {
     }
   }
 
+  /// Overlapping probes (the settings path field applies per keystroke) can
+  /// finish out of order; only the latest one may set the status.
   public func relocate() async {
+    probeGeneration += 1
+    let generation = probeGeneration
     runner = makeRunner(settings)
     guard let runner else {
       cliStatus = .missing
       return
     }
-    do {
-      let data = try await runner.run(["--version"])
-      if let version = CLI.parseVersion(data), CLI.isSupported(version) {
-        cliStatus = .ready(version)
-      } else {
-        cliStatus = .tooOld
-      }
-    } catch {
-      cliStatus = .tooOld
+    var status = CLIStatus.tooOld
+    if let data = try? await runner.run(["--version"]), let version = CLI.parseVersion(data), CLI.isSupported(version) {
+      status = .ready(version)
     }
+    guard generation == probeGeneration else { return }
+    cliStatus = status
   }
 
   public func refresh() async {
     guard !isRefreshing else { return }
     isRefreshing = true
     defer { isRefreshing = false }
-    guard case .ready = cliStatus, let runner else {
-      await relocate()
-      return
-    }
+    // Not ready: re-probe first, so a brew upgrade or a path fix is picked
+    // up without a relaunch, then carry on when it answered.
+    if case .ready = cliStatus {} else { await relocate() }
+    guard case .ready = cliStatus, let runner else { return }
     do {
       let data = try await runner.run(["list", "--json"])
       snapshot = try decode(Snapshot.self, data)

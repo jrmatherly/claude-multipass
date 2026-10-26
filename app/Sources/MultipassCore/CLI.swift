@@ -52,10 +52,13 @@ public struct CLI: CommandRunner {
     process.terminationHandler = { p in exit.finish(status: p.terminationStatus) }
     try process.run()
 
-    // Drain both pipes before awaiting exit, or a chatty command fills a
-    // pipe buffer and never terminates.
-    async let outData = Self.drain(stdout.fileHandleForReading)
-    async let errData = Self.drain(stderr.fileHandleForReading)
+    // Drain both pipes while the command runs, or a chatty command fills a
+    // pipe buffer and never terminates. Detached, not async let: after a
+    // timeout a grandchild (usage runs each account in a backgrounded
+    // subshell) can keep the write ends open, and the drains must not hold
+    // this call hostage until it dies.
+    let outData = Self.drain(stdout.fileHandleForReading)
+    let errData = Self.drain(stderr.fileHandleForReading)
     let watchdog = Task {
       try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
       exit.markTimedOut()
@@ -65,9 +68,13 @@ public struct CLI: CommandRunner {
     }
     let status = await exit.wait()
     watchdog.cancel()
-    let out = await outData
-    let err = await errData
-    if exit.timedOut { throw CLIError.timedOut }
+    if exit.timedOut {
+      try? stdout.fileHandleForReading.close()
+      try? stderr.fileHandleForReading.close()
+      throw CLIError.timedOut
+    }
+    let out = await outData.value
+    let err = await errData.value
     let message = Self.plainText(err)
     switch status {
     case 0: return out
@@ -92,8 +99,8 @@ public struct CLI: CommandRunner {
     return nums.lexicographicallyPrecedes([0, 2, 0]) == false
   }
 
-  private static func drain(_ handle: FileHandle) async -> Data {
-    await Task.detached { handle.readDataToEndOfFile() }.value
+  private static func drain(_ handle: FileHandle) -> Task<Data, Never> {
+    Task.detached { handle.readDataToEndOfFile() }
   }
 
   private static func plainText(_ data: Data) -> String {
