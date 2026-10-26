@@ -204,7 +204,10 @@ ${bold}Commands${reset}
                        backups folder. Desktop's current login is untouched.
   usage [name]         Prints each saved account's 5-hour and weekly usage as a
                        percentage, with the time each window resets. Give a
-                       name to see one account. Opt-in; see Cautions.
+                       name to see one account. Opt-in; see Cautions. With
+                       --json, {"profiles":[{name, fiveHour, sevenDay} or
+                       {name, error}]}; each window has utilization and
+                       resetsAt (UTC, Z).
   current              Prints the name of the saved account Desktop is signed
                        in as, "not saved" if the current login has no name, or
                        "signed out". For scripts and the Raycast commands.
@@ -455,8 +458,8 @@ usage_jq='
   def at: if .resets_at then " (resets " + (.resets_at | try (sub("(\\.[0-9]+)?(\\+00:00|Z)$"; "Z") | fromdate | strflocaltime("%a %H:%M")) catch .) + ")" else "" end;
   "5h " + (.five_hour | pct) + (.five_hour | at) + "  7d " + (.seven_day | pct) + (.seven_day | at)'
 
-# The 5h and 7d figures for one config.json, or a short reason.
-usage_text() {
+# The raw usage body for one config.json, or "error: <reason>".
+usage_fetch() {
   local key=$1 cfg=$2 account=$3 token code body msg=''
   token=$(access_token "$key" "$cfg" "$account")
   if [[ -z $token ]]; then
@@ -478,8 +481,40 @@ usage_text() {
       *) msg="unavailable (HTTP $code)" ;;
     esac
   fi
-  [[ -n $msg ]] && echo "$msg" && return 0
-  jq -r "$usage_jq" <<< "$body" 2> /dev/null || echo "unreadable response"
+  [[ -z $msg ]] || {
+    echo "error: $msg"
+    return 0
+  }
+  jq -e . <<< "$body" > /dev/null 2>&1 || {
+    echo "error: unreadable response"
+    return 0
+  }
+  printf '%s\n' "$body"
+}
+
+# The 5h and 7d figures for one config.json as text, or a short reason.
+usage_line() {
+  local body
+  body=$(usage_fetch "$@")
+  case $body in
+    error:\ *) echo "${body#error: }" ;;
+    *) jq -r "$usage_jq" <<< "$body" ;;
+  esac
+}
+
+# The same figures as one JSON object {name, fiveHour?, sevenDay?} or
+# {name, error}; a window with a null utilization is left out.
+usage_object() {
+  local name=$1 body
+  shift
+  body=$(usage_fetch "$@")
+  case $body in
+    error:\ *) jq -n --arg name "$name" --arg error "${body#error: }" '{name: $name, error: $error}' ;;
+    *) jq --arg name "$name" '
+      def win: select(.utilization != null)
+        | {utilization} + (if .resets_at then {resetsAt: (.resets_at | sub("(\\.[0-9]+)?(\\+00:00|Z)$"; "Z"))} else {} end);
+      {name: $name} + ((.five_hour // {}) | win | {fiveHour: .}) + ((.seven_day // {}) | win | {sevenDay: .})' <<< "$body" ;;
+  esac
 }
 
 # One line per saved account plus the live login when it is unsaved. The
@@ -495,15 +530,28 @@ usage_report() {
     name=${dir##*/}
     [[ -z $only || $only == "$name" ]] || continue
     i=$((i + 1))
-    printf '%-16s %s\n' "$name" "$(usage_text "$key" "$dir/config.json" "$(jq -r .account "$meta")")" > "$out/$(printf %03d "$i")" &
+    usage_entry "$name" "$key" "$dir/config.json" "$(jq -r .account "$meta")" > "$out/$(printf %03d "$i")" &
   done
   live=$(live_account)
   if [[ -z $only && -n $live && -z $(active_profile) ]]; then
-    printf '%-16s %s\n' "(signed in)" "$(usage_text "$key" "$config" "$live")" > "$out/999" &
+    usage_entry "(signed in)" "$key" "$config" "$live" > "$out/999" &
   fi
   wait
-  cat "$out"/* 2> /dev/null || true
+  if [[ -n $json ]]; then
+    if [[ -n $(ls -A "$out") ]]; then jq -s '{profiles: .}' "$out"/*; else echo '{"profiles":[]}'; fi
+  else
+    cat "$out"/* 2> /dev/null || true
+  fi
   rm -rf "$out"
+}
+
+# One account's entry in the report, text line or JSON object.
+usage_entry() {
+  if [[ -n $json ]]; then
+    usage_object "$@"
+  else
+    printf '%-16s %s\n' "$1" "$(usage_line "${@:2}")"
+  fi
 }
 
 count_sessions() {

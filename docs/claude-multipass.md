@@ -41,7 +41,7 @@ Desktop quits, relaunches signed in as that account, and the Code tab lists both
 | `rename <old> <new>` | Rename a profile |
 | `remove <name>` | Move a profile to the backups folder |
 | `current` | The signed-in saved name, `not saved` or `signed out` (for scripts and Raycast) |
-| `usage [name]` | 5-hour and weekly usage per saved account with reset times. Opt-in, see below |
+| `usage [name]` | 5-hour and weekly usage per saved account with reset times. Opt-in, see below. `--json` prints the figures as one object |
 | `pick` | The fzf picker |
 | `--version` | Print the version |
 
@@ -63,6 +63,8 @@ Three script commands in `raycast/` wrap the tool for Raycast: **Claude Account*
 ## Usage headroom
 
 `usage` reads each saved account's 5-hour and weekly utilization from Anthropic's OAuth usage endpoint. To do that it decrypts the saved token cache with the app's own key: the "Claude Safe Storage" password from the login Keychain (macOS asks once; click Always Allow), stretched with PBKDF2 and used as an AES-128-CBC key, the same scheme Chromium uses. The fetches run in parallel, one key derivation serves them all, and nothing prints a token.
+
+`usage --json` prints the same figures for scripts and the menu bar app: `{"profiles":[...]}` with one entry per account, either `{"name","fiveHour","sevenDay"}` (each window `{"utilization","resetsAt"}`, `resetsAt` in UTC ending in `Z`, a window left out when its utilization is null) or `{"name","error"}` with the same reason text the plain command prints. The unsaved live login appears as `(signed in)`. With nothing to report it prints `{"profiles":[]}`.
 
 This is the one part of the tool that uses a subscription token outside Anthropic's own apps. Third-party coverage says Anthropic's terms discourage that pattern; it is read-only and runs only when you ask for it, and the call is yours. Desktop's own usage ring and Claude Code's `/usage` still work after a switch without it.
 

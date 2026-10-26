@@ -4,6 +4,7 @@
 
 - `--version` prints the version.
 - `list --json` prints the saved accounts and the signed-in state as one JSON object. The first-run store migration message moves to stderr.
+- `usage --json` prints the usage figures, or the failure reason per account, as one JSON object.
 - Refusals that `--force` lifts (`save` over another account, `switch` from an unsaved login, `sync` while Desktop runs) exit 3; other failures exit 1. A refused `save` no longer quits and relaunches Desktop.
 
 ## 0.1.0 (2026-10-25)
