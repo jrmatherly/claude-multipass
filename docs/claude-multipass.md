@@ -61,6 +61,24 @@ Desktop quits, relaunches signed in as that account, and the Code tab lists both
 
 Three script commands in `raycast/` wrap the tool for Raycast: **Claude Account** (the signed-in name in Root Search), **Claude Account Usage** (opt-in, with the 5-hour and weekly figures) and **Switch Claude Account**. They call `claude-multipass` by name with Homebrew's bin on PATH. Copy them once to a folder you own, `cp -R "$(brew --prefix)/share/claude-multipass/raycast" ~/.config/claude-multipass/raycast` (Homebrew's `share` path is a symlink into a versioned folder that changes on upgrade, and the macOS picker hides `/opt`), then add that folder: Raycast, **Settings, Script Commands, Add Script Directory**, Cmd+Shift+G in the picker, `~/.config/claude-multipass/raycast`. A repo checkout's `raycast/` folder works too. Do not use **Developer, Import Extension**: that imports a packaged extension, not a script directory. Save each account first with `claude-multipass save {{name}}`.
 
+## Menu bar app
+
+**Claude Multipass** (`app/`, a Swift package; the bundle comes from `scripts/build-app.sh`) is a menu bar front end over the same `claude-multipass` command. The bash script stays the only code that touches Desktop's files; the app runs it as a subprocess, with `list --json`, `usage --json`, `switch` and `save`, and needs 0.2.0 or newer. Install it with `brew install --cask jrmatherly/tap/claude-multipass-app`; the cask depends on the formula.
+
+The strip is an icon plus two-line modules, each with its own toggle in Settings: `@` over the signed-in saved name (`not saved`, `signed out`, names longer than 16 characters truncated), and with usage on, `5H` and `7D` capsule bars with the percentage (red from 90 %), and `5H↻` and `7D↻` reset countdowns. Unknown values show `–`. While the tool is missing or too old the strip shows `CLI` over `?` and the popover shows the install or upgrade line.
+
+The popover (left click) lists the saved accounts with session counts and, when usage is on, `5h 42%  7d 12%` per account. Clicking another account expands an inline confirm; Switch runs `claude-multipass switch <name>`, so Desktop quits and relaunches, and the row shows a spinner meanwhile. A refusal (exit 3, for example when the signed-in login was never saved) shows the tool's message with a "Switch anyway" button that reruns with `--force`; any other failure shows the message with Retry. When the signed-in login has no name, a "Save this login as…" row runs `save <name>` for a name the tool accepts. Right click: Refresh, Settings, Quit. Settings: the usage toggle and interval, one toggle per module, Launch at login, and the tool's path (auto-detected in Homebrew's bin, with an override).
+
+Refresh cadence:
+
+| What | Command | When |
+| --- | --- | --- |
+| Snapshot (accounts, signed-in state, Desktop running) | `list --json` | every 30 s, on popover open, after a switch or save, on Refresh; reads `config.json` and `meta.json`, never the Keychain |
+| Usage figures | `usage --json` | only when usage is on: every 5, 15, 30 or 60 minutes, once when turned on, on Refresh; one Keychain read per run |
+| Strip redraw and countdowns | none | every 3 s from cached data |
+
+Turning a module on or off never fetches usage. Nothing in the app runs `switch` without a click. The first launch of a downloaded build needs the network once, for Gatekeeper to check the notarization ticket (the DMG is notarized and stapled; the app inside carries the ticket online).
+
 ## Usage headroom
 
 `usage` reads each saved account's 5-hour and weekly utilization from Anthropic's OAuth usage endpoint. To do that it decrypts the saved token cache with the app's own key: the "Claude Safe Storage" password from the login Keychain (macOS asks once; click Always Allow), stretched with PBKDF2 and used as an AES-128-CBC key, the same scheme Chromium uses. The fetches run in parallel, one key derivation serves them all, and nothing prints a token.

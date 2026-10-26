@@ -58,6 +58,18 @@ cp -R "$(brew --prefix)/share/claude-multipass/raycast" ~/.config/claude-multipa
 
 Then in Raycast, **Settings, Script Commands, Add Script Directory**, press Cmd+Shift+G in the picker and enter `~/.config/claude-multipass/raycast`.
 
+## Menu bar app
+
+**Claude Multipass** is a menu bar app over the same tool. The strip shows an icon and `@` over the signed-in saved account (`not saved` or `signed out` otherwise). A left click opens a popover with every saved account and its Code session count; clicking another account expands an inline confirm, and Switch runs `claude-multipass switch` (Desktop quits and relaunches). A right click gives Refresh, Settings and Quit. Install:
+
+```sh
+brew install --cask jrmatherly/tap/claude-multipass-app
+```
+
+The cask depends on the `claude-multipass` formula and the app needs 0.2.0 or newer; it says so in the popover when the tool is missing or older. The first launch of a downloaded build needs the network once, for Gatekeeper to check the notarization ticket.
+
+Usage in the menu bar (5-hour and weekly bars and reset countdowns) is off by default. Turning it on in Settings has the same caution as the `usage` command: the app runs `claude-multipass usage --json` on a timer, at least 5 minutes apart, which decrypts the saved tokens through this Mac's Keychain (one prompt the first time; click Always Allow) and reads Anthropic's usage endpoint outside the app. Turn it off and the polling stops.
+
 ## Development
 
 `pnpm check` is the gate: `bash -n`, ShellCheck, Prettier, the fixture self-check (`test/claude-multipass.sh`, which stubs the app, Keychain and network and never touches the real Desktop folder) and the Claude Code hook self-checks. CI runs it on macOS for every pull request and push to `main`.
