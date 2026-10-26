@@ -6,7 +6,6 @@ import SwiftUI
 /// tick, which also recomputes the countdowns.
 struct StripView: View {
   @ObservedObject var appState: AppState
-  var onWidth: (CGFloat) -> Void
   @State private var now = Date()
   private let tick = Timer.publish(every: 3, on: .main, in: .common).autoconnect()
 
@@ -25,16 +24,5 @@ struct StripView: View {
     .padding(.horizontal, 6)
     .fixedSize()
     .onReceive(tick) { now = $0 }
-    .background(
-      GeometryReader { proxy in
-        Color.clear.preference(key: StripWidthKey.self, value: proxy.size.width)
-      }
-    )
-    .onPreferenceChange(StripWidthKey.self) { onWidth($0) }
   }
-}
-
-private struct StripWidthKey: PreferenceKey {
-  static var defaultValue: CGFloat = 0
-  static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }

@@ -9,6 +9,8 @@ final class StatusItemController: NSObject {
   private let appState: AppState
   private var statusItem: NSStatusItem?
   private var hosting: NSHostingController<StripView>?
+  private static let buttonInsets: CGFloat = 12
+  private var frameObserver: NSObjectProtocol?
   private var popover: PopoverController?
   private var settingsWindow: SettingsWindowController?
 
@@ -19,12 +21,7 @@ final class StatusItemController: NSObject {
   func install() {
     let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     guard let button = item.button else { return }
-    let strip = StripView(appState: appState) { [weak self] width in
-      // A zero arrives before the first layout; keep the item visible.
-      guard width > 0 else { return }
-      self?.statusItem?.length = width
-    }
-    let hosting = NSHostingController(rootView: strip)
+    let hosting = NSHostingController(rootView: StripView(appState: appState))
     hosting.sizingOptions = [.intrinsicContentSize]
     let view = hosting.view
     view.translatesAutoresizingMaskIntoConstraints = false
@@ -33,13 +30,28 @@ final class StatusItemController: NSObject {
       view.centerXAnchor.constraint(equalTo: button.centerXAnchor),
       view.centerYAnchor.constraint(equalTo: button.centerYAnchor),
     ])
-    item.length = max(view.fittingSize.width, 24)
+    // Auto layout sizes the hosting view from its intrinsic size; mirror
+    // that frame onto the item so the item follows its content. The status
+    // button pads its content, hence the extra width.
+    view.postsFrameChangedNotifications = true
+    frameObserver = NotificationCenter.default.addObserver(
+      forName: NSView.frameDidChangeNotification, object: view, queue: .main
+    ) { [weak self] _ in
+      MainActor.assumeIsolated { self?.fitLength() }
+    }
+    statusItem = item
+    fitLength()
     button.target = self
     button.action = #selector(clicked(_:))
     button.sendAction(on: [.leftMouseUp, .rightMouseUp])
-    statusItem = item
     self.hosting = hosting
     popover = PopoverController(appState: appState) { [weak self] in self?.openSettings() }
+  }
+
+  private func fitLength() {
+    guard let view = hosting?.view, view.frame.width > 0 else { return }
+    let length = view.frame.width + Self.buttonInsets
+    if statusItem?.length != length { statusItem?.length = length }
   }
 
   @objc private func clicked(_ sender: Any?) {
