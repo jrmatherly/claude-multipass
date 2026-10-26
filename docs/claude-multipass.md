@@ -5,6 +5,7 @@
 ## Summary
 
 - A Desktop login is three keys of `config.json` plus the cookie files, all encrypted by the app with a key in this Mac's login Keychain. The script copies them as opaque bytes into a named profile and swaps them back on `switch`. Nothing is decrypted for that.
+- The Claude Code CLI (the `claude` command) has its own login: a login-Keychain item with its OAuth tokens and an `oauthAccount` block in `~/.claude.json`. `save` copies the tokens into a Keychain item of the tool's own, named after the profile, and the identity block into the profile's `cli.json`, when the CLI is signed in as the same account as Desktop. Otherwise it saves Desktop only and says so.
 - Claude Code transcripts live in `~/.claude/projects`, shared by every account. Only the Code tab's per-account session list differs, and `switch` merges every account's list entries into every account, so a session started under one account shows up under the other.
 - Chats, Projects and memory on the claude.ai side stay per account. They do not move.
 - Profiles are per Mac. Save each account once on each Mac you use.
@@ -34,7 +35,7 @@ Desktop quits, relaunches signed in as that account, and the Code tab lists both
 | --- | --- |
 | `list` | Saved accounts with a short account id, save time and Code-session count; `*` marks the signed-in one. `--json` prints one object: `version`, `signedIn`, `desktopRunning`, `current` (`null` when the login has no name) and `profiles` (`name`, `account`, `savedAt`, `sessions`) |
 | `show <name>` | One account, with its session count per organization folder |
-| `save <name>` | Snapshot the current login as `<name>`. Refuses a name that holds a different account; `--force` replaces it and keeps the old profile in the backups folder |
+| `save <name>` | Snapshot the current login as `<name>`: Desktop's, and the CLI's when `claude` is signed in as the same account (a warning says when it is not, and the profile's earlier CLI login stays). Refuses a name that holds a different account; `--force` replaces it and keeps the old profile in the backups folder |
 | `add <name>` | Re-save the current login, clear it locally, relaunch at the sign-in screen. Then sign in and run `save <name>` |
 | `switch <name>` | Quit Desktop, re-save the outgoing login, swap in `<name>`, merge the session lists, relaunch. Refuses to drop a login you never saved; `--force` drops it |
 | `sync` | Only the session-list merge. Needs Desktop quit, or `--force` |
@@ -91,7 +92,7 @@ This is the one part of the tool that uses a subscription token outside Anthropi
 
 | Path | Holds |
 | --- | --- |
-| `~/.config/claude-multipass/profiles/<name>/` | A profile: `config.json` (the three login keys), `Cookies`, `Cookies-journal`, `meta.json` (account id, save time). Mode 0600 |
+| `~/.config/claude-multipass/profiles/<name>/` | A profile: `config.json` (the three login keys), `Cookies`, `Cookies-journal`, `meta.json` (account id, save time), `cli.json` (the CLI's `oauthAccount` block, no secret). Mode 0600. The CLI's tokens for the profile are a login-Keychain item, service `claude-multipass`, account `<name>` |
 | `~/.config/claude-multipass/backups/login-*/` | The login each `switch` or `add` replaced, newest ten |
 | `~/.config/claude-multipass/backups/profile-*/` | Profiles that `remove` or a forced `save` set aside |
 | `~/Library/Application Support/Claude/` | Desktop's data: `config.json`, the cookie files, `claude-code-sessions/<account>/<org>/local_*.json` (the Code tab's list) |

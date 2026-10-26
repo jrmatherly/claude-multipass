@@ -74,10 +74,10 @@ echo "security $*" >> "$log"
 if [[ ${1:-} == -i ]]; then
   while IFS= read -r line; do
     echo "stdin $line" >> "$log"
-    line=${line//\"/}
-    # shellcheck disable=SC2086
-    set -- $line
-    run "$@"
+    # The exact shape the script emits; the service name carries a space.
+    [[ $line =~ ^add-generic-password\ -U\ -a\ \"([^\"]*)\"\ -s\ \"([^\"]*)\"\ -X\ ([0-9a-f]*)$ ]] \
+      || { echo "security: unparsed line: $line" >&2; exit 1; }
+    run add-generic-password -a "${BASH_REMATCH[1]}" -s "${BASH_REMATCH[2]}" -X "${BASH_REMATCH[3]}"
   done
   exit 0
 fi
@@ -128,8 +128,21 @@ printf '{\n\t"theme": "dark",\n\t"oauth:tokenCache": "enc-A1",\n\t"windowBounds"
 printf cookie-A > "$d/Cookies"
 printf journal-A > "$d/Cookies-journal"
 
+# The CLI is signed in as the same account as Desktop: claude.json carries the
+# identity, the Keychain item the tokens plus shared MCP keys.
+jq -n '{numStartups: 3, nested: {a: [1, 2], b: {c: "d"}}, k1: 1, k2: 2, k3: 3, k4: 4, k5: 5, k6: 6, k7: 7, k8: 8, k9: 9, k10: 10, k11: 11, k12: 12, k13: 13, k14: 14, k15: 15, k16: 16, k17: 17, k18: 18,
+  oauthAccount: {accountUuid: "aaaaaaaa-1111", emailAddress: "a@example.com", organizationUuid: "org-alpha", organizationRole: "admin"}}' > "$tmp/claude.json"
+live_item='{"claudeAiOauth":{"accessToken":"at-alpha","refreshToken":"rt-alpha","expiresAt":1,"scopes":["a"],"subscriptionType":"max"},"mcpOAuth":{"srv":"shared"},"trustedDeviceToken":"dev-alpha"}'
+kc_put "Claude Code-credentials" "$USER" "$live_item"
+
 # save captures exactly the three keys and the cookie files
 cda save alpha > /dev/null
+check "save writes cli.json with the identity block" "$(jq -c .oauthAccount "$tmp/claude.json")" "$(jq -c .oauthAccount "$p/alpha/cli.json")"
+check "save keeps cli.json private" 600 "$(stat -f %Lp "$p/alpha/cli.json")"
+check "save stores the CLI tokens in the Keychain" '{"claudeAiOauth":{"accessToken":"at-alpha","refreshToken":"rt-alpha","expiresAt":1,"scopes":["a"],"subscriptionType":"max"},"trustedDeviceToken":"dev-alpha"}' "$(kc_get claude-multipass alpha)"
+check "save sends the token as hex on stdin" 0 "$(grep -c 'rt-alpha' "$tmp/security-calls")"
+check "save never puts a token on argv" 0 "$(grep -c -- '-w ' "$tmp/security-calls")"
+check "no token on disk in the store" 0 "$(grep -rl rt-alpha "$p" | wc -l | tr -d ' ')"
 check "save keeps only the auth keys, in order" \
   '{"oauth:tokenCache":"enc-A1","oauth:tokenCacheV2":"enc-A2","lastKnownAccountUuid":"aaaaaaaa-1111"}' \
   "$(jq -c . "$p/alpha/config.json")"
@@ -140,6 +153,24 @@ check "save writes the profile config private" 600 "$(stat -f %Lp "$p/alpha/conf
 check "save writes meta.json private" 600 "$(stat -f %Lp "$p/alpha/meta.json")"
 check "save relaunches the app" "open -a Claude" "$(cat "$tmp/calls")"
 rm "$tmp/calls"
+
+# A CLI signed in by hand as another account, or signed out, leaves the saved CLI login alone
+cp "$tmp/claude.json" "$tmp/claude-alpha.json"
+jq '.oauthAccount.accountUuid = "zzzzzzzz-9999"' "$tmp/claude.json" > "$tmp/claude.json.new" && mv "$tmp/claude.json.new" "$tmp/claude.json"
+err=$(cda save alpha --no-relaunch 2>&1 > /dev/null)
+check_true "save warns when the CLI is on another account" grep -q 'Claude Code is signed in as a different account, or signed out; saved the Desktop login only' <<< "$err"
+check "a mismatched save keeps cli.json" aaaaaaaa-1111 "$(jq -r .oauthAccount.accountUuid "$p/alpha/cli.json")"
+check "a mismatched save keeps the saved item" at-alpha "$(kc_get claude-multipass alpha | jq -r .claudeAiOauth.accessToken)"
+check_true "save with CLAUDE_CONFIG_DIR skips the CLI login" grep -q 'CLAUDE_CONFIG_DIR is set; the CLI login is not switched' <<< "$(CLAUDE_CONFIG_DIR=/x cda save alpha --no-relaunch 2>&1 > /dev/null)"
+cp "$tmp/claude-alpha.json" "$tmp/claude.json"
+security delete-generic-password -a "$USER" -s "Claude Code-credentials" > /dev/null
+check_true "save warns when the CLI is signed out" grep -q 'signed in as a different account, or signed out' <<< "$(cda save alpha --no-relaunch 2>&1 > /dev/null)"
+check "a signed-out save keeps the saved item" at-alpha "$(kc_get claude-multipass alpha | jq -r .claudeAiOauth.accessToken)"
+big=$(printf 'x%.0s' $(seq 1 2000))
+kc_put "Claude Code-credentials" "$USER" "{\"claudeAiOauth\":{\"accessToken\":\"$big\"}}"
+check_true "save warns when the CLI login is too large for security -i" grep -q 'the CLI login is too large for security -i' <<< "$(cda save alpha --no-relaunch 2>&1 > /dev/null)"
+check "an oversize save keeps the saved item" at-alpha "$(kc_get claude-multipass alpha | jq -r .claudeAiOauth.accessToken)"
+kc_put "Claude Code-credentials" "$USER" "$live_item"
 
 printf '{"oauth:tokenCache":"enc-B1","oauth:tokenCacheV2":"enc-B2","lastKnownAccountUuid":"bbbbbbbb-2222"}' > "$p/beta/config.json"
 printf '{"account":"bbbbbbbb-2222","savedAt":"2026-01-01T00:00:00Z"}' > "$p/beta/meta.json"

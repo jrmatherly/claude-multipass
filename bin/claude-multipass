@@ -14,7 +14,7 @@
 #
 # `claude-multipass show {{name}}`
 #
-# - Save the account signed in now under a name (quits and relaunches Claude):
+# - Save the account signed in now under a name, the terminal's claude login with it (quits and relaunches Claude):
 #
 # `claude-multipass save {{name}}`
 #
@@ -78,7 +78,12 @@
 # copies it back and never deletes anything.
 #
 # Profiles: ${CLAUDE_MULTIPASS_DIR:-${XDG_CONFIG_HOME:-~/.config}/claude-multipass}/profiles/<name>/
-# (config.json, Cookies, Cookies-journal, meta.json). The backups/ folder
+# (config.json, Cookies, Cookies-journal, meta.json, cli.json). The Claude Code
+# CLI's login is a login-Keychain item (service "Claude Code-credentials") plus
+# oauthAccount in ~/.claude.json; save copies the tokens into a Keychain item
+# of the tool's own (service claude-multipass, account <name>) and the identity
+# into cli.json, when the CLI is signed in as the same account as Desktop. The
+# token goes to security as hex on stdin, never on a command line. The backups/ folder
 # beside it keeps the login (config.json and cookies) each switch or add
 # replaced, newest ten, plus any profile `save --force` replaced. A store
 # left by the tool's earlier life in a dotfiles repo
@@ -126,6 +131,18 @@ sessions="$desktop_dir/claude-code-sessions"
 cookies=$desktop_dir
 [[ -d $desktop_dir/Network ]] && cookies=$desktop_dir/Network
 auth_keys='["oauth:tokenCache","oauth:tokenCacheV2","lastKnownAccountUuid"]'
+# The Claude Code CLI keeps its own login: a login-Keychain item (service
+# "Claude Code-credentials", account the macOS user name) with the OAuth
+# tokens, and the oauthAccount object in ~/.claude.json naming the account
+# and org. A profile's copy of the tokens is a Keychain item under the tool's
+# own service, named after the profile; only the identity goes on disk.
+claude_json="${CLAUDE_CLI_CONFIG:-$HOME/.claude.json}"
+cli_service='Claude Code-credentials'
+cli_account=${USER:-$(id -un)}
+mp_service=claude-multipass
+# security -i keeps at most 4019 bytes of a line and corrupts the rest
+# (measured), so the hex payload stays under 3800: 1900 bytes of JSON.
+keychain_payload_limit=1900
 
 bold=$(tput bold 2> /dev/null || true)
 yellow=$(tput setaf 3 2> /dev/null || true)
@@ -187,7 +204,10 @@ ${bold}Commands${reset}
                        as its preview.
   save <name>          Stores the login Desktop currently has under <name>, so
                        you can switch back to it later without an email code.
-                       Desktop quits and relaunches, still signed in. If <name>
+                       Desktop quits and relaunches, still signed in. The
+                       terminal's claude login is saved too when it is signed
+                       in as the same account; otherwise save warns and keeps
+                       the profile's earlier CLI login. If <name>
                        already holds a different account, save stops; add
                        --force to replace it (the old profile is kept in the
                        backups folder).
@@ -273,6 +293,61 @@ jq_write() {
   out=$(jq --tab "$@")
   (umask 077 && printf '%s' "$out" > "$dest.tmp")
   mv "$dest.tmp" "$dest"
+}
+
+# Keychain items go through security on PATH; 44 means the item is absent.
+keychain_get() { security find-generic-password -a "$2" -s "$1" -w 2> /dev/null; }
+
+# The value (stdin) never touches argv: it goes as hex on one line to
+# security -i, whose own quoting rules reject the shell's '\'' escape while
+# hex round-trips any byte. Returns 2 when the value would overflow the line.
+keychain_put() {
+  local v
+  v=$(cat)
+  if (($(printf %s "$v" | LC_ALL=C wc -c) > keychain_payload_limit)); then
+    warning "the CLI login is too large for security -i"
+    return 2
+  fi
+  printf 'add-generic-password -U -a "%s" -s "%s" -X %s\n' "$2" "$1" "$(printf %s "$v" | xxd -p | tr -d '\n')" \
+    | security -i > /dev/null
+}
+
+keychain_delete() {
+  local rc=0
+  security delete-generic-password -a "$2" -s "$1" > /dev/null 2>&1 || rc=$?
+  [[ $rc -eq 0 || $rc -eq 44 ]]
+}
+
+# The account uuid the CLI is signed in as, or nothing when signed out. It is
+# the same claude.ai account id Desktop stores as lastKnownAccountUuid, so
+# equality with the live Desktop account is the fingerprint that proves the
+# CLI login belongs to the profile being saved.
+cli_signed_in_as() { jq -r '.oauthAccount.accountUuid // empty' "$claude_json" 2> /dev/null || true; }
+
+# The CLI part of a save: the tokens into the profile's Keychain item, the
+# identity into cli.json. Any doubt leaves the profile's earlier CLI login
+# untouched, so a hand `claude auth login` never overwrites a saved one.
+cli_capture() {
+  local name=$1 dir="$store/$1" live rc=0
+  if [[ -n ${CLAUDE_CONFIG_DIR:-} ]]; then
+    warning "CLAUDE_CONFIG_DIR is set; the CLI login is not switched"
+    return 0
+  fi
+  live=$(keychain_get "$cli_service" "$cli_account") || rc=$?
+  if [[ $rc -eq 44 || $(cli_signed_in_as) != "$(live_account)" ]]; then
+    warning "Claude Code is signed in as a different account, or signed out; saved the Desktop login only"
+    return 0
+  elif [[ $rc -ne 0 ]]; then
+    warning "security exited $rc reading the CLI login; saved the Desktop login only"
+    return 0
+  fi
+  jq -c '{claudeAiOauth, trustedDeviceToken} | with_entries(select(.value != null))' <<< "$live" \
+    | keychain_put "$mp_service" "$name" || {
+    rc=$?
+    [[ $rc -eq 2 ]] || warning "security exited $rc saving the CLI login; saved the Desktop login only"
+    return 0
+  }
+  jq_write "$dir/cli.json" '{oauthAccount}' "$claude_json"
 }
 
 desktop_running() { pgrep -xq Claude; }
@@ -370,6 +445,7 @@ profile_save() {
   copy_cookies "$cookies" "$dir"
   jq_write "$dir/meta.json" -n --arg a "$live" \
     --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{account: $a, savedAt: $t}'
+  cli_capture "$name"
   echo "Saved the signed-in account as $name"
 }
 
