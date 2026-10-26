@@ -28,8 +28,67 @@ printf '#!/bin/sh\nexit 1\n' > "$tmp/bin/pgrep"
 for stub in osascript pkill open; do
   printf '#!/bin/sh\necho "%s $*" >> "%s/calls"\n' "$stub" "$tmp" > "$tmp/bin/$stub"
 done
+# A stateful security stub: generic-password items live in $tmp/keychain/<service>/<account>,
+# every invocation and every `-i` stdin line goes to $tmp/security-calls, and
+# the "Claude Safe Storage" item answers with the fixture password for usage.
+# add-generic-password is accepted on argv too, so a drift to argv shows in the log.
+pw='fixture pass!$'
+cat > "$tmp/bin/security" << EOF
+#!/bin/bash
+kc="$tmp/keychain"
+log="$tmp/security-calls"
+pw='$pw'
+EOF
+cat >> "$tmp/bin/security" << 'EOF'
+run() {
+  local cmd=$1 a='' s='' v='' hex='' want_w=''
+  shift
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      -a) a=$2; shift ;;
+      -s) s=$2; shift ;;
+      -w) if [[ $cmd == add-generic-password ]]; then v=$2; shift; else want_w=1; fi ;;
+      -X) hex=$2; shift ;;
+    esac
+    shift
+  done
+  case $cmd in
+    add-generic-password)
+      [[ -n $hex ]] && v=$(printf %s "$hex" | xxd -r -p)
+      mkdir -p "$kc/$s"
+      printf %s "$v" > "$kc/$s/$a"
+      ;;
+    find-generic-password)
+      if [[ $s == 'Claude Safe Storage' ]]; then printf %s "$pw"; return 0; fi
+      [[ -f $kc/$s/$a ]] || { echo "security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain." >&2; return 44; }
+      [[ -n $want_w ]] && cat "$kc/$s/$a"
+      ;;
+    delete-generic-password)
+      [[ -f $kc/$s/$a ]] || return 44
+      rm "$kc/$s/$a"
+      ;;
+    *) echo "security: unknown command $cmd" >&2; return 1 ;;
+  esac
+}
+echo "security $*" >> "$log"
+if [[ ${1:-} == -i ]]; then
+  while IFS= read -r line; do
+    echo "stdin $line" >> "$log"
+    line=${line//\"/}
+    # shellcheck disable=SC2086
+    set -- $line
+    run "$@"
+  done
+  exit 0
+fi
+run "$@"
+EOF
+kc_get() { security find-generic-password -a "$2" -s "$1" -w 2> /dev/null || echo absent; }
+kc_put() { printf 'add-generic-password -U -a "%s" -s "%s" -X %s\n' "$2" "$1" "$(printf %s "$3" | xxd -p | tr -d '\n')" | security -i > /dev/null; }
 chmod +x "$tmp"/bin/*
 export PATH="$tmp/bin:$PATH"
+export CLAUDE_CLI_CONFIG="$tmp/claude.json" CLAUDE_CLI_HOME="$tmp/claude-home"
+mkdir -p "$tmp/claude-home"
 cda() { "$script" "$@"; }
 pkg_version=$(jq -r .version "$(dirname "$script")/../package.json")
 
@@ -52,6 +111,16 @@ check_true() {
 exit_code() {
   "$@" > /dev/null 2>&1 && echo 0 || echo $?
 }
+
+# the security stub itself
+printf 'add-generic-password -U -a "u" -s "t" -X %s\n' "$(printf 'a "b" c'"'"'d' | xxd -p | tr -d '\n')" | security -i > /dev/null
+check "security stub decodes a hex value" 'a "b" c'"'"'d' "$(kc_get t u)"
+check "security stub reports a missing item" 44 "$(
+  security find-generic-password -a u -s none -w > /dev/null 2>&1
+  echo $?
+)"
+security delete-generic-password -a u -s t > /dev/null
+check "security stub deletes" absent "$(kc_get t u)"
 
 mkdir -p "$d" "$p/beta" "$s/aaaaaaaa-1111/org-a" "$s/bbbbbbbb-2222/org-b"
 tab=$'\t'
@@ -256,11 +325,9 @@ check "login backups pruned to ten" 10 "$(find "$b" -mindepth 1 -maxdepth 1 -typ
 # usage: a fixture token cache encrypted the way the app does; security and
 # curl are stubs on PATH, so no Keychain and no network
 mkdir -p "$p/usagey" "$p/stale"
-pw='fixture pass!$'
-printf '#!/bin/sh\necho "security $*" >> "%s/calls"\nprintf %%s "%s"\n' "$tmp" "$pw" > "$tmp/bin/security"
 printf '{"five_hour":{"utilization":42.6,"resets_at":"2026-10-23T19:45:00.123456+00:00"},"seven_day":{"utilization":18.0,"resets_at":"2026-10-27T13:00:00Z"}}' > "$tmp/usage.json"
 printf '#!/bin/sh\n{ echo "curl $*"; cat; } >> "%s/curl-args"\ncat "%s/usage.json"; printf "\\n200"\n' "$tmp" "$tmp" > "$tmp/bin/curl"
-chmod +x "$tmp/bin/security" "$tmp/bin/curl"
+chmod +x "$tmp/bin/curl"
 key=$(printf '%s' "$pw" | /usr/bin/python3 -c 'import hashlib, sys; print(hashlib.pbkdf2_hmac("sha1", sys.stdin.buffer.read(), b"saltysalt", 1003, 16).hex())')
 encrypt() { {
   printf 'v10'
@@ -323,7 +390,9 @@ rm -f "$tmp/calls"
 touch "$tmp/calls"
 check "doctor healthy" 0 "$(exit_code cda doctor)"
 check_true "doctor reports jq" grep -q '^ok: jq' <<< "$(cda doctor)"
-check "doctor never calls security" 0 "$(grep -c security "$tmp/calls")"
+n_sec=$(wc -l < "$tmp/security-calls" | tr -d ' ')
+cda doctor > /dev/null
+check "doctor never calls security" "$n_sec" "$(wc -l < "$tmp/security-calls" | tr -d ' ')"
 cp "$p/usagey/config.json" "$tmp/usagey-config"
 printf '{"oauth:tokenCacheV2":""}' > "$p/usagey/config.json"
 check "doctor fails on an empty token" 1 "$(exit_code cda doctor)"
