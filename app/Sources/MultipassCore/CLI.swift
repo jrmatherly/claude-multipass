@@ -53,12 +53,14 @@ public struct CLI: CommandRunner {
     try process.run()
 
     // Drain both pipes while the command runs, or a chatty command fills a
-    // pipe buffer and never terminates. Detached, not async let: after a
-    // timeout a grandchild (usage runs each account in a backgrounded
-    // subshell) can keep the write ends open, and the drains must not hold
-    // this call hostage until it dies.
-    let outData = Self.drain(stdout.fileHandleForReading)
-    let errData = Self.drain(stderr.fileHandleForReading)
+    // pipe buffer and never terminates. The reads run on GCD through
+    // readabilityHandler, never on a cooperative thread: a blocking read
+    // there starves the pool on a small machine (a 3-core CI runner) and
+    // the watchdog below never gets to run. After a timeout a grandchild
+    // (usage runs each account in a backgrounded subshell) can keep the
+    // write ends open, so the drains are only awaited on the normal path.
+    let outData = PipeDrain(stdout.fileHandleForReading)
+    let errData = PipeDrain(stderr.fileHandleForReading)
     let watchdog = Task {
       try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
       exit.markTimedOut()
@@ -69,12 +71,12 @@ public struct CLI: CommandRunner {
     let status = await exit.wait()
     watchdog.cancel()
     if exit.timedOut {
-      try? stdout.fileHandleForReading.close()
-      try? stderr.fileHandleForReading.close()
+      outData.stop()
+      errData.stop()
       throw CLIError.timedOut
     }
-    let out = await outData.value
-    let err = await errData.value
+    let out = await outData.value()
+    let err = await errData.value()
     let message = Self.plainText(err)
     switch status {
     case 0: return out
@@ -97,10 +99,6 @@ public struct CLI: CommandRunner {
     guard parts.count >= 2, !parts.contains(nil) else { return false }
     let nums = parts.compactMap { $0 }
     return nums.lexicographicallyPrecedes([0, 2, 0]) == false
-  }
-
-  private static func drain(_ handle: FileHandle) -> Task<Data, Never> {
-    Task.detached { handle.readDataToEndOfFile() }
   }
 
   private static func plainText(_ data: Data) -> String {
@@ -143,5 +141,62 @@ private final class Exit: @unchecked Sendable {
         lock.unlock()
       }
     }
+  }
+}
+
+/// Collects a pipe to EOF on GCD and hands the bytes to one async waiter.
+private final class PipeDrain: @unchecked Sendable {
+  private let lock = NSLock()
+  private let handle: FileHandle
+  private var data = Data()
+  private var done = false
+  private var waiter: CheckedContinuation<Data, Never>?
+
+  init(_ handle: FileHandle) {
+    self.handle = handle
+    handle.readabilityHandler = { [weak self] h in
+      let chunk = h.availableData
+      guard let self else { return }
+      if chunk.isEmpty {
+        self.finish()
+      } else {
+        self.lock.lock()
+        self.data.append(chunk)
+        self.lock.unlock()
+      }
+    }
+  }
+
+  func value() async -> Data {
+    await withCheckedContinuation { c in
+      lock.lock()
+      if done {
+        lock.unlock()
+        c.resume(returning: data)
+      } else {
+        waiter = c
+        lock.unlock()
+      }
+    }
+  }
+
+  /// Stop reading and release the handle; nothing waits for the bytes.
+  func stop() {
+    finish()
+  }
+
+  private func finish() {
+    lock.lock()
+    let first = !done
+    done = true
+    let w = waiter
+    waiter = nil
+    let bytes = data
+    lock.unlock()
+    if first {
+      handle.readabilityHandler = nil
+      try? handle.close()
+    }
+    w?.resume(returning: bytes)
   }
 }

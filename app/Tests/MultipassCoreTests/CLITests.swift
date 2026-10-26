@@ -66,7 +66,8 @@ private func stubScript() throws -> URL {
   let cli = CLI(executable: try stubScript(), timeout: 1)
   let started = Date()
   await #expect(throws: CLIError.timedOut) { try await cli.run(["slow"]) }
-  #expect(Date().timeIntervalSince(started) < 3)
+  // terminate at 1 s; a shell that defers SIGTERM behind a child dies to the SIGKILL at 3 s
+  #expect(Date().timeIntervalSince(started) < 4.5)
 }
 
 @Test func timeoutReleasesAHungGrandchild() async throws {
@@ -75,7 +76,7 @@ private func stubScript() throws -> URL {
   let cli = CLI(executable: try stubScript(), timeout: 1)
   let started = Date()
   await #expect(throws: CLIError.timedOut) { try await cli.run(["hang"]) }
-  #expect(Date().timeIntervalSince(started) < 4)
+  #expect(Date().timeIntervalSince(started) < 4.5)
 }
 
 @Test func versionCompare() {
