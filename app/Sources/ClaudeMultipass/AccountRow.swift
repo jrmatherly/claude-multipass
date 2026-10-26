@@ -15,6 +15,7 @@ struct AccountRow: View {
   private var isCurrent: Bool { appState.snapshot?.current == profile.name }
   private var isSwitching: Bool { appState.phase == .switching(profile.name) }
   private var rowError: RowError? { appState.rowError?.name == profile.name ? appState.rowError : nil }
+  private var rowNote: RowNote? { appState.rowNote?.name == profile.name ? appState.rowNote : nil }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
@@ -22,7 +23,7 @@ struct AccountRow: View {
         HStack(spacing: 8) {
           Image(systemName: "checkmark").opacity(isCurrent ? 1 : 0).frame(width: 12)
           Text(profile.name).fontWeight(isCurrent ? .semibold : .regular)
-          Text("\(profile.sessions) sessions").font(.caption).foregroundStyle(.secondary)
+          Text(profile.cliSaved ? "\(profile.sessions) sessions · CLI" : "\(profile.sessions) sessions").font(.caption).foregroundStyle(.secondary)
           Spacer()
           if appState.settings.usageEnabled {
             usageText
@@ -50,13 +51,16 @@ struct AccountRow: View {
         }
       } else if isExpanded {
         VStack(alignment: .leading, spacing: 4) {
-          Text("Switch to \(profile.name)? Claude Desktop quits and relaunches signed in as \(profile.name). Its Code tab will list every saved account's sessions.")
+          Text("Switch to \(profile.name)? Claude Desktop quits and relaunches signed in as \(profile.name). Its Code tab will list every saved account's sessions. "
+            + (profile.cliSaved ? "The terminal's claude login switches too." : "The terminal's claude login stays as it is (no CLI login saved)."))
             .font(.caption)
           HStack {
             Button("Switch") { onSwitch(false) }.keyboardShortcut(.defaultAction)
             Button("Cancel", action: onCancel)
           }
         }
+      } else if let rowNote {
+        Text(rowNote.message).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
       }
     }
     .padding(.vertical, 2)

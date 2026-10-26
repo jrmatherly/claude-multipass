@@ -20,7 +20,7 @@ struct PopoverView: View {
         }
       case .tooOld:
         VStack(alignment: .leading, spacing: 6) {
-          Text("The installed claude-multipass is too old for this app (0.2.0 or newer is needed).")
+          Text("The installed claude-multipass is too old for this app (0.3.0 or newer is needed).")
           Text("brew upgrade claude-multipass").font(.system(.body, design: .monospaced)).textSelection(.enabled)
         }
       case .ready:

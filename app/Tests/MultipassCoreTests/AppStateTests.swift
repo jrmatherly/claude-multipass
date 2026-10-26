@@ -7,6 +7,8 @@ final class FakeRunner: CommandRunner, @unchecked Sendable {
   private let lock = NSLock()
   private var _calls: [[String]] = []
   private var responses: [String: Result<Data, CLIError>] = [:]
+  /// stderr to hand back beside a successful response, keyed the same way.
+  var onStderr: [String: String] = [:]
   var onCall: (@Sendable ([String]) async -> Void)?
   var location: String?
 
@@ -42,10 +44,14 @@ final class FakeRunner: CommandRunner, @unchecked Sendable {
   }
 
   func run(_ args: [String]) async throws -> Data {
+    try await runCapturing(args).stdout
+  }
+
+  func runCapturing(_ args: [String]) async throws -> CommandOutput {
     let response = record(args)
     await onCall?(args)
     guard let response else { throw CLIError.failed(status: 1, stderr: "unscripted \(args)") }
-    return try response.get()
+    return CommandOutput(stdout: try response.get(), stderr: onStderr[args[0]] ?? "")
   }
 }
 
@@ -63,7 +69,7 @@ private func makeState(_ runner: FakeRunner?, makeRunner: ((AppSettings) -> Comm
 @MainActor
 private func readyRunner() -> FakeRunner {
   let r = FakeRunner()
-  r.answer("--version", "claude-multipass 0.2.0\n")
+  r.answer("--version", "claude-multipass 0.3.0\n")
   r.answer("list", snapshotBeta)
   r.answer("switch", "")
   r.answer("save", "")
@@ -92,7 +98,7 @@ private func enabledUsage(_ s: AppState) -> AppSettings {
   let s = makeState(readyRunner())
   #expect(s.cliStatus == .unknown)
   await s.relocate()
-  #expect(s.cliStatus == .ready("0.2.0"))
+  #expect(s.cliStatus == .ready("0.3.0"))
 }
 
 @Test @MainActor func relocateExposesTheRunnerLocation() async {
@@ -133,11 +139,11 @@ private func enabledUsage(_ s: AppState) -> AppSettings {
   let s = makeState(r)
   await s.relocate()
   #expect(s.cliStatus == .tooOld)
-  r.answer("--version", "claude-multipass 0.2.0\n")
+  r.answer("--version", "claude-multipass 0.3.0\n")
   r.answer("list", snapshotBeta)
   r.clearCalls()
   await s.refresh()
-  #expect(s.cliStatus == .ready("0.2.0"))
+  #expect(s.cliStatus == .ready("0.3.0"))
   #expect(r.calls == [["--version"], ["list", "--json"]])
   #expect(s.snapshot?.current == "beta")
 }
@@ -146,7 +152,7 @@ private func enabledUsage(_ s: AppState) -> AppSettings {
   // The settings path field applies per keystroke; an earlier probe that
   // finishes last must not overwrite the status of the path typed later.
   let slow = FakeRunner()
-  slow.answer("--version", "claude-multipass 0.2.0\n")
+  slow.answer("--version", "claude-multipass 0.3.0\n")
   slow.onCall = { _ in try? await Task.sleep(nanoseconds: 200_000_000) }
   let s = makeState(nil) { settings in settings.cliPathOverride == "/slow" ? slow : nil }
   var slowPath = s.settings
@@ -223,6 +229,29 @@ private func enabledUsage(_ s: AppState) -> AppSettings {
   #expect(seen.phaseDuringRefresh == .switching("alpha"))
   #expect(s.phase == .idle)
   #expect(s.rowError == nil)
+}
+
+@Test @MainActor func switchWarningBecomesRowNote() async {
+  let (s, r) = await readyState()
+  r.onStderr["switch"] = "no CLI login saved for alpha; switched Desktop only"
+  await s.switchTo("alpha")
+  #expect(s.rowNote == RowNote(name: "alpha", message: "no CLI login saved for alpha; switched Desktop only"))
+  #expect(s.rowError == nil)
+  #expect(r.calls == [["switch", "alpha"], ["list", "--json"]])
+}
+
+@Test @MainActor func nextActionClearsRowNote() async {
+  let (s, r) = await readyState()
+  r.onStderr["switch"] = "switched Desktop only"
+  await s.switchTo("alpha")
+  #expect(s.rowNote != nil)
+  r.onStderr = [:]
+  await s.saveCurrent(as: "work")
+  #expect(s.rowNote == nil)
+  r.onStderr["switch"] = "switched Desktop only"
+  await s.switchTo("alpha")
+  s.dismissRowError()
+  #expect(s.rowNote == nil)
 }
 
 @Test @MainActor func switchRefusedSetsRowError() async {

@@ -1,13 +1,29 @@
 import Foundation
 
+/// A successful command's stdout plus its stderr: the tool warns on stderr
+/// (a switch that moved Desktop only) while exiting 0.
+public struct CommandOutput: Sendable, Equatable {
+  public let stdout: Data
+  public let stderr: String
+
+  public init(stdout: Data, stderr: String) {
+    self.stdout = stdout
+    self.stderr = stderr
+  }
+}
+
 public protocol CommandRunner: Sendable {
   func run(_ args: [String]) async throws -> Data
+  func runCapturing(_ args: [String]) async throws -> CommandOutput
   /// Where the command lives, for display; nil when there is no path to show.
   var location: String? { get }
 }
 
 extension CommandRunner {
   public var location: String? { nil }
+  public func runCapturing(_ args: [String]) async throws -> CommandOutput {
+    CommandOutput(stdout: try await run(args), stderr: "")
+  }
 }
 
 public enum CLIError: Error, Equatable {
@@ -43,11 +59,17 @@ public struct CLI: CommandRunner {
   }
 
   public func run(_ args: [String]) async throws -> Data {
+    try await runCapturing(args).stdout
+  }
+
+  public func runCapturing(_ args: [String]) async throws -> CommandOutput {
     let process = Process()
     process.executableURL = executable
     process.arguments = args
     var env = ProcessInfo.processInfo.environment
-    env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:" + (env["PATH"] ?? "/usr/bin:/bin")
+    // ~/.local/bin holds the native claude, which the tool asks after a switch.
+    let home = FileManager.default.homeDirectoryForCurrentUser.path
+    env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:\(home)/.local/bin:" + (env["PATH"] ?? "/usr/bin:/bin")
     env["TERM"] = "dumb"
     process.environment = env
     let stdout = Pipe()
@@ -87,7 +109,7 @@ public struct CLI: CommandRunner {
     let err = await errData.value()
     let message = Self.plainText(err)
     switch status {
-    case 0: return out
+    case 0: return CommandOutput(stdout: out, stderr: message)
     case 3: throw CLIError.refused(message)
     default: throw CLIError.failed(status: status, stderr: message)
     }
@@ -101,12 +123,12 @@ public struct CLI: CommandRunner {
     return String(parts[1])
   }
 
-  /// At least 0.2.0, compared per numeric component.
+  /// At least 0.3.0 (cliSaved and the CLI warnings), compared per numeric component.
   public static func isSupported(_ version: String) -> Bool {
     let parts = version.split(separator: ".").map { Int($0) }
     guard parts.count >= 2, !parts.contains(nil) else { return false }
     let nums = parts.compactMap { $0 }
-    return nums.lexicographicallyPrecedes([0, 2, 0]) == false
+    return nums.lexicographicallyPrecedes([0, 3, 0]) == false
   }
 
   private static func plainText(_ data: Data) -> String {

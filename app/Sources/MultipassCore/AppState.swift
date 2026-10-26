@@ -21,6 +21,18 @@ public struct RowError: Equatable {
   }
 }
 
+/// A warning the tool printed while a switch or save succeeded (for example
+/// "switched Desktop only"), shown under the row until the next action.
+public struct RowNote: Equatable {
+  public let name: String
+  public let message: String
+
+  public init(name: String, message: String) {
+    self.name = name
+    self.message = message
+  }
+}
+
 /// Everything the views read. The CLI is reached only through `CommandRunner`;
 /// `switch` and `save` run only from `switchTo` and `saveCurrent`, which the
 /// confirm buttons call. Settings change only through `apply`, so the work a
@@ -34,6 +46,7 @@ public final class AppState: ObservableObject {
   @Published public private(set) var isRefreshingUsage = false
   @Published public private(set) var lastError: String?
   @Published public private(set) var rowError: RowError?
+  @Published public private(set) var rowNote: RowNote?
   @Published public private(set) var cliStatus: CLIStatus = .unknown
   @Published public private(set) var cliLocation: String?
   @Published public private(set) var settings: AppSettings
@@ -143,6 +156,7 @@ public final class AppState: ObservableObject {
 
   public func dismissRowError() {
     rowError = nil
+    rowNote = nil
   }
 
   public func start() {
@@ -168,10 +182,12 @@ public final class AppState: ObservableObject {
   private func act(_ name: String, phase: Phase, args: [String]) async {
     guard self.phase == .idle, let runner else { return }
     rowError = nil
+    rowNote = nil
     self.phase = phase
     defer { self.phase = .idle }
     do {
-      _ = try await runner.run(args)
+      let output = try await runner.runCapturing(args)
+      if !output.stderr.isEmpty { rowNote = RowNote(name: name, message: output.stderr) }
     } catch CLIError.refused(let message) {
       rowError = RowError(name: name, message: message, refused: true)
       return
