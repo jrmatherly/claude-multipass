@@ -8,8 +8,8 @@ Release version `$ARGUMENTS` (write it as `X.Y.Z` below; the tag is `vX.Y.Z`).
 
 Preconditions: on `main`, clean tree, `pnpm check` passes, the tap is cloned at `~/dev/homebrew-tap` (`ls ~/dev/homebrew-tap/Formula/claude-multipass.rb`).
 
-1. Update `CHANGELOG.md`: a `## vX.Y.Z (YYYY-MM-DD)` section at the top listing the user-visible changes since the previous tag (`git log --oneline <prev-tag>..HEAD`).
-2. Bump `"version"` in `package.json` to `X.Y.Z`.
+1. Update `CHANGELOG.md`: a `## X.Y.Z (YYYY-MM-DD)` section at the top (no `v`, matching the existing headings) listing the user-visible changes since the previous tag (`git log --oneline <prev-tag>..HEAD`). When a `## X.Y.Z (unreleased)` heading exists, replace it with the dated one.
+2. Bump `version=` in `bin/claude-multipass` and `"version"` in `package.json` to `X.Y.Z` together; `pnpm check` fails when they differ.
 3. Commit: `git commit -am "Release vX.Y.Z"` (the commit-gate hook runs `pnpm check`).
 4. Tag: `git tag -a vX.Y.Z -m "vX.Y.Z"`.
 5. Push with the tag: `git push --follow-tags`.

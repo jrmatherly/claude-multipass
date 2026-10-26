@@ -46,6 +46,10 @@
 #
 # `claude-multipass --help`
 #
+# - Print the version:
+#
+# `claude-multipass --version`
+#
 # - Leave Claude quit afterwards (save, switch, add):
 #
 # `claude-multipass switch {{name}} --no-relaunch`
@@ -98,6 +102,8 @@
 # License: MIT
 
 set -euo pipefail
+
+version=0.2.0
 
 desktop_dir="${CLAUDE_DESKTOP_DIR:-$HOME/Library/Application Support/Claude}"
 config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
@@ -201,6 +207,7 @@ ${bold}Options${reset}
                        switch: proceed even though the current login was never
                        saved. sync: run while Desktop is open.
   -h, --help           This page.
+  --version            Print the version.
 
 ${bold}Folders${reset}
   Profiles   $store/<name>/
@@ -614,6 +621,10 @@ main() {
   [[ -z $force || $cmd == sync || $cmd == switch || $cmd == save ]] || fail "--force applies to sync, switch and save"
 
   case $cmd in
+    --version)
+      echo "claude-multipass $version"
+      return 0
+      ;;
     -h | --help | help)
       usage
       return 0

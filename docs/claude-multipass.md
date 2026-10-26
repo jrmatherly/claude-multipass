@@ -43,6 +43,7 @@ Desktop quits, relaunches signed in as that account, and the Code tab lists both
 | `current` | The signed-in saved name, `not saved` or `signed out` (for scripts and Raycast) |
 | `usage [name]` | 5-hour and weekly usage per saved account with reset times. Opt-in, see below |
 | `pick` | The fzf picker |
+| `--version` | Print the version |
 
 `--no-relaunch` leaves Desktop quit after `save`, `switch` or `add`.
 

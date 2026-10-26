@@ -31,6 +31,7 @@ done
 chmod +x "$tmp"/bin/*
 export PATH="$tmp/bin:$PATH"
 cda() { "$script" "$@"; }
+pkg_version=$(jq -r .version "$(dirname "$script")/../package.json")
 
 check() {
   if [[ $2 != "$3" ]]; then
@@ -188,6 +189,8 @@ check "two names fail" 1 "$(exit_code cda switch alpha beta --no-relaunch)"
 check "list with a name fails" 1 "$(exit_code cda list alpha)"
 check "current with a name fails" 1 "$(exit_code cda current x)"
 check "--help shows the commands" 1 "$(cda --help | grep -c "^  rename <old> <new>   ")"
+check "version" "claude-multipass $pkg_version" "$(cda --version)"
+check "version exits 0" 0 "$(exit_code cda --version)"
 check "rename moves the profile" "Renamed alpha to home" "$(cda rename alpha home)"
 check_true "renamed profile keeps its login" test -f "$p/home/config.json" -a ! -e "$p/alpha"
 check "rename onto an existing name fails" 1 "$(exit_code cda rename home beta)"

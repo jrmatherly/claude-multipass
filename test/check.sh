@@ -37,3 +37,10 @@ for file in bin/*; do
     exit 1
   }
 done
+# The script's version= line and package.json agree
+script_version=$(sed -n 's/^version=//p' bin/claude-multipass)
+pkg_version=$(jq -r .version package.json)
+[[ $script_version == "$pkg_version" ]] || {
+  echo "check: bin/claude-multipass version=$script_version differs from package.json $pkg_version" >&2
+  exit 1
+}
