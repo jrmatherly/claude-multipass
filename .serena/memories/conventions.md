@@ -23,4 +23,4 @@
 
 - Docs, comments, replies: no em-dashes, short declarative sentences, sentence-case headings, straight quotes.
 - Commit subjects: short, imperative, sentence case, no conventional-commit prefix.
-- Never commit to `main`: every change goes on its own branch in its own git worktree and lands through a PR after CI. Standing approval on that branch: once `pnpm check` passes and the change is what was asked, commit, push and open the PR without asking; merging is Jason's (`CLAUDE.md` Custom Notes).
+- Never commit code to `main`: every code change goes on its own branch in its own git worktree and lands through a PR after CI. Docs-only commits (Markdown under README, CHANGELOG, docs/, CLAUDE.md, .claude/rules, .claude/skills, .serena/memories) go directly on `main`. Standing approval: once `pnpm check` passes and the change is what was asked, commit and push without asking, opening the PR on a branch; merging is Jason's (`CLAUDE.md` Custom Notes).

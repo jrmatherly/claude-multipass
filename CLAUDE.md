@@ -74,5 +74,6 @@ Keep these when changing the script. The rules a reviewer rejects a change for a
 
 Add project-specific notes here. This section is never auto-modified.
 
-- Never commit to `main`. Every change, a one-line fix included, goes on its own branch in its own git worktree, becomes a pull request against `main`, and lands only through that PR after CI (`check.yml`) is green. Start work by creating the worktree and branch; never edit or commit in the `main` checkout.
-- Standing approval on a feature branch: once `pnpm check` passes (the commit-gate hook runs it) and the change is what was asked, commit, push the branch and open the PR without asking. Merging the PR is Jason's call.
+- Never commit code to `main`. Every change to the script, the app, the tests, the hooks, the scripts or the workflows, a one-line fix included, goes on its own branch in its own git worktree, becomes a pull request against `main`, and lands only through that PR after CI (`check.yml`) is green. Start such work by creating the worktree and branch; never edit or commit code in the `main` checkout.
+- Docs-only changes are the exception: a commit that touches only Markdown (`README.md`, `CHANGELOG.md`, `docs/`, `CLAUDE.md`, `.claude/rules/`, `.claude/skills/`, `.serena/memories/`) may be committed and pushed directly on `main`, with no branch, worktree or PR. A docs edit that accompanies a code change rides in that change's PR.
+- Standing approval: once `pnpm check` passes (the commit-gate hook runs it) and the change is what was asked, commit without asking; on a feature branch also push it and open the PR, on `main` (docs only) also push. Merging a PR is Jason's call.
