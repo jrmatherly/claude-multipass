@@ -9,7 +9,8 @@ private func stubScript() throws -> URL {
   let body = """
     #!/bin/bash
     case "$1" in
-      --version) echo "claude-multipass 0.2.0";;
+      --version) echo "claude-multipass 0.3.0";;
+      warn) echo '{"ok":true}'; echo "careful" >&2;;
       list) echo '{"version":"0.2.0","signedIn":false,"desktopRunning":false,"current":null,"profiles":[]}';;
       switch) echo "refused here" >&2; exit 3;;
       big) head -c 200000 /dev/zero | tr '\\0' x;;
@@ -43,7 +44,15 @@ private func stubScript() throws -> URL {
 
 @Test func runParsesVersion() async throws {
   let cli = CLI(executable: try stubScript())
-  #expect(CLI.parseVersion(try await cli.run(["--version"])) == "0.2.0")
+  #expect(CLI.parseVersion(try await cli.run(["--version"])) == "0.3.0")
+}
+
+@Test func runCapturingReturnsStderrOnSuccess() async throws {
+  let cli = CLI(executable: try stubScript())
+  let out = try await cli.runCapturing(["warn"])
+  #expect(String(decoding: out.stdout, as: UTF8.self) == "{\"ok\":true}\n")
+  #expect(out.stderr == "careful")
+  #expect(try await cli.run(["warn"]) == out.stdout)
 }
 
 @Test func exit3IsRefused() async throws {
@@ -85,11 +94,12 @@ private func stubScript() throws -> URL {
 }
 
 @Test func versionCompare() {
-  #expect(CLI.isSupported("0.2.0"))
+  #expect(CLI.isSupported("0.3.0"))
+  #expect(!CLI.isSupported("0.2.2"))
   #expect(!CLI.isSupported("0.1.9"))
   #expect(CLI.isSupported("1.0.0"))
   #expect(CLI.isSupported("0.10.0"))
   #expect(!CLI.isSupported("garbage"))
-  #expect(CLI.parseVersion(Data("claude-multipass 0.2.0\n".utf8)) == "0.2.0")
+  #expect(CLI.parseVersion(Data("claude-multipass 0.3.0\n".utf8)) == "0.3.0")
   #expect(CLI.parseVersion(Data("Usage: ...\n".utf8)) == nil)
 }

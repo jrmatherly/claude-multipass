@@ -15,7 +15,7 @@ struct SaveRow: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 4) {
-      Text("This login is not saved yet.").font(.caption).foregroundStyle(.secondary)
+      Text("This login is not saved yet (Desktop, and the terminal when it is signed in as the same account).").font(.caption).foregroundStyle(.secondary)
       HStack {
         TextField("Save this login as…", text: $name)
           .textFieldStyle(.roundedBorder)
@@ -26,6 +26,8 @@ struct SaveRow: View {
         Text("Saving as \(attempted)…").font(.caption).foregroundStyle(.secondary)
       } else if let error = appState.rowError, error.name == attempted {
         Text(error.message).font(.caption).foregroundStyle(.red).textSelection(.enabled)
+      } else if let note = appState.rowNote, note.name == attempted {
+        Text(note.message).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
       }
     }
     .disabled(appState.phase != .idle)

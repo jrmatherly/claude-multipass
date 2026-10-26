@@ -12,6 +12,18 @@ import Testing
   #expect(s.profiles[0].savedAt == Date(timeIntervalSince1970: 1_767_225_600))
 }
 
+@Test func decodesCliSaved() throws {
+  let json = #"{"version":"0.3.0","signedIn":true,"desktopRunning":false,"current":"beta","profiles":[{"name":"beta","account":"b","savedAt":"2026-01-01T00:00:00Z","sessions":4,"cliSaved":true}]}"#
+  let s = try MultipassJSON.decoder.decode(Snapshot.self, from: Data(json.utf8))
+  #expect(s.profiles[0].cliSaved == true)
+}
+
+@Test func cliSavedDefaultsToFalse() throws {
+  let json = #"{"version":"0.2.0","signedIn":true,"desktopRunning":false,"current":"beta","profiles":[{"name":"beta","account":"b","savedAt":"2026-01-01T00:00:00Z","sessions":4}]}"#
+  let s = try MultipassJSON.decoder.decode(Snapshot.self, from: Data(json.utf8))
+  #expect(s.profiles[0].cliSaved == false)
+}
+
 @Test func decodesNullCurrent() throws {
   let json = #"{"version":"0.2.0","signedIn":true,"desktopRunning":true,"current":null,"profiles":[]}"#
   let s = try MultipassJSON.decoder.decode(Snapshot.self, from: Data(json.utf8))
