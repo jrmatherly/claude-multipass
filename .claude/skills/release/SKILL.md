@@ -1,18 +1,18 @@
 ---
 name: release
-description: Cut a claude-multipass release. Tags the repo, pushes, and bumps the Homebrew formula in jrmatherly/homebrew-tap to the new tag's tarball and sha256. Use for "cut a release", "bump the formula", "tag vX.Y.Z", or "release X.Y.Z".
+description: Cut a claude-multipass release. Tags the repo, pushes (release.yml builds, signs, notarizes and uploads the menu bar app DMG), bumps the Homebrew formula in jrmatherly/homebrew-tap to the new tag's tarball and sha256, then the cask to the DMG. Use for "cut a release", "bump the formula", "tag vX.Y.Z", or "release X.Y.Z".
 argument-hint: '<X.Y.Z>'
 ---
 
 Release version `$ARGUMENTS` (write it as `X.Y.Z` below; the tag is `vX.Y.Z`).
 
-Preconditions: on `main`, clean tree, `pnpm check` passes, the tap is cloned at `~/dev/homebrew-tap` (`ls ~/dev/homebrew-tap/Formula/claude-multipass.rb`).
+Preconditions: on `main`, clean tree, `pnpm check` passes, the tap is cloned at `~/dev/homebrew-tap` (`ls ~/dev/homebrew-tap/Formula/claude-multipass.rb ~/dev/homebrew-tap/Casks/claude-multipass-app.rb`), and the repository has the five secrets `release.yml` needs, copied by name from the ai-kb repository settings: `MACOS_CERT_P12` (base64 of the Developer ID .p12), `MACOS_CERT_PASSWORD`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID`, `APPLE_API_KEY_P8` (the .p8 contents). Without them the workflow builds an unsigned, unnotarized DMG, which the cask must not ship. Casks from a third-party tap load only after `brew trust jrmatherly/tap` (once per Mac; `brew audit --cask` refuses otherwise).
 
 1. Update `CHANGELOG.md`: a `## X.Y.Z (YYYY-MM-DD)` section at the top (no `v`, matching the existing headings) listing the user-visible changes since the previous tag (`git log --oneline <prev-tag>..HEAD`). When a `## X.Y.Z (unreleased)` heading exists, replace it with the dated one.
 2. Bump `version=` in `bin/claude-multipass` and `"version"` in `package.json` to `X.Y.Z` together; `pnpm check` fails when they differ.
 3. Commit: `git commit -am "Release vX.Y.Z"` (the commit-gate hook runs `pnpm check`).
 4. Tag: `git tag -a vX.Y.Z -m "vX.Y.Z"`.
-5. Push with the tag: `git push --follow-tags`.
+5. Push with the tag: `git push --follow-tags`. The tag starts `release.yml` (`gh run watch` or the Actions tab); wait for it to finish. It publishes `claude-multipass-app_X.Y.Z_arm64.dmg` and its `.sha256` on the GitHub release. Confirm the DMG is notarized: download it and run `spctl -a -vv -t open --context context:primary-signature <dmg>`, expected `accepted`.
 6. Compute the tarball digest (GitHub builds the archive from the tag; wait for the push to land):
 
    ```sh
@@ -21,8 +21,9 @@ Preconditions: on `main`, clean tree, `pnpm check` passes, the tap is cloned at 
 
 7. Edit `~/dev/homebrew-tap/Formula/claude-multipass.rb`: set `url` to `https://github.com/jrmatherly/claude-multipass/archive/refs/tags/vX.Y.Z.tar.gz` and `sha256` to the digest.
 8. Audit the formula: `brew audit --strict --formula jrmatherly/tap/claude-multipass`. Fix what it reports before going on.
-9. Commit and push the tap: `git -C ~/dev/homebrew-tap commit -am "claude-multipass vX.Y.Z" && git -C ~/dev/homebrew-tap push`.
-10. Upgrade locally: `brew update && brew upgrade claude-multipass`.
-11. Verify: `claude-multipass list` prints the saved accounts, and `brew info jrmatherly/tap/claude-multipass` shows `X.Y.Z`.
+9. Edit `~/dev/homebrew-tap/Casks/claude-multipass-app.rb`: set `version` to `X.Y.Z` and `sha256` to the digest in the release asset `claude-multipass-app_X.Y.Z_arm64.dmg.sha256` (the first run replaces `:no_check`). The formula is bumped first (step 7) because the app refuses an older tool. Audit it: `brew audit --cask --strict jrmatherly/tap/claude-multipass-app`. The cask token is `claude-multipass-app`, not the formula's name, so `brew install jrmatherly/tap/claude-multipass` keeps meaning the tool; if the audit ever reports a token clash, rename it to `claude-multipass-menubar` and record why here.
+10. Commit and push the tap: `git -C ~/dev/homebrew-tap commit -am "claude-multipass vX.Y.Z" && git -C ~/dev/homebrew-tap push`.
+11. Upgrade locally: `brew update && brew upgrade claude-multipass && brew install --cask jrmatherly/tap/claude-multipass-app` (or `brew upgrade --cask`).
+12. Verify: `claude-multipass --version` prints `claude-multipass X.Y.Z`, `claude-multipass list` prints the saved accounts, `brew info jrmatherly/tap/claude-multipass` shows `X.Y.Z`, and Claude Multipass appears in the menu bar with the current account; one switch from its popover relaunches Desktop signed in as the other account.
 
-Report the tag, the digest, the tap commit, and the output of step 11. A failed audit or a digest mismatch stops the release; nothing is retagged. If the tag must move, delete it locally and remotely first (`git tag -d vX.Y.Z && git push origin :refs/tags/vX.Y.Z`), and say so, since the published tarball changes.
+Report the tag, the digest, the DMG digest, the tap commit, and the output of step 12. A failed audit or a digest mismatch stops the release; nothing is retagged. If the tag must move, delete it locally and remotely first (`git tag -d vX.Y.Z && git push origin :refs/tags/vX.Y.Z`), and say so, since the published tarball changes.
