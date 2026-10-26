@@ -33,11 +33,15 @@ final class FakeRunner: CommandRunner, @unchecked Sendable {
     lock.unlock()
   }
 
-  func run(_ args: [String]) async throws -> Data {
+  private func record(_ args: [String]) -> Result<Data, CLIError>? {
     lock.lock()
+    defer { lock.unlock() }
     _calls.append(args)
-    let response = responses[args[0]]
-    lock.unlock()
+    return responses[args[0]]
+  }
+
+  func run(_ args: [String]) async throws -> Data {
+    let response = record(args)
     await onCall?(args)
     guard let response else { throw CLIError.failed(status: 1, stderr: "unscripted \(args)") }
     return try response.get()

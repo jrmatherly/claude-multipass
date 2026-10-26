@@ -26,13 +26,16 @@ shellcheck --severity=warning "${shell_scripts[@]}"
 prettier --log-level warn --ignore-unknown --check "**/*.{js,cjs,ts,md,json,sh}" "bin/*" ".github/**/*.yml"
 # bin/claude-multipass against a fixture Desktop folder (never the real one)
 bash test/claude-multipass.sh > /dev/null
-# The menu bar app's core, a debug build. Under the Command Line Tools the
-# Swift Testing macro plugin has to be named by path.
-plugins="$(xcode-select -p)/usr/lib/swift/host/plugins/testing"
-swift_flags=()
-[[ -d $plugins ]] && swift_flags=(-Xswiftc -plugin-path -Xswiftc "$plugins")
-swift test --package-path app ${swift_flags[@]+"${swift_flags[@]}"} > /dev/null 2>&1 || {
-  echo "check: swift test failed; rerun it without the redirect to see why" >&2
+# The menu bar app, a debug build and its tests. The app module uses SwiftUI
+# macros whose compiler plugin only Xcode ships (the Command Line Tools have
+# the Testing plugin but not libSwiftUIMacros), so when xcode-select points at
+# the Tools and Xcode is installed, build through Xcode's developer dir.
+swiftui_plugin=Platforms/MacOSX.platform/Developer/usr/lib/swift/host/plugins/libSwiftUIMacros.dylib
+if [[ -z ${DEVELOPER_DIR:-} && ! -e "$(xcode-select -p)/$swiftui_plugin" && -e /Applications/Xcode.app/Contents/Developer/$swiftui_plugin ]]; then
+  export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+fi
+swift test --package-path app > /dev/null 2>&1 || {
+  echo "check: swift test failed; rerun it without the redirect to see why (the app needs Xcode, not only the Command Line Tools)" >&2
   exit 1
 }
 # the Claude Code hooks against sample payloads
