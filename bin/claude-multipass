@@ -111,7 +111,7 @@
 
 set -euo pipefail
 
-version=0.2.0
+version=0.2.1
 
 desktop_dir="${CLAUDE_DESKTOP_DIR:-$HOME/Library/Application Support/Claude}"
 config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
