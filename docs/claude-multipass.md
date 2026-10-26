@@ -79,7 +79,7 @@ Refresh cadence:
 | Usage figures | `usage --json` | only when usage is on: every 5, 15, 30 or 60 minutes, once when turned on, on Refresh; one Keychain read per run |
 | Strip redraw and countdowns | none | every 3 s from cached data |
 
-Turning a module on or off never fetches usage. Nothing in the app runs `switch` without a click. The first switch raises the macOS Automation prompt, "Claude Multipass wants to control Claude", because the app is the responsible process for the tool's `osascript` quit; allow it, or every switch falls back to the tool's `pkill` after 8 s. Revisit it under System Settings, Privacy & Security, Automation. The first switch that moves a CLI login may raise a Keychain prompt for `security`; click Always Allow, or the switch finishes Desktop only. The first launch of a downloaded build needs the network once, for Gatekeeper to check the notarization ticket (the DMG is notarized and stapled; the app inside carries the ticket online).
+Turning a module on or off never fetches usage. Nothing in the app runs `switch` without a click. The first switch raises the macOS Automation prompt, "Claude Multipass wants to control Claude", because the app is the responsible process for the tool's `osascript` quit; allow it, or every switch falls back to the tool's `pkill` after 8 s. Revisit it under System Settings, Privacy & Security, Automation. The first switch that moves a CLI login may raise a Keychain prompt naming `python3` (the system one, which the tool's Keychain helper runs under); click Always Allow, which grants that `python3` access to the item from then on, or the switch finishes Desktop only with the reason in its warning. The Command Line Tools must be installed (`xcode-select --install`); `doctor` says when they are not. The first launch of a downloaded build needs the network once, for Gatekeeper to check the notarization ticket (the DMG is notarized and stapled; the app inside carries the ticket online).
 
 ## Usage headroom
 
@@ -125,7 +125,7 @@ This is the one part of the tool that uses a subscription token outside Anthropi
 - Refusals that `--force` lifts exit 3, so a caller can offer the override; other failures exit 1. A refused `save` is decided before Desktop quits.
 - `save`, `switch` and `add` refuse (exit 1) from a shell that Desktop owns, such as the Code tab's terminal: quitting Desktop would end that shell mid-switch. BSD `pgrep` never reports its own ancestors, so the tool checks with `pgrep -a` too; run those commands from Terminal or the menu bar app.
 
-The self-check `test/claude-multipass.sh` runs in `pnpm check` against a fixture folder, with `pgrep`, `osascript`, `pkill`, `open`, `fzf`, `security` and `curl` stubbed on PATH, so it never touches the real app, Keychain or network.
+The self-check `test/claude-multipass.sh` runs in `pnpm check` against a fixture folder, with `pgrep`, `osascript`, `pkill`, `open`, `fzf`, `security`, `curl` and the Keychain helper (`CLAUDE_MULTIPASS_KEYCHAIN`) stubbed on PATH, so it never touches the real app, Keychain or network.
 
 ## Background
 

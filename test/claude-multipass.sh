@@ -42,10 +42,11 @@ EOF
 cat >> "$tmp/bin/keychain" << 'EOF'
 # argv is: -I -c <code> op service account
 op=$4 s=$5 a=$6
-echo "keychain $op $s $a" >> "$log"
-# Failure hooks for the self-check: a refused write, a failed read of the CLI item.
-[[ -z ${SECURITY_FAIL_ADD:-} || $op != put ]] || exit 1
-[[ -z ${SECURITY_FAIL_FIND:-} || $op != get || $s != 'Claude Code-credentials' ]] || exit "$SECURITY_FAIL_FIND"
+echo "keychain $*" >> "$log"
+# Failure hooks for the self-check: a refused write, a failed read of the CLI
+# item. Like the real helper, the reason goes to stderr.
+[[ -z ${SECURITY_FAIL_ADD:-} || $op != put ]] || { echo "keychain put $s: OSStatus -25293 access denied (stub)" >&2; exit 1; }
+[[ -z ${SECURITY_FAIL_FIND:-} || $op != get || $s != 'Claude Code-credentials' ]] || { echo "keychain get $s: OSStatus -25308 (stub)" >&2; exit "$SECURITY_FAIL_FIND"; }
 case $op in
   put)
     mkdir -p "$kc/$s"
@@ -93,6 +94,19 @@ check_true() {
 exit_code() {
   "$@" > /dev/null 2>&1 && echo 0 || echo $?
 }
+
+# The real helper: the embedded python parses, and a read of an item that
+# does not exist walks every binding (CFString, CFDictionary with its
+# callbacks, SecItemCopyMatching) without a write or a prompt
+if [[ -x /usr/bin/python3 ]] && xcode-select -p > /dev/null 2>&1; then
+  helper_py=$(sed -n "/^read -r -d '' keychain_py << 'PY'/,/^PY\$/p" "$script" | sed '1d;$d')
+  check "the embedded Keychain helper parses" ok "$(printf %s "$helper_py" | /usr/bin/python3 -I -c 'import ast, sys; ast.parse(sys.stdin.read()); print("ok")')"
+  check "the real helper reports an absent item as 44" 44 "$(
+    /usr/bin/python3 -I -c "$helper_py" get claude-multipass-selftest nobody > /dev/null 2> "$tmp/helper-err"
+    echo $?
+  )"
+  check "and says nothing on stderr for absent" "" "$(cat "$tmp/helper-err")"
+fi
 
 # the keychain stub itself
 printf 'a "b" c'"'"'d\n' | "$tmp/bin/keychain" -I -c x put t u
@@ -148,6 +162,17 @@ kc_delete "Claude Code-credentials" "$USER"
 check_true "save warns when the CLI is signed out" grep -q 'signed in as a different account, or signed out' <<< "$(cda save alpha --no-relaunch 2>&1 > /dev/null)"
 check "a signed-out save keeps the saved item" at-alpha "$(kc_get claude-multipass alpha | jq -r .claudeAiOauth.accessToken)"
 kc_put "Claude Code-credentials" "$USER" "$live_item"
+err=$(SECURITY_FAIL_ADD=1 cda save alpha --no-relaunch 2>&1 > /dev/null)
+check_true "a refused Keychain write on save warns with the helper's reason" grep -q 'alpha: the Keychain helper exited 1 saving the CLI login; saved the Desktop login only' <<< "$err"
+check_true "and the reason reaches the user" grep -q 'OSStatus -25293 access denied' <<< "$err"
+check "and keeps the earlier saved item" at-alpha "$(kc_get claude-multipass alpha | jq -r .claudeAiOauth.accessToken)"
+check "and still saved the Desktop login" aaaaaaaa-1111 "$(jq -r .lastKnownAccountUuid "$p/alpha/config.json")"
+# No Command Line Tools: the helper is a shim that pops an installer, so the CLI part is skipped
+printf '#!/bin/sh\nexit 2\n' > "$tmp/bin/xcode-select"
+chmod +x "$tmp/bin/xcode-select"
+check_true "save without the Command Line Tools skips the CLI login" grep -q 'alpha: the Command Line Tools are not installed (xcode-select --install); saved the Desktop login only' <<< "$(cda save alpha --no-relaunch 2>&1 > /dev/null)"
+check_true "doctor warns without the Command Line Tools" grep -q '^warn: Command Line Tools: not installed (xcode-select --install), needed for the CLI login and usage' <<< "$(cda doctor)"
+rm "$tmp/bin/xcode-select"
 
 printf '{"oauth:tokenCache":"enc-B1","oauth:tokenCacheV2":"enc-B2","lastKnownAccountUuid":"bbbbbbbb-2222"}' > "$p/beta/config.json"
 printf '{"account":"bbbbbbbb-2222","savedAt":"2026-01-01T00:00:00Z"}' > "$p/beta/meta.json"
@@ -288,6 +313,7 @@ cda switch alpha --no-relaunch > /dev/null 2>&1
 err=$(SECURITY_FAIL_FIND=36 cda switch beta --no-relaunch 2>&1 > /dev/null)
 check_true "a failed read on the way out names the status and the profile" grep -q 'alpha: the Keychain helper exited 36 reading the CLI login; saved the Desktop login only' <<< "$err"
 check_true "a failed read on the restore names the status" grep -q 'the Keychain helper exited 36 reading the CLI login; switched Desktop only' <<< "$err"
+check_true "and the helper's reason reaches the user" grep -q 'OSStatus -25308' <<< "$err"
 check "and leaves the live CLI item alone" at-alpha "$(kc_get "Claude Code-credentials" "$USER" | jq -r .claudeAiOauth.accessToken)"
 check "and leaves oauthAccount alone" aaaaaaaa-1111 "$(jq -r .oauthAccount.accountUuid "$tmp/claude.json")"
 cda switch alpha --no-relaunch > /dev/null 2>&1
@@ -473,6 +499,11 @@ check_true "renamed profile keeps its login" test -f "$p/home/config.json" -a ! 
 check "rename moves the CLI item" at-alpha "$(kc_get claude-multipass home | jq -r .claudeAiOauth.accessToken)"
 check "rename removes the old CLI item" absent "$(kc_get claude-multipass alpha)"
 check "rename of a profile without a CLI item succeeds" 0 "$(exit_code cda rename legacy legacy2)"
+err=$(SECURITY_FAIL_ADD=1 cda rename home home2 2>&1 > /dev/null)
+check_true "a rename whose Keychain copy fails says so" grep -q 'could not move the CLI login to home2 (the old item stays under home)' <<< "$err"
+check "and keeps the old item" at-alpha "$(kc_get claude-multipass home | jq -r .claudeAiOauth.accessToken)"
+check_true "and the renamed folder claims no CLI login" test ! -e "$p/home2/cli.json"
+cda rename home2 home > /dev/null
 cda rename legacy2 legacy > /dev/null
 check "rename onto an existing name fails" 1 "$(exit_code cda rename home beta)"
 check "rename needs two names" 1 "$(exit_code cda rename home)"
@@ -603,6 +634,7 @@ rm -f "$tmp/calls"
 touch "$tmp/calls"
 check "doctor healthy" 0 "$(exit_code cda doctor)"
 check_true "doctor reports jq" grep -q '^ok: jq' <<< "$(cda doctor)"
+check_true "doctor reports the Command Line Tools" grep -q '^ok: Command Line Tools' <<< "$(cda doctor)"
 n_sec=$(wc -l < "$tmp/security-calls" | tr -d ' ')
 cda doctor > /dev/null
 check "doctor never calls security" "$n_sec" "$(wc -l < "$tmp/security-calls" | tr -d ' ')"

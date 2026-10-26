@@ -98,13 +98,15 @@
 # machine. Profiles are per Mac, though: the app encrypts the login with a
 # key in that Mac's login Keychain ("Claude Safe Storage"), so a profile
 # copied to another Mac won't decrypt. Save each account once per Mac.
-# macOS only (osascript, open, security, Application Support paths); needs jq,
-# fzf for the picker, curl and the system python3 and openssl for usage.
+# macOS only (osascript, open, security, Application Support paths); needs jq
+# and the Command Line Tools (their /usr/bin/python3 reads and writes the CLI
+# login's Keychain items); fzf for the picker; curl and openssl for usage.
 #
 # Bare invocation on a terminal with fzf runs `pick`; `pick` and `current`
 # are also commands, for scripts and the self-check. The self-check stubs
-# security (stateful) and curl on PATH, so the CLI login paths and `usage` run
-# without the Keychain or network.
+# security, the Keychain helper (CLAUDE_MULTIPASS_KEYCHAIN, stateful) and curl
+# on PATH, so the CLI login paths and `usage` run without the Keychain or
+# network.
 #
 # config.json.journal is left alone: it is the app's write-ahead copy, headed
 # by the sha256 of the config.json it was taken from, and the app discards it
@@ -142,7 +144,7 @@ cli_home="${CLAUDE_CLI_HOME:-$HOME/.claude}"
 cli_service='Claude Code-credentials'
 cli_account=${USER:-$(id -un)}
 mp_service=claude-multipass
-# Keychain items are read and written through the Security framework from
+# The CLI login items are read and written through the Security framework from
 # the system python3 (the self-check points this at a stub). `security -i`
 # keeps at most 4019 bytes of a line (measured) and a live CLI item with MCP
 # logins runs to 15 KB, while `security -w` on argv would put the token on a
@@ -169,10 +171,13 @@ Sec.SecItemAdd.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
 Sec.SecItemDelete.argtypes = [ctypes.c_void_p]
 def cfstr(t): return CF.CFStringCreateWithCString(None, t.encode(), 0x08000100)
 def const(lib, n): return ctypes.c_void_p.in_dll(lib, n).value
+# The callback symbols are structs, so their address is what CF wants; a
+# .value read would hand it the struct's first word (0, no callbacks).
+def struct_addr(lib, n): return ctypes.addressof(ctypes.c_char.in_dll(lib, n))
 def cfdict(pairs):
     keys = (ctypes.c_void_p * len(pairs))(*[k for k, _ in pairs])
     vals = (ctypes.c_void_p * len(pairs))(*[v for _, v in pairs])
-    return CF.CFDictionaryCreate(None, keys, vals, len(pairs), const(CF, "kCFTypeDictionaryKeyCallBacks"), const(CF, "kCFTypeDictionaryValueCallBacks"))
+    return CF.CFDictionaryCreate(None, keys, vals, len(pairs), struct_addr(CF, "kCFTypeDictionaryKeyCallBacks"), struct_addr(CF, "kCFTypeDictionaryValueCallBacks"))
 query = [(const(Sec, "kSecClass"), const(Sec, "kSecClassGenericPassword")), (const(Sec, "kSecAttrService"), cfstr(service)), (const(Sec, "kSecAttrAccount"), cfstr(account))]
 NOTFOUND = -25300
 if op == "get":
@@ -188,6 +193,12 @@ elif op == "delete":
     st = Sec.SecItemDelete(cfdict(query))
 else:
     st = 1
+if st not in (0, NOTFOUND):
+    why = {-25293: "access denied (the Keychain prompt was declined, or the password was wrong)",
+           -25308: "no Keychain prompt is possible here (run it from a logged-in terminal, not SSH or a hook)",
+           -128: "the Keychain prompt was cancelled",
+           -25299: "the item already exists"}.get(st, "")
+    print("keychain %s %s: OSStatus %d %s" % (op, service, st, why), file=sys.stderr)
 sys.exit(0 if st == 0 else 44 if st == NOTFOUND else 1)
 PY
 
@@ -358,21 +369,23 @@ jq_write() {
   mv "$dest.tmp" "$dest"
 }
 
-# The helper exits 44 when the item is absent, like the security tool.
+# The helper exits 44 when the item is absent, like the security tool, and on
+# any other failure names the OSStatus on stderr, which stays visible: it
+# never carries a value, and the app shows stderr under the row.
 keychain() { "$keychain_helper" -I -c "$keychain_py" "$@"; }
-keychain_get() { keychain get "$1" "$2" 2> /dev/null; }
+keychain_get() { keychain get "$1" "$2"; }
 
 # The value (stdin) never touches argv. $(cat) drops the newline a here-string
 # appends, which the CLI's own reader would not expect.
 keychain_put() {
   local v
   v=$(cat)
-  printf %s "$v" | keychain put "$1" "$2" > /dev/null 2>&1
+  printf %s "$v" | keychain put "$1" "$2" > /dev/null
 }
 
 keychain_delete() {
   local rc=0
-  keychain delete "$1" "$2" > /dev/null 2>&1 || rc=$?
+  keychain delete "$1" "$2" > /dev/null || rc=$?
   [[ $rc -eq 0 || $rc -eq 44 ]]
 }
 
@@ -401,6 +414,9 @@ cli_skip=''
 # capture and the restore so the two never disagree.
 cli_blocker() {
   [[ -z ${CLAUDE_CONFIG_DIR:-} ]] || echo "CLAUDE_CONFIG_DIR is set; the CLI login is not saved or switched"
+  # Without the Command Line Tools /usr/bin/python3 is a shim that pops the
+  # installer dialog; xcode-select -p answers without one.
+  xcode-select -p > /dev/null 2>&1 || echo "the Command Line Tools are not installed (xcode-select --install)"
   [[ -f $claude_json ]] || echo "Claude Code has not run on this Mac"
   [[ ! -f $claude_json ]] || jq -e . "$claude_json" > /dev/null 2>&1 || echo "$claude_json is not valid JSON"
 }
@@ -431,7 +447,7 @@ cli_capture() {
     return 0
   fi
   keychain_put "$mp_service" "$name" <<< "$part" || {
-    warning "$name: the Keychain refused the CLI login (status $?); saved the Desktop login only"
+    warning "$name: the Keychain helper exited $? saving the CLI login; saved the Desktop login only"
     return 0
   }
   jq_write "$dir/cli.json" '{oauthAccount}' "$claude_json" \
@@ -561,9 +577,11 @@ cli_restore() {
   if ! { (umask 077 && jq --indent 2 --slurpfile c "$dir/cli.json" '.oauthAccount = $c[0].oauthAccount' "$claude_json" > "$claude_json.tmp") \
     && mv "$claude_json.tmp" "$claude_json"; }; then
     rm -f "$claude_json.tmp" 2> /dev/null || true
-    if [[ -n $live ]]; then keychain_put "$cli_service" "$cli_account" <<< "$live"; else keychain_delete "$cli_service" "$cli_account"; fi \
-      || warning "and the previous CLI item could not be put back either; it is in $backup_dest"
-    warning "could not write $claude_json; the CLI login was put back, switched Desktop only"
+    if { [[ -n $live ]] && keychain_put "$cli_service" "$cli_account" <<< "$live"; } || { [[ -z $live ]] && keychain_delete "$cli_service" "$cli_account"; }; then
+      warning "could not write $claude_json; the CLI login was put back, switched Desktop only"
+    else
+      warning "could not write $claude_json, and the previous CLI item could not be put back; it is in $backup_dest"
+    fi
     return 0
   fi
   # claude-swap reports the CLI takes these locks on refresh (unverified here),
@@ -856,7 +874,8 @@ doctor_report() {
     echo "fail: jq: not on PATH (brew install jq)"
     status=1
   fi
-  for tool in 'fzf:the picker' 'python3:the CLI login (Keychain access) and usage (key derivation)' 'openssl:usage (token decrypt)' 'curl:usage (the usage endpoint)'; do
+  if xcode-select -p > /dev/null 2>&1; then echo "ok: Command Line Tools (the system python3 for the CLI login and usage)"; else echo "warn: Command Line Tools: not installed (xcode-select --install), needed for the CLI login and usage"; fi
+  for tool in 'fzf:the picker' 'openssl:usage (token decrypt)' 'curl:usage (the usage endpoint)'; do
     if command -v "${tool%%:*}" > /dev/null; then echo "ok: ${tool%%:*}"; else echo "warn: ${tool%%:*}: not on PATH, needed for ${tool#*:}"; fi
   done
   if [[ -d $store ]]; then
