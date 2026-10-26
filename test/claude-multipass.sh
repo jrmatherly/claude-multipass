@@ -467,6 +467,20 @@ check "current prints the active name" beta "$(cda current)"
 check "Raycast inline shows the active account" beta "$("$raycast/claude-account.sh")"
 check "Raycast switch ends with a toast line" "Switched to beta" "$("$raycast/switch-claude-account.sh" beta | tail -1)"
 
+# Run from a shell inside Desktop (the Code tab's terminal): BSD pgrep excludes
+# its own ancestors, so plain pgrep says "not running" while pgrep -a finds it.
+printf '#!/bin/sh\ncase "$1" in -a*) exit 0 ;; esac\nexit 1\n' > "$tmp/bin/pgrep"
+cp "$d/config.json" "$tmp/config-inside"
+rm -f "$tmp/calls"
+check "switch from inside Desktop refuses" 1 "$(exit_code cda switch alpha --no-relaunch)"
+check_true "and names the way out" grep -q 'inside Claude Desktop' <<< "$(cda switch alpha --no-relaunch 2>&1 || true)"
+check_true "and touches nothing" cmp -s "$d/config.json" "$tmp/config-inside"
+check_true "and neither quits nor launches" test ! -e "$tmp/calls"
+check "save from inside Desktop refuses" 1 "$(exit_code cda save beta --no-relaunch)"
+check "sync from inside Desktop refuses as Desktop running" 3 "$(exit_code cda sync)"
+check "list from inside Desktop works" 0 "$(exit_code cda list)"
+printf '#!/bin/sh\nexit 1\n' > "$tmp/bin/pgrep"
+
 # sync refuses while Desktop runs (pgrep finds it)
 printf '#!/bin/sh\nexit 0\n' > "$tmp/bin/pgrep"
 check "sync refuses while Desktop runs" 3 "$(exit_code cda sync)"

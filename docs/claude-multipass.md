@@ -123,6 +123,7 @@ This is the one part of the tool that uses a subscription token outside Anthropi
 - A failure after the app was quit still relaunches it.
 - The menu bar app polls `list --json` on a timer; that reads `config.json` and `meta.json`, never the Keychain. Usage polling is opt-in, through `usage --json`, with an interval of at least 5 minutes, one `security` call per run, and stops when the user turns it off. Keychain reads and writes happen only inside `save`, `add` (its re-save and the backup prune), `switch`, `rename`, `remove` and the backup prune, for the CLI login item and the tool's own items. Still rejected: any automatic switch; usage polling that is on by default or faster than 5 minutes; a launch agent or daemon separate from the user-visible app; reading the Keychain anywhere else.
 - Refusals that `--force` lifts exit 3, so a caller can offer the override; other failures exit 1. A refused `save` is decided before Desktop quits.
+- `save`, `switch` and `add` refuse (exit 1) from a shell that Desktop owns, such as the Code tab's terminal: quitting Desktop would end that shell mid-switch. BSD `pgrep` never reports its own ancestors, so the tool checks with `pgrep -a` too; run those commands from Terminal or the menu bar app.
 
 The self-check `test/claude-multipass.sh` runs in `pnpm check` against a fixture folder, with `pgrep`, `osascript`, `pkill`, `open`, `fzf`, `security` and `curl` stubbed on PATH, so it never touches the real app, Keychain or network.
 

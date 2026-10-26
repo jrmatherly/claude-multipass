@@ -300,6 +300,9 @@ ${bold}Cautions${reset}
     decrypt (visible in ps to any local user while it runs).
   - Chats, Projects and memory on claude.ai stay with their account. Only
     Claude Code sessions carry over.
+  - save, switch and add refuse from a shell inside Desktop (the Code tab's
+    terminal): quitting Desktop would end that shell. Use Terminal or the
+    menu bar app.
 EOF
 }
 
@@ -540,7 +543,10 @@ cli_restore() {
   cli_verify "$(jq -r '.oauthAccount.organizationUuid // empty' "$dir/cli.json")"
 }
 
-desktop_running() { pgrep -xq Claude; }
+# BSD pgrep never reports its own ancestors, so from a shell inside Desktop
+# (the Code tab's terminal) plain pgrep says "not running" while -a finds it.
+desktop_running() { pgrep -axq Claude; }
+inside_desktop() { ! pgrep -xq Claude && pgrep -axq Claude; }
 
 wait_gone() {
   local i
@@ -1160,7 +1166,9 @@ main() {
   esac
 
   # Everything past here needs the app quit. Relaunch from the trap so an
-  # error midway still brings it back.
+  # error midway still brings it back. Quitting Desktop from a shell it owns
+  # would end that shell mid-switch, so refuse instead.
+  ! inside_desktop || fail "This shell runs inside Claude Desktop; quitting it would end this session. Run $cmd from Terminal or the menu bar app"
   desktop_quit
   # relaunch is main's local, so the trap text is chosen now, not at exit.
   if [[ -n $relaunch ]]; then trap 'cli_unlock; desktop_launch' EXIT; else trap cli_unlock EXIT; fi
