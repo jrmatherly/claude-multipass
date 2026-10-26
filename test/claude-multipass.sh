@@ -255,8 +255,10 @@ check "same-name switch repairs missing cookies" cookie-B "$(cat "$d/Cookies")"
 
 # The CLI already on the target account: its live tokens are fresher than the saved ones, so switch re-saves them and writes nothing
 kc_put "Claude Code-credentials" "$USER" "$(kc_get "Claude Code-credentials" "$USER" | jq -c '.claudeAiOauth.accessToken = "at-beta-fresh"')"
+n_backups=$(ls -1d "$b"/login-*/ | wc -l | tr -d ' ')
 out=$(cda switch beta --no-relaunch)
 check "switch to the signed-in account re-saves the live CLI login" "beta is already signed in" "$(head -1 <<< "$out")"
+check "and writes no backup folder" "$n_backups" "$(ls -1d "$b"/login-*/ | wc -l | tr -d ' ')"
 check "and leaves the live tokens alone" at-beta-fresh "$(kc_get "Claude Code-credentials" "$USER" | jq -r .claudeAiOauth.accessToken)"
 check "and the profile now holds them" at-beta-fresh "$(kc_get claude-multipass beta | jq -r .claudeAiOauth.accessToken)"
 
@@ -270,7 +272,6 @@ check "and still restores the target's CLI login" at-alpha "$(kc_get "Claude Cod
 check "and its identity" aaaaaaaa-1111 "$(jq -r .oauthAccount.accountUuid "$tmp/claude.json")"
 
 # A live item too large for security -i: the CLI part is skipped whole, backup included
-big=$(printf 'x%.0s' $(seq 1 2000))
 kc_put "Claude Code-credentials" "$USER" "{\"claudeAiOauth\":{\"accessToken\":\"at-alpha\"},\"mcpOAuth\":\"$big\"}"
 n_backups=$(ls -1d "$b"/login-*/ | wc -l | tr -d ' ')
 err=$(cda switch beta --no-relaunch 2>&1 > /dev/null)
@@ -281,6 +282,14 @@ check "and still switches Desktop" bbbbbbbb-2222 "$(jq -r .lastKnownAccountUuid 
 check "and backs up no CLI item" absent "$(kc_get claude-multipass "$(basename "$(ls -1d "$b"/login-*/ | sort | tail -1)")")"
 check "though the Desktop backup was made" $((n_backups + 1)) "$(ls -1d "$b"/login-*/ | wc -l | tr -d ' ')"
 kc_put "Claude Code-credentials" "$USER" "$live_item"
+
+# A Mac where the CLI never ran (no ~/.claude.json): Desktop only, nothing created
+mv "$tmp/claude.json" "$tmp/claude-aside.json"
+check_true "switch without a claude.json says the CLI never ran here" grep -q 'Claude Code has not run on this Mac; switched Desktop only' <<< "$(cda switch beta --no-relaunch 2>&1 > /dev/null)"
+check_true "and creates no claude.json" test ! -e "$tmp/claude.json"
+check "and leaves the live item alone" at-alpha "$(kc_get "Claude Code-credentials" "$USER" | jq -r .claudeAiOauth.accessToken)"
+mv "$tmp/claude-aside.json" "$tmp/claude.json"
+cda switch alpha --no-relaunch > /dev/null 2>&1
 
 # A profile saved by 0.2.x has no CLI login
 mkdir -p "$p/legacy"

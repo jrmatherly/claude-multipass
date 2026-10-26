@@ -13,7 +13,6 @@ public struct CommandOutput: Sendable, Equatable {
 }
 
 public protocol CommandRunner: Sendable {
-  func run(_ args: [String]) async throws -> Data
   func runCapturing(_ args: [String]) async throws -> CommandOutput
   /// Where the command lives, for display; nil when there is no path to show.
   var location: String? { get }
@@ -21,8 +20,8 @@ public protocol CommandRunner: Sendable {
 
 extension CommandRunner {
   public var location: String? { nil }
-  public func runCapturing(_ args: [String]) async throws -> CommandOutput {
-    CommandOutput(stdout: try await run(args), stderr: "")
+  public func run(_ args: [String]) async throws -> Data {
+    try await runCapturing(args).stdout
   }
 }
 
@@ -56,10 +55,6 @@ public struct CLI: CommandRunner {
       return URL(fileURLWithPath: override)
     }
     return candidates.first(where: isExecutable).map { URL(fileURLWithPath: $0) }
-  }
-
-  public func run(_ args: [String]) async throws -> Data {
-    try await runCapturing(args).stdout
   }
 
   public func runCapturing(_ args: [String]) async throws -> CommandOutput {

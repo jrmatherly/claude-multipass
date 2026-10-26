@@ -43,10 +43,6 @@ final class FakeRunner: CommandRunner, @unchecked Sendable {
     return responses[args[0]]
   }
 
-  func run(_ args: [String]) async throws -> Data {
-    try await runCapturing(args).stdout
-  }
-
   func runCapturing(_ args: [String]) async throws -> CommandOutput {
     let response = record(args)
     await onCall?(args)
