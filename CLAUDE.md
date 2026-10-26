@@ -10,7 +10,7 @@ Three Raycast script commands in `raycast/` call the tool by name. `bin/claude-m
 
 ## Commands
 
-- `pnpm check` (`test/check.sh`) is the gate. It exports `LC_ALL=en_US.UTF-8` (the self-checks grep for UTF-8 glyphs) and runs `bash -n` and `shellcheck --severity=warning` on `bin/claude-multipass`, `test/*.sh`, `.claude/hooks/*.sh` and `raycast/*.sh`; `prettier --check` over `**/*.{js,cjs,ts,md,json,sh}`, `bin/*` and `.github/**/*.yml`; `test/claude-multipass.sh`; the three hook self-checks (`.claude/hooks/test-lint-edited.sh`, `test-lint-bash-edits.sh`, `test-commit-gate.sh`); and a check that every `bin/` file has a comment on line 2. CI (`.github/workflows/check.yml`) runs it on `macos-latest` for PRs and pushes to `main`.
+- `pnpm check` (`test/check.sh`) is the gate. It exports `LC_ALL=en_US.UTF-8` (the self-checks grep for UTF-8 glyphs) and runs `bash -n` and `shellcheck --severity=warning` on `bin/claude-multipass`, `test/*.sh`, `.claude/hooks/*.sh` and `raycast/*.sh`; `prettier --check` over `**/*.{js,cjs,ts,md,json,sh}`, `bin/*` and `.github/**/*.yml`; `test/claude-multipass.sh`; the three hook self-checks (`.claude/hooks/test-lint-edited.sh`, `test-lint-bash-edits.sh`, `test-commit-gate.sh`); a check that every `bin/` file has a comment on line 2; that `version=` in the script equals `package.json`; and `swift test --package-path app` (a debug build, about 20 s warm; under the Command Line Tools it passes `-Xswiftc -plugin-path -Xswiftc "$(xcode-select -p)/usr/lib/swift/host/plugins/testing"`, or Swift Testing macros fail to load). CI (`.github/workflows/check.yml`) runs it on `macos-latest` for PRs and pushes to `main`.
 - `pnpm format`: prettier `--write` over the same globs.
 - One file: `bash -n <file> && shellcheck --severity=warning <file> && node_modules/.bin/prettier --check <file>`.
 - `bash test/claude-multipass.sh`: the fixture self-check, exits 1 naming the first failed assertion. It never touches the real Desktop: `CLAUDE_DESKTOP_DIR` and `CLAUDE_MULTIPASS_DIR` point into a temp dir, and `pgrep`, `osascript`, `pkill`, `open`, `fzf`, `security` and `curl` are stubs on PATH (no app quit or launched, no Keychain, no network). The migration case sets `XDG_CONFIG_HOME` to the temp dir, not `HOME`, because tools on PATH read their own config from `HOME`. Details in `.claude/rules/testing.md`.
@@ -23,6 +23,8 @@ bin/claude-multipass     the tool, one bash script; its header comment is the tl
 test/check.sh            pnpm check
 test/claude-multipass.sh fixture self-check
 raycast/                 claude-account.sh (inline, current name), claude-account-usage.sh (inline, opt-in), switch-claude-account.sh (argument, confirmation)
+app/                     the menu bar app, a Swift package: Sources/MultipassCore (models, CLI runner, formatting, settings, state; Foundation only, unit tested), Sources/ClaudeMultipass (AppKit/SwiftUI shell), Tests/
+scripts/                 build-app.sh (swift build, bundle, sign, optional DMG), sign-mac-app.sh (copied from ai-kb)
 docs/                    claude-multipass.md (how it works, for users), research.md (scrubbed research digest)
 .claude/                 settings.json (permissions, hooks), hooks/ (lint and commit gate with self-checks), rules/, skills/, agents/
 .github/workflows/       check.yml
@@ -57,7 +59,7 @@ Keep these when changing the script. The rules a reviewer rejects a change for a
 - `index_sync` is add-only: it copies a pointer only when the source is newer (`lastActivityAt`, else mtime), skips any id with a `deleted_*` tombstone, and never deletes or symlinks.
 - Desktop is quit before any write (`osascript` quit, then `pkill` after 8 s, fail after 10 s more), and relaunched from the `EXIT` trap so an error midway still brings it back. `--no-relaunch` leaves it quit.
 - Never use Desktop's own Log out to change accounts; it may revoke the saved token server-side. `add` signs out locally by deleting the three keys and the cookie files instead.
-- `usage` is the one terms-gray-area feature: it decrypts saved tokens with the Keychain key and reads Anthropic's OAuth usage endpoint outside the app. It stays opt-in, read-only, run only when asked, never a daemon, never a trigger for an automatic switch. The bearer token goes to `curl` on stdin; the derived AES key is on the `openssl` command line only for the moment of each decrypt.
+- `usage` is the one terms-gray-area feature: it decrypts saved tokens with the Keychain key and reads Anthropic's OAuth usage endpoint outside the app. It stays opt-in, read-only, never a trigger for an automatic switch. The CLI runs it only when asked; the menu bar app polls `usage --json` only after the user turns usage on, at an interval of at least 5 minutes, one `security` call per run. The app's snapshot poll (`list --json`) reads `config.json` and `meta.json`, never the Keychain. Still rejected: any automatic switch; usage polling that is on by default or faster than 5 minutes; a launch agent or daemon separate from the user-visible app; reading the Keychain anywhere but inside `usage`. The bearer token goes to `curl` on stdin; the derived AES key is on the `openssl` command line only for the moment of each decrypt.
 - Profiles are per Mac: the Safe Storage key is in that Mac's login Keychain, so a copied profile won't decrypt elsewhere.
 
 ## Release

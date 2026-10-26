@@ -26,6 +26,15 @@ shellcheck --severity=warning "${shell_scripts[@]}"
 prettier --log-level warn --ignore-unknown --check "**/*.{js,cjs,ts,md,json,sh}" "bin/*" ".github/**/*.yml"
 # bin/claude-multipass against a fixture Desktop folder (never the real one)
 bash test/claude-multipass.sh > /dev/null
+# The menu bar app's core, a debug build. Under the Command Line Tools the
+# Swift Testing macro plugin has to be named by path.
+plugins="$(xcode-select -p)/usr/lib/swift/host/plugins/testing"
+swift_flags=()
+[[ -d $plugins ]] && swift_flags=(-Xswiftc -plugin-path -Xswiftc "$plugins")
+swift test --package-path app ${swift_flags[@]+"${swift_flags[@]}"} > /dev/null 2>&1 || {
+  echo "check: swift test failed; rerun it without the redirect to see why" >&2
+  exit 1
+}
 # the Claude Code hooks against sample payloads
 bash .claude/hooks/test-lint-edited.sh > /dev/null
 bash .claude/hooks/test-lint-bash-edits.sh > /dev/null

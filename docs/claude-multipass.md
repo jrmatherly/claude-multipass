@@ -67,7 +67,7 @@ Three script commands in `raycast/` wrap the tool for Raycast: **Claude Account*
 
 `usage --json` prints the same figures for scripts and the menu bar app: `{"profiles":[...]}` with one entry per account, either `{"name","fiveHour","sevenDay"}` (each window `{"utilization","resetsAt"}`, `resetsAt` in UTC ending in `Z`, a window left out when its utilization is null) or `{"name","error"}` with the same reason text the plain command prints. The unsaved live login appears as `(signed in)`. With nothing to report it prints `{"profiles":[]}`.
 
-This is the one part of the tool that uses a subscription token outside Anthropic's own apps. Third-party coverage says Anthropic's terms discourage that pattern; it is read-only and runs only when you ask for it, and the call is yours. Desktop's own usage ring and Claude Code's `/usage` still work after a switch without it.
+This is the one part of the tool that uses a subscription token outside Anthropic's own apps. Third-party coverage says Anthropic's terms discourage that pattern; it is read-only, the CLI runs it only when you ask for it, and the menu bar app polls it only after you turn usage on there (at least 5 minutes apart, one Keychain read per run). The call is yours. Desktop's own usage ring and Claude Code's `/usage` still work after a switch without it.
 
 ## Where things live
 
@@ -95,6 +95,7 @@ This is the one part of the tool that uses a subscription token outside Anthropi
 - Every write of `config.json` goes through a temp file and keeps the app's other keys byte for byte; every replaced login is backed up first.
 - `sync` never deletes; it honours `deleted_<id>` tombstones.
 - A failure after the app was quit still relaunches it.
+- The menu bar app polls `list --json` on a timer; that reads `config.json` and `meta.json`, never the Keychain. Usage polling is opt-in, through `usage --json`, with an interval of at least 5 minutes, one `security` call per run, and stops when the user turns it off. Still rejected: any automatic switch; usage polling that is on by default or faster than 5 minutes; a launch agent or daemon separate from the user-visible app; reading the Keychain anywhere but inside `usage`.
 - Refusals that `--force` lifts exit 3, so a caller can offer the override; other failures exit 1. A refused `save` is decided before Desktop quits.
 
 The self-check `test/claude-multipass.sh` runs in `pnpm check` against a fixture folder, with `pgrep`, `osascript`, `pkill`, `open`, `fzf`, `security` and `curl` stubbed on PATH, so it never touches the real app, Keychain or network.

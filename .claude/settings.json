@@ -30,7 +30,7 @@
             "type": "command",
             "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/commit-gate.sh",
             "args": [],
-            "timeout": 180,
+            "timeout": 600,
             "onFailure": "block",
             "statusMessage": "Running pnpm check before the commit"
           }

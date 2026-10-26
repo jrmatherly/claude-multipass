@@ -20,7 +20,7 @@ paths:
 - `signed_in` requires a non-empty `oauth:tokenCacheV2` string. An empty session list must not crash under bash 3.2 `set -u` (reproduced, fixed, in the self-check).
 - Profiles hold only encrypted tokens, cookie bytes and an account UUID, mode 0600 in a 0700 store. They are per Mac.
 - Never use Desktop's own Log out to change accounts; it may revoke the saved token server-side. `add` signs out locally by deleting the three keys and the cookie files.
-- The Keychain is read only for `usage`, through `/usr/bin/security` (so "Always Allow" persists), once per run. Never poll it.
+- The Keychain is read only for `usage`, through `/usr/bin/security` (so "Always Allow" persists), once per run. The menu bar app may call `usage --json` on a timer only when the user turned usage on, at most once per 5 minutes.
 - The bearer token reaches `curl` on stdin (`-K -`), never argv. The derived AES key is on the `openssl` command line for the moment of each decrypt, and that is the documented limit (`--help`, Cautions). Nothing prints a token.
 - Stray `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY` or `apiKeyHelper` in the environment silently override the subscription login in the CLI; the tool never sets them.
 - Do not add a per-account `CLAUDE_CONFIG_DIR`: it splits transcripts, and `--resume` searches only the current dir.
@@ -29,14 +29,14 @@ paths:
 
 Reported, not legal advice. The Consumer Terms (2025-10-08 revision) have no multi-account clause but forbid credential sharing and bypassing protective measures, and allow suspension without notice. The Usage Policy bars multiple accounts only to evade bans. Reported risk gradient: several paid accounts is low; manual switching is a gray area; automated rotation is riskier; sharing or reselling is a clear violation. Third-party coverage says subscription OAuth tokens used outside Anthropic's own apps are discouraged.
 
-So `usage` is the one feature in that gray area and stays opt-in (runs only when asked), read-only (one GET of the usage endpoint), never a daemon, never a trigger for an automatic switch. Everything else copies the app's own files as opaque bytes and decrypts nothing. Switching stays manual by construction; the Raycast switch command asks for confirmation.
+So `usage` is the one feature in that gray area and stays opt-in (the CLI runs it only when asked; the menu bar app polls it only after the user turns usage on, at an interval of at least 5 minutes), read-only (one GET of the usage endpoint per account per run), never a trigger for an automatic switch. The menu bar app polls `list --json` on a timer; that reads `config.json` and `meta.json`, never the Keychain. Usage polling is opt-in, through `usage --json`, with an interval of at least 5 minutes, one `security` call per run, and stops when the user turns it off. Everything else copies the app's own files as opaque bytes and decrypts nothing. Switching stays manual by construction; the Raycast switch command asks for confirmation.
 
 Chats, Projects and memory on claude.ai are server-side per account and never move; only Claude Code sessions carry over. Sign in with the email code, not Google, so the browser hand-back lands in the right window.
 
 ## What a reviewer rejects
 
-- Any daemon, launch agent, cron entry, menu bar loop or `--watch` mode.
-- Polling `security`, or reading the Keychain outside `usage`.
+- A launch agent, cron entry, daemon or `--watch` mode separate from the user-visible menu bar app. The app's own timers are allowed: the snapshot poll (`list --json`, no Keychain) and the opt-in usage poll.
+- Usage polling that is on by default or faster than 5 minutes; a `security` call outside `usage`; reading the Keychain anywhere but inside `usage`.
 - A token on a command line anywhere beyond the documented `openssl -K` moment, or a token in output or a log.
 - A sync that deletes, renames, symlinks, or writes while Desktop runs without `--force`.
 - A write to `config.json` without a `backup_login` first, or one that changes keys other than the three login keys.

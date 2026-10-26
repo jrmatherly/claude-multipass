@@ -11,3 +11,4 @@ CLAUDE.md
 private/
 logs/
 .superpowers/
+app/.build/

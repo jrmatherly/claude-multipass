@@ -252,7 +252,9 @@ ${bold}Cautions${reset}
   - usage decrypts the saved tokens with this Mac's Keychain key and reads
     Anthropic's OAuth usage endpoint with them, outside the app. Third-party
     coverage says Anthropic's terms discourage that pattern. It is read-only
-    and only runs when you ask for it. Whether to use it is your decision.
+    and only runs when you ask for it, or when you turn usage on in the menu
+    bar app (polled at least 5 minutes apart). Whether to use it is your
+    decision.
     The derived AES key is on the openssl command line for the moment of each
     decrypt (visible in ps to any local user while it runs).
   - Chats, Projects and memory on claude.ai stay with their account. Only
