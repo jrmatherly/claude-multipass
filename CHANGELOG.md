@@ -3,6 +3,7 @@
 ## 0.2.0 (unreleased)
 
 - `--version` prints the version.
+- Refusals that `--force` lifts (`save` over another account, `switch` from an unsaved login, `sync` while Desktop runs) exit 3; other failures exit 1. A refused `save` no longer quits and relaunches Desktop.
 
 ## 0.1.0 (2026-10-25)
 

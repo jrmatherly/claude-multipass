@@ -127,6 +127,11 @@ fail() {
   echo "${red}$*${reset}" >&2
   exit 1
 }
+# A refusal that --force lifts, so a caller can offer the override
+refuse() {
+  echo "${red}$*${reset}" >&2
+  exit 3
+}
 
 usage() {
   cat << EOF
@@ -205,7 +210,8 @@ ${bold}Options${reset}
                        instead of relaunching it.
   --force              save: replace a profile that holds a different account.
                        switch: proceed even though the current login was never
-                       saved. sync: run while Desktop is open.
+                       saved. sync: run while Desktop is open. A refusal
+                       exits 3.
   -h, --help           This page.
   --version            Print the version.
 
@@ -324,7 +330,7 @@ profile_save() {
   if [[ -f $dir/meta.json ]]; then
     saved=$(jq -r .account "$dir/meta.json")
     if [[ $saved != "$live" ]]; then
-      [[ -n $force ]] || fail "$name already holds account ${saved:0:8}, not the signed-in ${live:0:8}: pick another name, or pass --force to replace it"
+      [[ -n $force ]] || refuse "$name already holds account ${saved:0:8}, not the signed-in ${live:0:8}: pick another name, or pass --force to replace it"
       (umask 077 && mkdir -p "$backups")
       mv "$dir" "$backups/profile-$name-$(date +%Y%m%d-%H%M%S)-$$"
       echo "Moved the old $name profile into $backups"
@@ -599,7 +605,7 @@ migrate_store() {
 }
 
 main() {
-  local cmd=${1:-} names=() name='' relaunch=1 force='' arg active
+  local cmd=${1:-} names=() name='' relaunch=1 force='' arg active saved live
   [[ -n $cmd ]] || {
     if [[ -t 0 ]] && command -v fzf > /dev/null; then
       cmd=pick
@@ -659,7 +665,7 @@ main() {
       ;;
     sync)
       if desktop_running && [[ -z $force ]]; then
-        fail "Claude Desktop is running: quit it first, or pass --force"
+        refuse "Claude Desktop is running: quit it first, or pass --force"
       fi
       index_sync
       return 0
@@ -690,11 +696,19 @@ main() {
       profile_show "$name"
       return 0
       ;;
-    save) signed_in || fail "Claude Desktop is signed out: sign in first, then save" ;;
+    save)
+      signed_in || fail "Claude Desktop is signed out: sign in first, then save"
+      # Decided before the quit, so a refused save never bounces Desktop.
+      if [[ -f $store/$name/meta.json && -z $force ]]; then
+        saved=$(jq -r .account "$store/$name/meta.json")
+        live=$(live_account)
+        [[ $saved == "$live" ]] || refuse "$name already holds account ${saved:0:8}, not the signed-in ${live:0:8}: pick another name, or pass --force to replace it"
+      fi
+      ;;
     switch)
       require_profile "$name"
       if signed_in && [[ -z $(active_profile) && -z $force ]]; then
-        fail "The signed-in account isn't saved and would need its email code again: run save <name> first, or pass --force"
+        refuse "The signed-in account isn't saved and would need its email code again: run save <name> first, or pass --force"
       fi
       ;;
   esac

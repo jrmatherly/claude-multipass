@@ -91,6 +91,7 @@ This is the one part of the tool that uses a subscription token outside Anthropi
 - Every write of `config.json` goes through a temp file and keeps the app's other keys byte for byte; every replaced login is backed up first.
 - `sync` never deletes; it honours `deleted_<id>` tombstones.
 - A failure after the app was quit still relaunches it.
+- Refusals that `--force` lifts exit 3, so a caller can offer the override; other failures exit 1. A refused `save` is decided before Desktop quits.
 
 The self-check `test/claude-multipass.sh` runs in `pnpm check` against a fixture folder, with `pgrep`, `osascript`, `pkill`, `open`, `fzf`, `security` and `curl` stubbed on PATH, so it never touches the real app, Keychain or network.
 

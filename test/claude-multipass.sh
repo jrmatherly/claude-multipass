@@ -174,7 +174,7 @@ check "Raycast switch ends with a toast line" "Switched to beta" "$("$raycast/sw
 
 # sync refuses while Desktop runs (pgrep finds it)
 printf '#!/bin/sh\nexit 0\n' > "$tmp/bin/pgrep"
-check "sync refuses while Desktop runs" 1 "$(exit_code cda sync)"
+check "sync refuses while Desktop runs" 3 "$(exit_code cda sync)"
 check "sync --force runs anyway" 0 "$(exit_code cda sync --force)"
 printf '#!/bin/sh\nexit 1\n' > "$tmp/bin/pgrep"
 
@@ -205,14 +205,16 @@ cp -R "$b"/profile-home-* "$p/alpha"
 check "--force outside sync or switch fails" 1 "$(exit_code cda list --force)"
 # an unsaved login must not be switched away from silently
 printf '{"oauth:tokenCacheV2":"enc-Z","lastKnownAccountUuid":"zzzzzzzz-9999"}' > "$d/config.json"
-check "switch refuses to drop an unsaved login" 1 "$(exit_code cda switch alpha --no-relaunch)"
+check "switch refuses to drop an unsaved login" 3 "$(exit_code cda switch alpha --no-relaunch)"
 check "switch --force drops it anyway" 0 "$(exit_code cda switch alpha --no-relaunch --force)"
 check "forced switch restored alpha" aaaaaaaa-1111 "$(jq -r .lastKnownAccountUuid "$d/config.json")"
 check "no backups folder inside the profile store" "" "$(ls -d "$p/backups" 2> /dev/null || true)"
 
 # save refuses to overwrite a profile that holds another account
 printf '{"oauth:tokenCacheV2":"enc-Z","lastKnownAccountUuid":"zzzzzzzz-9999"}' > "$d/config.json"
-check "save over another account's profile fails" 1 "$(exit_code cda save beta --no-relaunch)"
+rm -f "$tmp/calls"
+check "save over another account's profile is refused" 3 "$(exit_code cda save beta)"
+check_true "a refused save does not quit or relaunch Desktop" test ! -e "$tmp/calls"
 check "the refused save left beta untouched" bbbbbbbb-2222 "$(jq -r .account "$p/beta/meta.json")"
 check "save --force replaces it" 0 "$(exit_code cda save beta --no-relaunch --force)"
 check "forced save moved the old profile to backups" 1 "$(find "$b" -maxdepth 1 -name 'profile-beta-*' | wc -l | tr -d ' ')"
