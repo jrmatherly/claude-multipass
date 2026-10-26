@@ -39,7 +39,7 @@ Claude Code transcripts live in `~/.claude/projects`, shared by every account, s
 | `pick` | The fzf picker (also a bare invocation on a terminal) |
 | `doctor` | Check the setup: config, tools, store modes, profile tokens, which profiles hold no CLI login. Exits 1 on any `fail:` line |
 
-`--no-relaunch` leaves Desktop quit; `--force` overrides the refusals named in `--help`. Quit any running `claude` terminal session before a switch: it is assumed to keep its old token and write it back on its next refresh (`switch` warns when one runs). A profile saved before the CLI login existed switches Desktop only until the account is signed in with `claude auth login` and saved again (the next `switch` away from it captures the login too).
+`--no-relaunch` leaves Desktop quit; `--force` overrides the refusals named in `--help`. Run `save`, `switch` and `add` from Terminal or the menu bar app, not from a terminal inside Desktop (the Code tab): the tool refuses there, since quitting Desktop would end that shell. Quit any running `claude` terminal session before a switch: it is assumed to keep its old token and write it back on its next refresh (`switch` warns when one runs). A profile saved before the CLI login existed switches Desktop only until the account is signed in with `claude auth login` and saved again (the next `switch` away from it captures the login too).
 
 ## Cautions
 

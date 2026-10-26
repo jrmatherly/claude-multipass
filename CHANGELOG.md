@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1 (unreleased)
+
+- `save`, `switch` and `add` refuse from a shell that Desktop owns (the Code tab's terminal). BSD `pgrep` hides its own ancestors, so 0.3.0 and earlier took Desktop for not running there and rewrote its login under the live app, which kept its own.
+
 ## 0.3.0 (2026-10-26)
 
 - `save` also captures the Claude Code CLI's terminal login (the Keychain item's tokens into a Keychain item of the tool's own, the `oauthAccount` identity into the profile's `cli.json`) when the CLI is signed in as the same account as Desktop, and `switch` restores it under the CLI's own locks, keeping the shared MCP keys. A CLI already on the target account is re-saved, never overwritten. The live CLI login is backed up beside the Desktop backup.
