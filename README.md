@@ -32,7 +32,7 @@ Claude Code transcripts live in `~/.claude/projects`, shared by every account, s
 
 | Command | What it does |
 | --- | --- |
-| `list`, `show <name>`, `current` | What is saved and which account is signed in |
+| `list`, `show <name>`, `current` | What is saved and which account is signed in. `list --json` prints one object for scripts and the menu bar app |
 | `save`, `add`, `switch`, `remove`, `rename` | Manage saved logins; `save`, `add` and `switch` quit and relaunch Desktop |
 | `sync` | Only the session-list merge (Desktop must be quit, or `--force`) |
 | `usage [name]` | 5-hour and weekly usage per saved account. Opt-in: it decrypts the saved token with the app's Keychain key and reads Anthropic's OAuth usage endpoint outside the app, which third-party coverage says Anthropic's terms discourage. Read-only, runs only when asked |

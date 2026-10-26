@@ -138,6 +138,15 @@ check "same-name switch repairs missing cookies" cookie-B "$(cat "$d/Cookies")"
 list=$(cda list)
 check_true "list marks beta active" grep -Eq '^\* beta +bbbbbbbb  2026-01-01T00:00:00Z  4 sessions$' <<< "$list"
 check_true "list leaves alpha unmarked" grep -Eq '^  alpha +aaaaaaaa  ' <<< "$list"
+out=$(cda list --json)
+check "list --json current" beta "$(jq -r .current <<< "$out")"
+check "list --json signedIn" true "$(jq -r .signedIn <<< "$out")"
+check "list --json desktopRunning" false "$(jq -r .desktopRunning <<< "$out")"
+check "list --json names in order" "alpha beta" "$(jq -r '[.profiles[].name] | join(" ")' <<< "$out")"
+check "list --json sessions is a number" number "$(jq -r '.profiles[1].sessions | type' <<< "$out")"
+check "list --json sessions" 4 "$(jq -r '.profiles[1].sessions' <<< "$out")"
+check "list --json version" "$pkg_version" "$(jq -r .version <<< "$out")"
+check "--json rejected elsewhere" 1 "$(exit_code cda current --json)"
 
 # show, the fzf picker (stub fzf picks the beta row) and the Raycast scripts
 check "show prints the profile and its sessions per org" "beta
@@ -205,6 +214,8 @@ cp -R "$b"/profile-home-* "$p/alpha"
 check "--force outside sync or switch fails" 1 "$(exit_code cda list --force)"
 # an unsaved login must not be switched away from silently
 printf '{"oauth:tokenCacheV2":"enc-Z","lastKnownAccountUuid":"zzzzzzzz-9999"}' > "$d/config.json"
+check "list --json current is null when not saved" null "$(cda list --json | jq -r .current)"
+check "list --json still signed in" true "$(cda list --json | jq -r .signedIn)"
 check "switch refuses to drop an unsaved login" 3 "$(exit_code cda switch alpha --no-relaunch)"
 check "switch --force drops it anyway" 0 "$(exit_code cda switch alpha --no-relaunch --force)"
 check "forced switch restored alpha" aaaaaaaa-1111 "$(jq -r .lastKnownAccountUuid "$d/config.json")"
@@ -296,7 +307,9 @@ check "Raycast usage command shows the active account's figures" "usagey        
 mkdir -p "$tmp/home/.config/dotfiles/claude-desktop-accounts/old" "$tmp/home/.config/dotfiles/claude-desktop-accounts-backups/login-1"
 printf '{"account":"aaaaaaaa-1111","savedAt":"2026-01-01T00:00:00Z"}' > "$tmp/home/.config/dotfiles/claude-desktop-accounts/old/meta.json"
 cp "$p/beta/config.json" "$tmp/home/.config/dotfiles/claude-desktop-accounts/old/config.json"
-check "first run moves the old store" "Moved the saved accounts from $tmp/home/.config/dotfiles/claude-desktop-accounts to $tmp/home/.config/claude-multipass/profiles" "$(env -u CLAUDE_MULTIPASS_DIR XDG_CONFIG_HOME="$tmp/home/.config" "$script" list | head -1)"
+out=$(env -u CLAUDE_MULTIPASS_DIR XDG_CONFIG_HOME="$tmp/home/.config" "$script" list --json 2> "$tmp/migrate-err")
+check "first run moves the old store" "Moved the saved accounts from $tmp/home/.config/dotfiles/claude-desktop-accounts to $tmp/home/.config/claude-multipass/profiles" "$(cat "$tmp/migrate-err")"
+check "first run list --json is clean JSON" old "$(jq -r '.profiles[0].name' <<< "$out")"
 check_true "old backups moved beside it" test -d "$tmp/home/.config/claude-multipass/backups/login-1" -a ! -e "$tmp/home/.config/dotfiles/claude-desktop-accounts"
 check "the moved store is private" 700 "$(stat -f %Lp "$tmp/home/.config/claude-multipass")"
 check "second run does not move again" "  old " "$(env -u CLAUDE_MULTIPASS_DIR XDG_CONFIG_HOME="$tmp/home/.config" "$script" list | head -1 | cut -c1-6)"

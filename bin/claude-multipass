@@ -50,6 +50,10 @@
 #
 # `claude-multipass --version`
 #
+# - List or usage as JSON, for scripts and the menu bar app:
+#
+# `claude-multipass list --json`
+#
 # - Leave Claude quit afterwards (save, switch, add):
 #
 # `claude-multipass switch {{name}} --no-relaunch`
@@ -167,7 +171,9 @@ ${bold}Commands${reset}
   list                 Prints every saved account on one line: name, the first
                        eight characters of its account id, when it was saved,
                        and how many Code sessions it has. A leading * marks the
-                       account Desktop is signed in as right now.
+                       account Desktop is signed in as right now. With --json,
+                       one object: version, signedIn, desktopRunning, current
+                       (null when the login has no name) and profiles.
   show <name>          Prints one saved account in detail, including its Code
                        session count per organization. The picker shows this
                        as its preview.
@@ -214,6 +220,8 @@ ${bold}Options${reset}
                        exits 3.
   -h, --help           This page.
   --version            Print the version.
+  --json               list, usage: print JSON instead of text, for scripts and
+                       the menu bar app.
 
 ${bold}Folders${reset}
   Profiles   $store/<name>/
@@ -535,6 +543,26 @@ list_profiles() {
     || echo "Signed in now: ${live:0:8} (not saved; run: claude-multipass save <name>)"
 }
 
+# One JSON object for the menu bar app; --slurpfile turns a file of bare
+# objects into an array, [] when it is empty
+list_json() {
+  local meta account tmpfile signed_in=false running=false
+  tmpfile=$(mktemp)
+  for meta in "$store"/*/meta.json; do
+    [[ -f $meta ]] || continue
+    account=$(jq -r .account "$meta")
+    jq -n --arg name "$(basename "$(dirname "$meta")")" --arg account "$account" \
+      --arg savedAt "$(jq -r .savedAt "$meta")" --argjson sessions "$(count_sessions "$sessions/$account")" \
+      '{name: $name, account: $account, savedAt: $savedAt, sessions: $sessions}' >> "$tmpfile"
+  done
+  signed_in && signed_in=true
+  desktop_running && running=true
+  jq -n --arg v "$version" --argjson signedIn "$signed_in" --argjson running "$running" \
+    --arg current "$(active_profile)" --slurpfile p "$tmpfile" \
+    '{version: $v, signedIn: $signedIn, desktopRunning: $running, current: (if $current == "" then null else $current end), profiles: $p}'
+  rm -f "$tmpfile"
+}
+
 require_profile() {
   [[ -f $store/$1/meta.json && -f $store/$1/config.json ]] \
     || fail "No saved account named $1 (see: claude-multipass list)"
@@ -601,11 +629,11 @@ migrate_store() {
   (umask 077 && mkdir -p "$root")
   mv "$legacy" "$store"
   [[ -d $legacy-backups && ! -e $backups ]] && mv "$legacy-backups" "$backups"
-  echo "Moved the saved accounts from $legacy to $store"
+  echo "Moved the saved accounts from $legacy to $store" >&2
 }
 
 main() {
-  local cmd=${1:-} names=() name='' relaunch=1 force='' arg active saved live
+  local cmd=${1:-} names=() name='' relaunch=1 force='' json='' arg active saved live
   [[ -n $cmd ]] || {
     if [[ -t 0 ]] && command -v fzf > /dev/null; then
       cmd=pick
@@ -619,12 +647,14 @@ main() {
     case $arg in
       --no-relaunch) relaunch= ;;
       --force) force=1 ;;
+      --json) json=1 ;;
       -h | --help) cmd=help ;;
       -*) fail "Unknown option: $arg" ;;
       *) names+=("$arg") ;;
     esac
   done
   [[ -z $force || $cmd == sync || $cmd == switch || $cmd == save ]] || fail "--force applies to sync, switch and save"
+  [[ -z $json || $cmd == list || $cmd == usage ]] || fail "--json applies to list and usage"
 
   case $cmd in
     --version)
@@ -660,7 +690,7 @@ main() {
 
   case $cmd in
     list)
-      list_profiles
+      if [[ -n $json ]]; then list_json; else list_profiles; fi
       return 0
       ;;
     sync)
