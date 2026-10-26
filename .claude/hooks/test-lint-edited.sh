@@ -12,8 +12,9 @@ tmp=hooktest-$$
 gated_bin=bin/hooktest-$$
 swift_bin=bin/hooktest-swift-$$
 gated_raycast=raycast/hooktest-$$.sh
+gated_scripts=scripts/hooktest-$$.sh
 mkdir -p "$tmp" private
-trap 'rm -rf "$root/$tmp" "$root/private/hooktest-$$.sh" "$root/$gated_bin" "$root/$swift_bin" "$root/$gated_raycast"' EXIT
+trap 'rm -rf "$root/$tmp" "$root/private/hooktest-$$.sh" "$root/$gated_bin" "$root/$swift_bin" "$root/$gated_raycast" "$root/$gated_scripts"' EXIT
 
 fail() {
   echo "FAIL: $1" >&2
@@ -62,8 +63,8 @@ grep -q '^- b$' "$tmp/e.md" || fail "serena relative_path: not formatted"
 printf 'cat $(ls)\n' > "$tmp/loose.sh"
 run "$root/$tmp/loose.sh" || fail "ungated .sh: should not be shellchecked"
 
-# 8. A bash script in bin/ and a raycast/*.sh are shellchecked like the gate does
-for f in "$gated_bin" "$gated_raycast"; do
+# 8. A bash script in bin/, a raycast/*.sh and a scripts/*.sh are shellchecked like the gate does
+for f in "$gated_bin" "$gated_raycast" "$gated_scripts"; do
   printf '#!/bin/bash\ncat $(ls)\n' > "$f"
   set +e
   run "$root/$f"

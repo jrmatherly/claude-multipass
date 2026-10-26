@@ -19,6 +19,7 @@ shell_scripts=(
   test/*.sh
   .claude/hooks/*.sh
   raycast/*.sh
+  scripts/*.sh
 )
 
 bash -n "${shell_scripts[@]}"

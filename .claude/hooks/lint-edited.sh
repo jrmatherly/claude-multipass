@@ -49,10 +49,10 @@ case $rel in
 esac
 
 # bash -n + shellcheck: test/check.sh's script list (test/*.sh,
-# .claude/hooks/*.sh, raycast/*.sh) plus top-level bin/ files with a bash/sh
+# .claude/hooks/*.sh, raycast/*.sh, scripts/*.sh) plus top-level bin/ files with a bash/sh
 # shebang, which covers bin/claude-multipass
 gated=false
-if [[ $rel =~ ^(test|\.claude/hooks|raycast)/[^/]+\.sh$ ]]; then
+if [[ $rel =~ ^(test|\.claude/hooks|raycast|scripts)/[^/]+\.sh$ ]]; then
   gated=true
 elif [[ $rel =~ ^bin/[^/]+$ ]] \
   && head -n 1 "$rel" | grep -Eq '^#!(/bin/(ba)?sh|/usr/bin/env (ba)?sh)$'; then
