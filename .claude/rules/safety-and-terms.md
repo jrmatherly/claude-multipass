@@ -20,7 +20,7 @@ paths:
 - `signed_in` requires a non-empty `oauth:tokenCacheV2` string. An empty session list must not crash under bash 3.2 `set -u` (reproduced, fixed, in the self-check).
 - Profiles hold only encrypted tokens, cookie bytes and an account UUID, mode 0600 in a 0700 store. They are per Mac.
 - Never use Desktop's own Log out to change accounts; it may revoke the saved token server-side. `add` signs out locally by deleting the three keys and the cookie files.
-- The Keychain is read only for `usage`, through `/usr/bin/security` (so "Always Allow" persists), once per run. The menu bar app may call `usage --json` on a timer only when the user turned usage on, at most once per 5 minutes.
+- The Keychain is read only for `usage`, through `security` on PATH (`/usr/bin/security` on a stock Mac, so "Always Allow" persists; the self-check stubs it on PATH), once per run. The menu bar app may call `usage --json` on a timer only when the user turned usage on, at most once per 5 minutes.
 - The bearer token reaches `curl` on stdin (`-K -`), never argv. The derived AES key is on the `openssl` command line for the moment of each decrypt, and that is the documented limit (`--help`, Cautions). Nothing prints a token.
 - Stray `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY` or `apiKeyHelper` in the environment silently override the subscription login in the CLI; the tool never sets them.
 - Do not add a per-account `CLAUDE_CONFIG_DIR`: it splits transcripts, and `--resume` searches only the current dir.

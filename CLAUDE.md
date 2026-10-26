@@ -4,7 +4,7 @@ Guidance for Claude Code in this repository.
 
 ## Overview
 
-`bin/claude-multipass` switches the Claude Desktop app between saved claude.ai accounts on one Mac without an email code, and keeps every saved account's Claude Code sessions listed in the Code tab after a switch. One Mac, several accounts (personal, work, a second plan). macOS only (`osascript`, `open`, `security`, Application Support paths). Runs on the system `/bin/bash` 3.2 and needs `jq`. `fzf` is optional (the picker). `usage` also needs `curl`, the system `python3` and `openssl`.
+`bin/claude-multipass` switches the Claude Desktop app between saved claude.ai accounts on one Mac without an email code, and keeps every saved account's Claude Code sessions listed in the Code tab after a switch. `app/` is Claude Multipass, a menu bar app over the same script (it never touches Desktop's files itself), shipped as a notarized DMG through the `claude-multipass-app` cask. One Mac, several accounts (personal, work, a second plan). macOS only (`osascript`, `open`, `security`, Application Support paths). Runs on the system `/bin/bash` 3.2 and needs `jq`. `fzf` is optional (the picker). `usage` also needs `curl`, the system `python3` and `openssl`.
 
 Three Raycast script commands in `raycast/` call the tool by name. `bin/claude-multipass --help` is the command reference; `docs/claude-multipass.md` explains the mechanism for users; `docs/research.md` is the scrubbed research the tool was built from.
 
@@ -27,7 +27,7 @@ app/                     the menu bar app, a Swift package: Sources/MultipassCor
 scripts/                 build-app.sh (swift build, bundle, sign, optional DMG), sign-mac-app.sh (copied from ai-kb)
 docs/                    claude-multipass.md (how it works, for users), research.md (scrubbed research digest)
 .claude/                 settings.json (permissions, hooks), hooks/ (lint and commit gate with self-checks), rules/, skills/, agents/
-.github/workflows/       check.yml
+.github/workflows/       check.yml (pnpm check on PRs and main), release.yml (on v* tags: build, sign, notarize, upload the DMG)
 private/                 git-ignored research and notes, never published
 ```
 
@@ -44,7 +44,7 @@ The verified Desktop and CLI internals, with evidence labels, are in `.claude/ru
 ## Conventions
 
 - Shell style, as in the script: `#!/bin/bash`, `set -euo pipefail`, inline `tput` helpers (`info`, `warning`, `fail`), no sourced library. The header comment block is the tldr page (one `- description:` line and a backticked command per entry, then `---` and the mechanism notes), so keep it accurate when behaviour changes. Comments explain the non-obvious why (a macOS quirk, a bash 3.2 limit, the app's file format), not what the code does.
-- Prettier with `prettier-plugin-sh` (`prettier.config.cjs`: `singleQuote`, `semi: false`; Markdown `printWidth: 70`, `proseWrap: never`). ShellCheck at `--severity=warning` with `check-unassigned-uppercase` (`.shellcheckrc`). `.prettierignore` skips `CLAUDE.md`, `.serena/`, `private/`, `.remember/`, `logs/` and `.claude/settings.local.json`; don't hand-format them.
+- Prettier with `prettier-plugin-sh` (`prettier.config.cjs`: `singleQuote`, `semi: false`; Markdown `printWidth: 70`, `proseWrap: never`). ShellCheck at `--severity=warning` with `check-unassigned-uppercase` (`.shellcheckrc`). `.prettierignore` skips `CLAUDE.md`, `.serena/`, `private/`, `.remember/`, `logs/`, `.claude/settings.local.json`, `.superpowers/` and `app/.build/`; don't hand-format them.
 - Prose, in docs, comments and replies: no em-dashes, short declarative sentences, sentence-case headings, straight quotes, facts and paths over adjectives.
 - Commit subjects are short, imperative, sentence case, with no conventional-commit prefix.
 - Docs mirror behaviour: a change to what the script does edits `README.md` or `docs/` in the same commit. The commit-gate hook (`.claude/hooks/commit-gate.sh`) runs `pnpm check` before every `git commit` and reminds about this when `bin/claude-multipass` changed without a README or docs change.
@@ -64,7 +64,7 @@ Keep these when changing the script. The rules a reviewer rejects a change for a
 
 ## Release
 
-`git tag -a vX.Y.Z` after updating `CHANGELOG.md` and `package.json`, then `git push --follow-tags`. The Homebrew formula lives in `github.com/jrmatherly/homebrew-tap` as `Formula/claude-multipass.rb` and needs the new tag's tarball `url` and `sha256`. The exact steps are in `.claude/skills/release/SKILL.md`.
+`git tag -a vX.Y.Z` after updating `CHANGELOG.md`, `version=` in `bin/claude-multipass` and `package.json` (the gate fails when the two differ), then `git push --follow-tags`; the tag runs `release.yml`, which publishes the DMG. The Homebrew formula lives in `github.com/jrmatherly/homebrew-tap` as `Formula/claude-multipass.rb` and needs the new tag's tarball `url` and `sha256`; the cask `Casks/claude-multipass-app.rb` then needs the new `version` and the DMG's `sha256` from the release asset. The exact steps are in `.claude/skills/release/SKILL.md`.
 
 ## Path-scoped rules
 

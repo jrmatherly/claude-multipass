@@ -2,7 +2,7 @@
 
 Switch the Claude Desktop app on macOS between several claude.ai accounts without typing an email code each time, and keep every account's Claude Code sessions listed in the Code tab after a switch.
 
-It is for one Mac with more than one account (personal, work, a second plan): when one hits its 5-hour or weekly limit, switch to the other and carry on in the same Code session.
+It is for one Mac with more than one account (personal, work, a second plan): when one hits its 5-hour or weekly limit, switch to the other and carry on. The Code tab lists the sessions of every saved account after a switch; resuming a session under a different account than the one that started it has not been tested yet.
 
 ```sh
 claude-multipass save personal   # once: the account Desktop is signed in as
@@ -72,6 +72,6 @@ Usage in the menu bar (5-hour and weekly bars and reset countdowns) is off by de
 
 ## Development
 
-`pnpm check` is the gate: `bash -n`, ShellCheck, Prettier, the fixture self-check (`test/claude-multipass.sh`, which stubs the app, Keychain and network and never touches the real Desktop folder) and the Claude Code hook self-checks. CI runs it on macOS for every pull request and push to `main`.
+`pnpm check` is the gate: `bash -n`, ShellCheck, Prettier, the fixture self-check (`test/claude-multipass.sh`, which stubs the app, Keychain and network and never touches the real Desktop folder), the Claude Code hook self-checks, and the menu bar app's `swift test` (which needs Xcode, not only the Command Line Tools, for the SwiftUI macro plugin). CI runs it on macOS for every pull request and push to `main`.
 
 The mechanism follows [SnlperStripes/claude-account-switcher](https://github.com/SnlperStripes/claude-account-switcher) (Desktop login swap and session-list sync) and the token scheme shared by [realiti4/claude-swap](https://github.com/realiti4/claude-swap) and [XueshiQiao/CCSwitcher](https://github.com/XueshiQiao/CCSwitcher). MIT licence.

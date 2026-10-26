@@ -14,13 +14,13 @@ Helpers:
 
 - `check <name> <expected> <actual>`: string equality, so pass the actual value as `"$(...)"`.
 - `check_true <name> <command...>`: the command's exit status.
-- `exit_code <command...>`: prints the status, output discarded, for `check "..." 1 "$(exit_code cda sync)"`.
+- `exit_code <command...>`: prints the status, output discarded, for `check "..." 3 "$(exit_code cda sync)"` (a refusal exits 3).
 - `cda`: runs the script under test.
 
 Isolation, so no case can touch the real Desktop:
 
 - `CLAUDE_DESKTOP_DIR` and `CLAUDE_MULTIPASS_DIR` point into the temp dir. The script reads both, and `migrate_store` never runs when `CLAUDE_MULTIPASS_DIR` is set.
-- Stubs on PATH: `pgrep` exits 1 (Desktop "not running", so the quit is a no-op) or 0 for the refusal cases; `osascript`, `pkill` and `open` append their arguments to `$tmp/calls` (so "relaunched" is `open -a Claude` in that file and "not launched" is the file missing); `fzf` is rewritten per case (pick a row, exit 130 for esc); `security` prints a fixture password; `curl` records its arguments and stdin to `$tmp/curl-args` and prints a fixture body plus an HTTP code. No app is quit or launched, no Keychain or network is touched.
+- Stubs on PATH: `pgrep` exits 1 (Desktop "not running", so the quit is a no-op) or 0 for the refusal cases; `osascript`, `pkill` and `open` append their arguments to `$tmp/calls` (so "relaunched" is `open -a Claude` in that file and "not launched" is the file missing); `fzf` is rewritten per case (pick a row, exit 130 for esc); `security` prints a fixture password and logs `security <args>` to `$tmp/calls` (the `doctor` case asserts it is never called); `curl` records its arguments and stdin to `$tmp/curl-args` and prints a fixture body plus an HTTP code. No app is quit or launched, no Keychain or network is touched.
 - Fixture layout: `$d` is the Desktop folder with a tab-indented `config.json` carrying non-login keys (`theme`, `windowBounds`, a UTF-8 string) that must survive byte-identical; `$p/<name>/` profiles; `$b/` backups; `$s/<account>/<org>/local_*.json` pointers with `lastActivityAt`, a `deleted_*` tombstone and an mtime-only pair for the fallback.
 - The `usage` case encrypts a fixture token cache the way the app does (`v10` + AES-128-CBC with the PBKDF2 key of the stub password, IV 16 spaces, base64) and asserts the token never appears in `curl`'s argv or in the output.
 - The migration case runs with `CLAUDE_MULTIPASS_DIR` unset and `XDG_CONFIG_HOME` pointed at a temp home, not `HOME`: tools on PATH (jq, fzf, python3) read their own config from `HOME`, and changing it would change their behaviour mid-test.
