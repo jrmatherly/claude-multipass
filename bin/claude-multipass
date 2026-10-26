@@ -199,7 +199,8 @@ ${bold}Commands${reset}
                        and how many Code sessions it has. A leading * marks the
                        account Desktop is signed in as right now. With --json,
                        one object: version, signedIn, desktopRunning, current
-                       (null when the login has no name) and profiles.
+                       (null when the login has no name) and profiles (name,
+                       account, savedAt, sessions, cliSaved).
   show <name>          Prints one saved account in detail, including its Code
                        session count per organization. The picker shows this
                        as its preview.
@@ -859,13 +860,16 @@ list_profiles() {
 # One JSON object for the menu bar app; [inputs] gathers the bare objects
 # into an array, [] when there are none
 list_json() {
-  local meta account profiles='' signed_in=false running=false
+  local meta account profiles='' signed_in=false running=false cli_saved
   for meta in "$store"/*/meta.json; do
     [[ -f $meta ]] || continue
     account=$(jq -r .account "$meta")
+    cli_saved=false
+    [[ ! -f $(dirname "$meta")/cli.json ]] || cli_saved=true
     profiles+=$(jq -n --arg name "$(basename "$(dirname "$meta")")" --arg account "$account" \
       --arg savedAt "$(jq -r .savedAt "$meta")" --argjson sessions "$(count_sessions "$sessions/$account")" \
-      '{name: $name, account: $account, savedAt: $savedAt, sessions: $sessions}')
+      --argjson cliSaved "$cli_saved" \
+      '{name: $name, account: $account, savedAt: $savedAt, sessions: $sessions, cliSaved: $cliSaved}')
   done
   signed_in && signed_in=true
   desktop_running && running=true
@@ -906,6 +910,7 @@ profile_show() {
   echo "$1"
   echo "account ${account:0:8}"
   echo "saved at $(jq -r .savedAt "$store/$1/meta.json")"
+  if [[ -f $store/$1/cli.json ]]; then echo "CLI login: saved"; else echo "CLI login: not saved"; fi
   for org in "$sessions/$account"/*/; do
     [[ -d $org ]] || continue
     n=$(count_sessions "$org")

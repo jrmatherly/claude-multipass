@@ -33,8 +33,8 @@ Desktop quits, relaunches signed in as that account, and the Code tab lists both
 
 | Command | What it does |
 | --- | --- |
-| `list` | Saved accounts with a short account id, save time and Code-session count; `*` marks the signed-in one. `--json` prints one object: `version`, `signedIn`, `desktopRunning`, `current` (`null` when the login has no name) and `profiles` (`name`, `account`, `savedAt`, `sessions`) |
-| `show <name>` | One account, with its session count per organization folder |
+| `list` | Saved accounts with a short account id, save time and Code-session count; `*` marks the signed-in one. `--json` prints one object: `version`, `signedIn`, `desktopRunning`, `current` (`null` when the login has no name) and `profiles` (`name`, `account`, `savedAt`, `sessions`, `cliSaved`) |
+| `show <name>` | One account, whether it holds a CLI login, and its session count per organization folder |
 | `save <name>` | Snapshot the current login as `<name>`: Desktop's, and the CLI's when `claude` is signed in as the same account (a warning says when it is not, and the profile's earlier CLI login stays). Refuses a name that holds a different account; `--force` replaces it and keeps the old profile in the backups folder |
 | `add <name>` | Re-save the current login, clear it locally, relaunch at the sign-in screen. Then sign in, run `claude auth login` for the terminal, and run `save <name>`. `add` leaves the CLI's login alone |
 | `switch <name>` | Quit Desktop, re-save the outgoing login, swap in `<name>`, merge the session lists, relaunch. The CLI login moves too when the profile holds one (the live CLI item and `oauthAccount` are backed up first; see below for what a warning means). Refuses to drop a login you never saved; `--force` drops it |

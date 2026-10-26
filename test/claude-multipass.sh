@@ -338,13 +338,17 @@ check "list --json names in order" "alpha beta legacy" "$(jq -r '[.profiles[].na
 check "list --json sessions is a number" number "$(jq -r '.profiles[1].sessions | type' <<< "$out")"
 check "list --json sessions" 4 "$(jq -r '.profiles[1].sessions' <<< "$out")"
 check "list --json version" "$pkg_version" "$(jq -r .version <<< "$out")"
+check "list --json cliSaved true" true "$(jq -r '.profiles[] | select(.name == "beta") | .cliSaved' <<< "$out")"
+check "list --json cliSaved false for a legacy profile" false "$(jq -r '.profiles[] | select(.name == "legacy") | .cliSaved' <<< "$out")"
 check "--json rejected elsewhere" 1 "$(exit_code cda current --json)"
 
 # show, the fzf picker (stub fzf picks the beta row) and the Raycast scripts
 check "show prints the profile and its sessions per org" "beta
 account bbbbbbbb
 saved at 2026-01-01T00:00:00Z
+CLI login: saved
 org org-b: 4 sessions" "$(cda show beta)"
+check_true "show says when no CLI login is saved" grep -q '^CLI login: not saved' <<< "$(cda show legacy)"
 check "show of an unknown name fails" 1 "$(exit_code cda show nope)"
 printf '#!/bin/sh\necho "fzf $*" > "%s/fzf-args"\ntee "%s/fzf-in" | grep "^beta "\n' "$tmp" "$tmp" > "$tmp/bin/fzf"
 chmod +x "$tmp/bin/fzf"
