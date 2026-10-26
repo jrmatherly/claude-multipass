@@ -15,10 +15,20 @@
       "Bash(claude-multipass add *)",
       "Bash(claude-multipass save *)",
       "Bash(claude-multipass remove *)",
+      "Bash(claude-multipass sync *)",
+      "Bash(claude-multipass usage *)",
       "Bash(bin/claude-multipass switch *)",
       "Bash(bin/claude-multipass add *)",
       "Bash(bin/claude-multipass save *)",
-      "Bash(bin/claude-multipass remove *)"
+      "Bash(bin/claude-multipass remove *)",
+      "Bash(bin/claude-multipass sync *)",
+      "Bash(bin/claude-multipass usage *)",
+      "Bash(./bin/claude-multipass switch *)",
+      "Bash(./bin/claude-multipass add *)",
+      "Bash(./bin/claude-multipass save *)",
+      "Bash(./bin/claude-multipass remove *)",
+      "Bash(./bin/claude-multipass sync *)",
+      "Bash(./bin/claude-multipass usage *)"
     ]
   },
   "hooks": {

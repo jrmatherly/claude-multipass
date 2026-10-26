@@ -41,7 +41,7 @@ MACOS_SIGN_ENTITLEMENTS="$PWD/app/ClaudeMultipass.entitlements" bash scripts/sig
 echo "build-app: $app ($version)"
 
 [[ -n $dmg ]] || exit 0
-out="dist/claude-multipass-app_${version}_arm64.dmg"
+out="dist/claude-multipass-app_${version}_$(uname -m).dmg"
 staging=$(mktemp -d)
 trap 'rm -rf "$staging"' EXIT
 cp -R "$app" "$staging/"

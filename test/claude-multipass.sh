@@ -245,6 +245,7 @@ check "sync with no pointers says so" "No Code tab sessions to sync" "$(cda sync
 
 # list with nothing saved
 check "list with no profiles explains" "No saved accounts yet: run claude-multipass save <name> for the signed-in one, add <name> for another" "$(CLAUDE_MULTIPASS_DIR="$tmp/empty" cda list)"
+check "list --json with no profiles is an empty array" "[]" "$(CLAUDE_MULTIPASS_DIR="$tmp/empty" cda list --json | jq -c .profiles)"
 
 # backups prune to the newest ten
 for i in $(seq 1 12); do mkdir -p "$b/login-2020010100000$i-1"; done
@@ -350,5 +351,10 @@ check_true "old backups moved beside it" test -d "$tmp/home/.config/claude-multi
 check "the moved store is private" 700 "$(stat -f %Lp "$tmp/home/.config/claude-multipass")"
 check "second run does not move again" "  old " "$(env -u CLAUDE_MULTIPASS_DIR XDG_CONFIG_HOME="$tmp/home/.config" "$script" list | head -1 | cut -c1-6)"
 check "an explicit store never migrates" "No saved accounts yet: run claude-multipass save <name> for the signed-in one, add <name> for another" "$(CLAUDE_MULTIPASS_DIR="$tmp/empty2" XDG_CONFIG_HOME="$tmp/home/.config" cda list | head -1)"
+mkdir -p "$tmp/home2/.config/dotfiles/claude-desktop-accounts/old" "$tmp/home2/.config/dotfiles/claude-desktop-accounts-backups" "$tmp/home2/.config/claude-multipass/backups"
+cp "$tmp/home/.config/claude-multipass/profiles/old/"* "$tmp/home2/.config/dotfiles/claude-desktop-accounts/old/"
+env -u CLAUDE_MULTIPASS_DIR XDG_CONFIG_HOME="$tmp/home2/.config" "$script" list > /dev/null 2> "$tmp/migrate-err2"
+check_true "migration warns when the new backups folder already exists" grep -q "Left $tmp/home2/.config/dotfiles/claude-desktop-accounts-backups in place" "$tmp/migrate-err2"
+check_true "and leaves the legacy backups where they were" test -d "$tmp/home2/.config/dotfiles/claude-desktop-accounts-backups"
 
 echo "All claude-multipass checks passed"

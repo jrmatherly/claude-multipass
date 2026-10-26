@@ -121,7 +121,8 @@ private final class Exit: @unchecked Sendable {
   private let lock = NSLock()
   private var status: Int32?
   private var waiter: CheckedContinuation<Int32, Never>?
-  private(set) var timedOut = false
+  private var didTimeOut = false
+  var timedOut: Bool { lock.withLock { didTimeOut } }
 
   func finish(status: Int32) {
     lock.lock()
@@ -133,9 +134,7 @@ private final class Exit: @unchecked Sendable {
   }
 
   func markTimedOut() {
-    lock.lock()
-    timedOut = true
-    lock.unlock()
+    lock.withLock { didTimeOut = true }
   }
 
   func wait() async -> Int32 {

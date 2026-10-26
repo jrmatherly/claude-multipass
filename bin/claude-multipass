@@ -82,9 +82,12 @@
 # beside it keeps the login (config.json and cookies) each switch or add
 # replaced, newest ten, plus any profile `save --force` replaced. A store
 # left by the tool's earlier life in a dotfiles repo
-# (~/.config/dotfiles/claude-desktop-accounts, plus -backups) is moved into
-# place once, on the first run that finds it and no new store. Never use the app's own Log out to change accounts: it may
-# revoke the saved token server-side. Use `add`. Desktop folder: ${CLAUDE_DESKTOP_DIR:-~/Library/Application Support/Claude}.
+# (~/.config/dotfiles/claude-desktop-accounts) is moved into place once, on
+# the first run that finds it and no new store; its -backups sibling moves
+# too unless backups/ already exists, in which case the run warns.
+# Never use the app's own Log out to change accounts: it may revoke the
+# saved token server-side. Use `add`.
+# Desktop folder: ${CLAUDE_DESKTOP_DIR:-~/Library/Application Support/Claude}.
 #
 # Any number of accounts, any Mac: nothing here names an account or a
 # machine. Profiles are per Mac, though: the app encrypts the login with a
@@ -653,24 +656,22 @@ list_profiles() {
     || echo "Signed in now: ${live:0:8} (not saved; run: claude-multipass save <name>)"
 }
 
-# One JSON object for the menu bar app; --slurpfile turns a file of bare
-# objects into an array, [] when it is empty
+# One JSON object for the menu bar app; [inputs] gathers the bare objects
+# into an array, [] when there are none
 list_json() {
-  local meta account tmpfile signed_in=false running=false
-  tmpfile=$(mktemp)
+  local meta account profiles='' signed_in=false running=false
   for meta in "$store"/*/meta.json; do
     [[ -f $meta ]] || continue
     account=$(jq -r .account "$meta")
-    jq -n --arg name "$(basename "$(dirname "$meta")")" --arg account "$account" \
+    profiles+=$(jq -n --arg name "$(basename "$(dirname "$meta")")" --arg account "$account" \
       --arg savedAt "$(jq -r .savedAt "$meta")" --argjson sessions "$(count_sessions "$sessions/$account")" \
-      '{name: $name, account: $account, savedAt: $savedAt, sessions: $sessions}' >> "$tmpfile"
+      '{name: $name, account: $account, savedAt: $savedAt, sessions: $sessions}')
   done
   signed_in && signed_in=true
   desktop_running && running=true
   jq -n --arg v "$version" --argjson signedIn "$signed_in" --argjson running "$running" \
-    --arg current "$(active_profile)" --slurpfile p "$tmpfile" \
-    '{version: $v, signedIn: $signedIn, desktopRunning: $running, current: (if $current == "" then null else $current end), profiles: $p}'
-  rm -f "$tmpfile"
+    --arg current "$(active_profile)" \
+    '{version: $v, signedIn: $signedIn, desktopRunning: $running, current: (if $current == "" then null else $current end), profiles: [inputs]}' <<< "$profiles"
 }
 
 require_profile() {
@@ -738,8 +739,14 @@ migrate_store() {
   [[ -z ${CLAUDE_MULTIPASS_DIR:-} && ! -e $store && -d $legacy ]] || return 0
   (umask 077 && mkdir -p "$root")
   mv "$legacy" "$store"
-  [[ -d $legacy-backups && ! -e $backups ]] && mv "$legacy-backups" "$backups"
   echo "Moved the saved accounts from $legacy to $store" >&2
+  if [[ -d $legacy-backups ]]; then
+    if [[ -e $backups ]]; then
+      warning "Left $legacy-backups in place: $backups already exists"
+    else
+      mv "$legacy-backups" "$backups"
+    fi
+  fi
 }
 
 main() {
