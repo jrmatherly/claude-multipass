@@ -18,7 +18,7 @@ claude-multipass                 # or pick one in fzf
 brew install jrmatherly/tap/claude-multipass
 ```
 
-Needs `jq` (installed with it); `fzf` for the picker; the system `python3`, `openssl` and `curl` for the opt-in `usage` command. Or clone the repo and put `bin/claude-multipass` on your PATH.
+Needs `jq` (installed with it) and the Command Line Tools (`xcode-select --install`; their `/usr/bin/python3` reads and writes the CLI login's Keychain items on every `save` and `switch`, and the first run may ask once to let `python3` use the item: click Always Allow, which grants it to the system `python3` as a whole); `fzf` for the picker; `openssl` and `curl` for the opt-in `usage` command. Or clone the repo and put `bin/claude-multipass` on your PATH.
 
 ## How it works
 

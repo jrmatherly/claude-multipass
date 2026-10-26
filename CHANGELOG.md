@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.2 (unreleased)
+
+- The CLI login now moves whatever its size. 0.3.0 wrote Keychain items through `security -i`, which holds at most 4019 bytes of a line, and a real item with MCP logins is about 15 KB, so a switch on a Mac with MCP logins said `too large for security -i; switched Desktop only`. Items are read and written through the Security framework from the system `python3`, the value on stdin, so the Command Line Tools are now required and `doctor` checks for them. A Keychain failure names its OSStatus and what to do (a declined prompt, no prompt possible over SSH).
+
 ## 0.3.1 (2026-10-26)
 
 - `save`, `switch` and `add` refuse from a shell that Desktop owns (the Code tab's terminal). BSD `pgrep` hides its own ancestors, so 0.3.0 and earlier took Desktop for not running there and rewrote its login under the live app, which kept its own.
