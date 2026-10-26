@@ -35,10 +35,14 @@ swiftui_plugin=Platforms/MacOSX.platform/Developer/usr/lib/swift/host/plugins/li
 if [[ -z ${DEVELOPER_DIR:-} && ! -e "$(xcode-select -p)/$swiftui_plugin" && -e /Applications/Xcode.app/Contents/Developer/$swiftui_plugin ]]; then
   export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 fi
-swift test --package-path app > /dev/null 2>&1 || {
-  echo "check: swift test failed; rerun it without the redirect to see why (the app needs Xcode, not only the Command Line Tools)" >&2
+swift_log=$(mktemp)
+swift test --package-path app > "$swift_log" 2>&1 || {
+  grep -vE 'ld: warning|^\s*$' "$swift_log" | tail -n 60 >&2
+  echo "check: swift test failed (the app needs Xcode, not only the Command Line Tools; the last lines of its output are above)" >&2
+  rm -f "$swift_log"
   exit 1
 }
+rm -f "$swift_log"
 # the Claude Code hooks against sample payloads
 bash .claude/hooks/test-lint-edited.sh > /dev/null
 bash .claude/hooks/test-lint-bash-edits.sh > /dev/null
