@@ -83,10 +83,10 @@
 # oauthAccount in ~/.claude.json; save copies the tokens into a Keychain item
 # of the tool's own (service claude-multipass, account <name>) and the identity
 # into cli.json, when the CLI is signed in as the same account as Desktop. The
-# token goes to security as hex on stdin, never on a command line. The backups/ folder
-# beside it keeps the login (config.json and cookies) each switch or add
-# replaced, newest ten, plus any profile `save --force` replaced. A store
-# left by the tool's earlier life in a dotfiles repo
+# token goes to security as hex on stdin, never on a command line.
+# The backups/ folder beside it keeps the login (config.json and cookies) each
+# switch or add replaced, newest ten, plus any profile `save --force` replaced.
+# A store left by the tool's earlier life in a dotfiles repo
 # (~/.config/dotfiles/claude-desktop-accounts) is moved into place once, on
 # the first run that finds it and no new store; its -backups sibling moves
 # too unless backups/ already exists, in which case the run warns.
@@ -142,8 +142,8 @@ cli_service='Claude Code-credentials'
 cli_account=${USER:-$(id -un)}
 mp_service=claude-multipass
 # security -i keeps at most 4019 bytes of a line and corrupts the rest
-# (measured), so the hex payload stays under 3800: 1900 bytes of JSON.
-keychain_payload_limit=1900
+# (measured), so the whole line stays under 3900: about 1900 bytes of JSON.
+keychain_line_limit=3900
 
 bold=$(tput bold 2> /dev/null || true)
 yellow=$(tput setaf 3 2> /dev/null || true)
@@ -307,22 +307,21 @@ jq_write() {
   mv "$dest.tmp" "$dest"
 }
 
-# Keychain items go through security on PATH; 44 means the item is absent.
+# security exits 44 when the item is absent.
 keychain_get() { security find-generic-password -a "$2" -s "$1" -w 2> /dev/null; }
 
 # The value (stdin) never touches argv: it goes as hex on one line to
 # security -i, whose own quoting rules reject the shell's '\'' escape while
 # hex round-trips any byte. Returns 2 when the value would overflow the line.
 keychain_put() {
-  local v
-  v=$(cat)
-  if (($(printf %s "$v" | LC_ALL=C wc -c) > keychain_payload_limit)); then
+  local line
+  line=$(printf 'add-generic-password -U -a "%s" -s "%s" -X %s' "$2" "$1" "$(xxd -p | tr -d '\n')")
+  if (($(printf %s "$line" | LC_ALL=C wc -c) > keychain_line_limit)); then
     warning "the CLI login is too large for security -i"
     return 2
   fi
   # stderr too: an error from security -i could echo the line, hex token and all.
-  printf 'add-generic-password -U -a "%s" -s "%s" -X %s\n' "$2" "$1" "$(printf %s "$v" | xxd -p | tr -d '\n')" \
-    | security -i > /dev/null 2>&1
+  printf '%s\n' "$line" | security -i > /dev/null 2>&1
 }
 
 keychain_delete() {
@@ -379,9 +378,9 @@ cli_capture() {
   jq_write "$dir/cli.json" '{oauthAccount}' "$claude_json"
 }
 
-# The CLI's locks are directories: mkdir is the acquire, rmdir the release,
-# and a holder older than the CLI's own stale threshold is swept first. Five
-# tries a second apart, then the switch fails before Desktop's config moves.
+# The CLI's locks are directories: mkdir acquires, rmdir releases, and a
+# holder older than the CLI's own stale threshold is swept first. A held lock
+# fails the switch before Desktop's config moves.
 cli_locks=()
 cli_lock() {
   local dir=$1 stale=$2 i
@@ -456,10 +455,18 @@ cli_restore() {
     warning "CLAUDE_CONFIG_DIR is set; the CLI login is not switched"
     return 0
   fi
-  if [[ $(cli_signed_in_as) == "$(jq -r .account "$dir/meta.json")" ]]; then
+  cli_live_read || rc=$?
+  if ((rc == 0)) && [[ $(cli_signed_in_as) == "$(jq -r .account "$dir/meta.json")" ]]; then
     cli_capture "$name"
     return 0
   fi
+  if ((rc == 44)); then live=''; elif ((rc != 0)); then
+    warning "security exited $rc reading the CLI login; switched Desktop only"
+    return 0
+  else
+    live=$cli_live
+  fi
+  rc=0
   saved=$(keychain_get "$mp_service" "$name") || rc=$?
   if ((rc == 44)); then
     warning "the saved CLI login for $name is missing from the Keychain; run claude auth login, then save $name"
@@ -468,18 +475,12 @@ cli_restore() {
     warning "security exited $rc reading the saved CLI login; switched Desktop only"
     return 0
   fi
-  cli_live_read || rc=$?
-  live=$cli_live
-  if ((rc == 44)); then live=''; elif ((rc != 0)); then
-    warning "security exited $rc reading the CLI login; switched Desktop only"
-    return 0
-  fi
   merged=$saved
   if [[ -n $live ]] && ! merged=$(jq -c --argjson s "$saved" 'del(.claudeAiOauth, .trustedDeviceToken) + $s' <<< "$live" 2> /dev/null); then
     warning "the live CLI login is not valid JSON; switched Desktop only"
     return 0
   fi
-  if (($(printf %s "$merged" | LC_ALL=C wc -c) > keychain_payload_limit)); then
+  if (($(printf %s "$merged" | LC_ALL=C wc -c) * 2 + 100 > keychain_line_limit)); then
     warning "the CLI login is too large for security -i; switched Desktop only"
     return 0
   fi
@@ -489,6 +490,8 @@ cli_restore() {
     return 0
   }
   jq_write "$claude_json" --slurpfile c "$dir/cli.json" '.oauthAccount = $c[0].oauthAccount' "$claude_json"
+  # claude's own refresh takes the same locks, so they go before it is asked.
+  cli_unlock
   cli_verify "$(jq -r '.oauthAccount.organizationUuid // empty' "$dir/cli.json")"
 }
 
@@ -929,7 +932,8 @@ profile_rename() {
     if keychain_put "$mp_service" "$2" <<< "$v"; then
       keychain_delete "$mp_service" "$1" || warning "the CLI login is now under $2 but its old item $1 could not be deleted"
     else
-      warning "could not move the CLI login to $2; run claude auth login, then save $2"
+      rm -f "$store/$2/cli.json"
+      warning "could not move the CLI login to $2 (the old item stays under $1); run claude auth login, then save $2"
     fi
   elif ((rc != 44)); then
     warning "security exited $rc reading the CLI login; run claude auth login, then save $2"
@@ -1116,8 +1120,8 @@ main() {
   # relaunch is main's local, so the trap text is chosen now, not at exit.
   if [[ -n $relaunch ]]; then trap 'cli_unlock; desktop_launch' EXIT; else trap cli_unlock EXIT; fi
   # The CLI's own locks guard its login while a save reads it or a switch
-  # writes it; a claude.json means the CLI has run here (cli_restore writes
-  # nothing without one, so the two agree).
+  # writes it. They are taken only when claude.json exists, because
+  # cli_restore writes nothing without it.
   cli_running_warning
   [[ ! -f $claude_json ]] || cli_lock_all
   active=$(active_profile)

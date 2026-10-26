@@ -178,7 +178,7 @@ printf cookie-B > "$p/beta/Cookies"
 kc_put claude-multipass beta '{"claudeAiOauth":{"accessToken":"at-beta","refreshToken":"rt-beta","expiresAt":2,"scopes":["a"],"subscriptionType":"max"}}'
 printf '{"oauthAccount":{"accountUuid":"bbbbbbbb-2222","emailAddress":"b@example.com","organizationUuid":"org-beta"}}' > "$p/beta/cli.json"
 # claude on PATH answers the verification after a restore
-printf '#!/bin/sh\necho "{\\"orgId\\":\\"org-beta\\"}"\n' > "$tmp/bin/claude"
+printf '#!/bin/sh\nls -d "%s"/claude.json.lock "%s"/claude-home/.oauth_refresh.lock "%s"/claude-home.lock 2> /dev/null | wc -l | tr -d " " > "%s/locks-at-verify"\necho "{\\"orgId\\":\\"org-beta\\"}"\n' "$tmp" "$tmp" "$tmp" "$tmp" > "$tmp/bin/claude"
 chmod +x "$tmp/bin/claude"
 cp "$tmp/claude.json" "$tmp/claude-before.json"
 
@@ -234,6 +234,7 @@ check "switch backs up the previous identity" aaaaaaaa-1111 "$(jq -r .oauthAccou
 check "switch re-saves the outgoing CLI login" at-alpha "$(kc_get claude-multipass alpha | jq -r .claudeAiOauth.accessToken)"
 check "switch releases the CLI locks" 0 "$(ls -d "$tmp"/claude.json.lock "$tmp"/claude-home/.oauth_refresh.lock "$tmp"/claude-home.lock 2> /dev/null | wc -l | tr -d ' ')"
 check "a matching org raises no warning" 0 "$(grep -c 'different org' "$tmp/switch-err")"
+check "the CLI locks are released before claude auth status runs" 0 "$(cat "$tmp/locks-at-verify")"
 check "switch never puts a token on argv" 0 "$(grep -c -- '-w ' "$tmp/security-calls")"
 
 # sync (run by switch)
@@ -261,6 +262,11 @@ check "switch to the signed-in account re-saves the live CLI login" "beta is alr
 check "and writes no backup folder" "$n_backups" "$(ls -1d "$b"/login-*/ | wc -l | tr -d ' ')"
 check "and leaves the live tokens alone" at-beta-fresh "$(kc_get "Claude Code-credentials" "$USER" | jq -r .claudeAiOauth.accessToken)"
 check "and the profile now holds them" at-beta-fresh "$(kc_get claude-multipass beta | jq -r .claudeAiOauth.accessToken)"
+
+# The CLI's identity says the target account but its Keychain item is gone: restore the saved one
+security delete-generic-password -a "$USER" -s "Claude Code-credentials" > /dev/null
+check_true "a same-account switch with the live item gone restores it" grep -q 'beta is already signed in' <<< "$(cda switch beta --no-relaunch)"
+check "and the live item is back" at-beta-fresh "$(kc_get "Claude Code-credentials" "$USER" | jq -r .claudeAiOauth.accessToken)"
 
 # A hand login as a foreign account on the way out: the outgoing profile's CLI login is left alone, the target's restored
 jq '.oauthAccount.accountUuid = "zzzzzzzz-9999"' "$tmp/claude.json" > "$tmp/claude.json.new" && mv "$tmp/claude.json.new" "$tmp/claude.json"

@@ -54,7 +54,7 @@ Untested or unverified claims, from the digest. Settle one before building on it
 9. Whether Desktop's cross-session tools (`mcp__ccd_session_mgmt__list_sessions` and friends) read copied index entries: stage a titled `local_<uuid>.json`, copy it, ask about it.
 10. claude-swap mid-session switch behaviour (`/status` Email row).
 11. Whether two personal accounts pool limits at all.
-12. Closed 2026-10-25: the tool works against a real Desktop folder (several profiles saved and switched since 2026-10-23).
+12. Closed 2026-10-25: the tool works against a real Desktop folder (several profiles saved and switched since 2026-10-23). Measured 2026-10-26 in review: `claude auth status` under an isolated config dir returns at once with `.claude.json.lock` held and rewrites `.claude.json` itself, so it does not honour that lock for reads; whether its token refresh waits on a held `.oauth_refresh.lock` is still open (the tool releases its locks before asking it).
 
 ## Third-party tools audited
 
