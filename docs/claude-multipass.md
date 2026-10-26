@@ -43,6 +43,7 @@ Desktop quits, relaunches signed in as that account, and the Code tab lists both
 | `current` | The signed-in saved name, `not saved` or `signed out` (for scripts and Raycast) |
 | `usage [name]` | 5-hour and weekly usage per saved account with reset times. Opt-in, see below. `--json` prints the figures as one object |
 | `pick` | The fzf picker |
+| `doctor` | One `ok:`, `warn:` or `fail:` line per check (config, tools, store and profile modes, each profile's token, backups, Desktop running, the pre-0.1 store). Exits 1 on any `fail:`. No Keychain, no network |
 | `--version` | Print the version |
 
 `--no-relaunch` leaves Desktop quit after `save`, `switch` or `add`.
@@ -81,6 +82,7 @@ This is the one part of the tool that uses a subscription token outside Anthropi
 
 ## When something is off
 
+- Start with `claude-multipass doctor`. It prints one line per check and names the profile that needs a re-save.
 - Desktop relaunches signed in as the wrong account after `add` or `switch`: the previous login is under the backups folder. Copy its `config.json` keys and cookie files back by hand, or run `switch` to the profile you want.
 - A switch died midway: run the same `switch` again. It re-copies the cookies even when the account already matches.
 - `usage` says `token expired, sign in and re-save`: sign in to that account in Desktop (through `switch` or `add`) and run `save <name>` again.

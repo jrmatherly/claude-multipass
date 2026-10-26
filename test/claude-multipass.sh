@@ -256,7 +256,7 @@ check "login backups pruned to ten" 10 "$(find "$b" -mindepth 1 -maxdepth 1 -typ
 # curl are stubs on PATH, so no Keychain and no network
 mkdir -p "$p/usagey" "$p/stale"
 pw='fixture pass!$'
-printf '#!/bin/sh\nprintf %%s "%s"\n' "$pw" > "$tmp/bin/security"
+printf '#!/bin/sh\necho "security $*" >> "%s/calls"\nprintf %%s "%s"\n' "$tmp" "$pw" > "$tmp/bin/security"
 printf '{"five_hour":{"utilization":42.6,"resets_at":"2026-10-23T19:45:00.123456+00:00"},"seven_day":{"utilization":18.0,"resets_at":"2026-10-27T13:00:00Z"}}' > "$tmp/usage.json"
 printf '#!/bin/sh\n{ echo "curl $*"; cat; } >> "%s/curl-args"\ncat "%s/usage.json"; printf "\\n200"\n' "$tmp" "$tmp" > "$tmp/bin/curl"
 chmod +x "$tmp/bin/security" "$tmp/bin/curl"
@@ -313,6 +313,18 @@ check "usage --json omits a null window" null "$(cda usage usagey --json | jq -r
 cp "$tmp/usage-full.json" "$tmp/usage.json"
 mkdir -p "$tmp/emptyd" && printf '{"theme":"dark"}' > "$tmp/emptyd/config.json"
 check "usage --json with nothing saved" '{"profiles":[]}' "$(CLAUDE_DESKTOP_DIR="$tmp/emptyd" CLAUDE_MULTIPASS_DIR="$tmp/empty" cda usage --json)"
+
+# doctor: one line per check, exit 1 on any fail:, no Keychain, no network
+rm -f "$tmp/calls"
+touch "$tmp/calls"
+check "doctor healthy" 0 "$(exit_code cda doctor)"
+check_true "doctor reports jq" grep -q '^ok: jq' <<< "$(cda doctor)"
+check "doctor never calls security" 0 "$(grep -c security "$tmp/calls")"
+cp "$p/usagey/config.json" "$tmp/usagey-config"
+printf '{"oauth:tokenCacheV2":""}' > "$p/usagey/config.json"
+check "doctor fails on an empty token" 1 "$(exit_code cda doctor)"
+check_true "doctor names the profile" grep -q '^fail: usagey: empty oauth:tokenCacheV2' <<< "$(cda doctor || true)"
+cp "$tmp/usagey-config" "$p/usagey/config.json"
 printf '{"oauth:tokenCache":"x","oauth:tokenCacheV2":"enc","lastKnownAccountUuid":"uuuuuuuu-1"}' > "$d/config.json"
 check "Raycast usage command shows the active account's figures" "usagey           $expected" "$("$raycast/claude-account-usage.sh")"
 

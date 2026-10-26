@@ -37,6 +37,7 @@ Claude Code transcripts live in `~/.claude/projects`, shared by every account, s
 | `sync` | Only the session-list merge (Desktop must be quit, or `--force`) |
 | `usage [name]` | 5-hour and weekly usage per saved account. Opt-in: it decrypts the saved token with the app's Keychain key and reads Anthropic's OAuth usage endpoint outside the app, which third-party coverage says Anthropic's terms discourage. Read-only, runs only when asked |
 | `pick` | The fzf picker (also a bare invocation on a terminal) |
+| `doctor` | Check the setup: config, tools, store modes, profile tokens. Exits 1 on any `fail:` line |
 
 `--no-relaunch` leaves Desktop quit; `--force` overrides the refusals named in `--help`.
 

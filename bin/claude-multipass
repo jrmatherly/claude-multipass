@@ -42,6 +42,10 @@
 #
 # `claude-multipass current`
 #
+# - Check the setup (config, tools, store modes, profile tokens); exits 1 on a fail: line:
+#
+# `claude-multipass doctor`
+#
 # - Full help, with the flags, folders and cautions:
 #
 # `claude-multipass --help`
@@ -153,6 +157,7 @@ ${bold}Usage${reset}
   claude-multipass sync [--force]
   claude-multipass usage [name]
   claude-multipass current
+  claude-multipass doctor
 
 ${bold}First time, once per account${reset}
   claude-multipass save personal   # the account Desktop is signed in as
@@ -213,6 +218,11 @@ ${bold}Commands${reset}
                        "signed out". For scripts and the Raycast commands.
   pick                 Opens the fzf picker, the same as running the command
                        with no arguments.
+  doctor               Checks the setup: Desktop's config.json, the tools on
+                       PATH, the store and profile modes, each profile's token,
+                       the backups count, whether Desktop runs. One ok:, warn:
+                       or fail: line per check; exits 1 on any fail:. Reads no
+                       Keychain and no network.
 
 ${bold}Options${reset}
   --no-relaunch        Leave Desktop quit after save, switch, add or pick,
@@ -517,6 +527,56 @@ usage_object() {
   esac
 }
 
+# One line per check, in a fixed order, no Keychain and no network. Exits 1
+# when any fail: line was printed.
+doctor_report() {
+  local status=0 tool mode meta dir name file n legacy
+  if [[ -f $config ]]; then echo "ok: config: $config"; else
+    echo "fail: config: no $config (open Claude Desktop once first)"
+    status=1
+  fi
+  if command -v jq > /dev/null; then echo "ok: jq"; else
+    echo "fail: jq: not on PATH (brew install jq)"
+    status=1
+  fi
+  for tool in 'fzf:the picker' 'python3:usage (key derivation)' 'openssl:usage (token decrypt)' 'curl:usage (the usage endpoint)'; do
+    if command -v "${tool%%:*}" > /dev/null; then echo "ok: ${tool%%:*}"; else echo "warn: ${tool%%:*}: not on PATH, needed for ${tool#*:}"; fi
+  done
+  if [[ -d $store ]]; then
+    mode=$(stat -f %Lp "$store")
+    if [[ $mode == 700 ]]; then echo "ok: store: $store"; else echo "warn: store: mode $mode, expected 700 (chmod 700 \"$store\")"; fi
+  else
+    echo "warn: store: nothing saved yet ($store)"
+  fi
+  for dir in "$store"/*/; do
+    [[ -d $dir ]] || continue
+    name=$(basename "$dir")
+    for file in "$dir"config.json "$dir"meta.json "$dir"Cookies "$dir"Cookies-journal; do
+      [[ -f $file ]] || continue
+      mode=$(stat -f %Lp "$file")
+      [[ $mode == 600 ]] || echo "warn: $name: $(basename "$file") is mode $mode, expected 600"
+    done
+    if [[ ! -f ${dir}meta.json ]]; then
+      echo "fail: $name: missing meta.json"
+      status=1
+    elif [[ ! -f ${dir}config.json ]]; then
+      echo "fail: $name: missing config.json (re-save it)"
+      status=1
+    elif ! jq -e '.["oauth:tokenCacheV2"] | type == "string" and length > 0' "${dir}config.json" > /dev/null 2>&1; then
+      echo "fail: $name: empty oauth:tokenCacheV2 (re-save it)"
+      status=1
+    else
+      echo "ok: $name"
+    fi
+  done
+  n=$(ls -1d "$backups"/login-*/ 2> /dev/null | wc -l | tr -d ' ')
+  echo "ok: backups: $n saved logins in $backups"
+  if desktop_running; then echo "ok: desktop: running"; else echo "ok: desktop: not running"; fi
+  legacy="$config_home/dotfiles/claude-desktop-accounts"
+  [[ ! -d $legacy ]] || echo "warn: legacy store: $legacy still exists (it moves on the first run without CLAUDE_MULTIPASS_DIR)"
+  return $status
+}
+
 # One line per saved account plus the live login when it is unsaved. The
 # fetches run in parallel; one key derivation serves them all.
 usage_report() {
@@ -713,7 +773,7 @@ main() {
       usage
       return 0
       ;;
-    list | sync | current | pick) [[ ${#names[@]} -eq 0 ]] || fail "$cmd takes no name" ;;
+    list | sync | current | pick | doctor) [[ ${#names[@]} -eq 0 ]] || fail "$cmd takes no name" ;;
     usage)
       [[ ${#names[@]} -le 1 ]] || fail "usage takes at most one name"
       [[ ${#names[@]} -eq 0 ]] || valid_name "${names[0]}"
@@ -733,6 +793,10 @@ main() {
       exit 2
       ;;
   esac
+  if [[ $cmd == doctor ]]; then
+    doctor_report
+    return $?
+  fi
   [[ -f $config ]] || fail "No $config: open Claude Desktop once first"
   migrate_store
 
