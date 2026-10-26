@@ -34,7 +34,8 @@ Verified facts the tool rests on. Do not re-derive them; cite them. Evidence lab
 ## CLI credentials
 
 - Keychain generic password service `Claude Code-credentials`, fallback `~/.claude/.credentials.json` mode 0600 (O). The JSON holds `claudeAiOauth` with `accessToken`, `refreshToken`, `expiresAt`, `scopes`, `subscriptionType` (M in tool sources). The identity block `oauthAccount` in `~/.claude.json` pins the org per request, so a token swap without it can bill the wrong org (R, two tools agree).
-- Per-directory item `Claude Code-credentials-<first 8 hex of sha256(NFC(CLAUDE_CONFIG_DIR))>` (R). The CLI reads the Keychain before the file (M in source) and caches the read about 30 s (R). Lock files `.oauth_refresh.lock` and `~/.claude.json.lock` (M in claude-swap source).
+- Per-directory item `Claude Code-credentials-<first 8 hex of sha256(NFC(CLAUDE_CONFIG_DIR))>` (R). The CLI reads the Keychain before the file (M in source) and caches the read about 30 s (R). The locks are directories, `mkdir` to take, stale after a threshold: `~/.claude/.oauth_refresh.lock` (60 s), `~/.claude.lock` (60 s) and `~/.claude.json.lock` (10 s) (M in claude-swap source).
+- Measured 2026-10-26 on this Mac: the item's account is the macOS user name and `oauthAccount.accountUuid` in `~/.claude.json` equals Desktop's `lastKnownAccountUuid` for the same claude.ai account (M). `claude auth status` prints JSON by default with `orgId` and `email` (M). The CLI writes its item through `security -i` with `-X <hex>` on stdin (M in source), which is the only safe way: `security -i` keeps at most 4019 bytes of a line and corrupts the rest, its parser rejects the shell's `'\''` escape (exit 45), `-X <hex>` round-trips any value, the `-w` prompt reads the terminal rather than a pipe, and exit 44 means absent (M). The item's other top-level keys (`mcpOAuth`, `mcpOAuthClientConfig`, `mcpXaaIdp`, `mcpXaaIdpConfig`, `pluginSecrets`) are shared across accounts (M). `~/.claude.json` is 2-space indented, mode 600 (M).
 - `CLAUDE_CONFIG_DIR` gives its own settings, history, login and Keychain entry; `claude --resume <id>` searches only the current config dir, so per-account config dirs split history (O).
 - Rate limits auto-continue since v2.1.234; the Code tab has its own "Auto-continue when limits reset" checkbox. The prompt cache is per account, so the first turn after a switch re-sends the transcript (R).
 
@@ -47,11 +48,13 @@ Untested or unverified claims, from the digest. Settle one before building on it
 3. `claude://resume?session=<id>` import across accounts on macOS.
 4. Whether Settings > Memory still has an export control.
 5. `claude_desktop_config.json` unchanged across a Desktop sign-out and sign-in.
-6. Keychain item names via `security find-generic-password -s "Claude Code-credentials"` and the `-<8 hex>` variant.
-7. Whether Desktop's cross-session tools (`mcp__ccd_session_mgmt__list_sessions` and friends) read copied index entries: stage a titled `local_<uuid>.json`, copy it, ask about it.
-8. claude-swap mid-session switch behaviour (`/status` Email row).
-9. Whether two personal accounts pool limits at all.
-10. Closed 2026-10-25: the tool works against a real Desktop folder (several profiles saved and switched since 2026-10-23).
+6. Closed 2026-10-26: `security find-generic-password -s "Claude Code-credentials"` finds the item, account the macOS user name. The `-<8 hex>` variant for `CLAUDE_CONFIG_DIR` stays R.
+7. Refresh-token rotation across a tool round trip: whether a login saved by `save`, left while the other account is used, then restored by `switch` still refreshes (or fails with `invalid_grant`). Settled by the real-Mac round trip in the plan's Task 8.
+8. The exit code of `security` when the Keychain prompt is denied, and whether a running `claude` waits on the lock dirs or fails.
+9. Whether Desktop's cross-session tools (`mcp__ccd_session_mgmt__list_sessions` and friends) read copied index entries: stage a titled `local_<uuid>.json`, copy it, ask about it.
+10. claude-swap mid-session switch behaviour (`/status` Email row).
+11. Whether two personal accounts pool limits at all.
+12. Closed 2026-10-25: the tool works against a real Desktop folder (several profiles saved and switched since 2026-10-23).
 
 ## Third-party tools audited
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0 (unreleased)
+
+- `save` also captures the Claude Code CLI's terminal login (the Keychain item's tokens into a Keychain item of the tool's own, the `oauthAccount` identity into the profile's `cli.json`) when the CLI is signed in as the same account as Desktop, and `switch` restores it under the CLI's own locks, keeping the shared MCP keys. A CLI already on the target account is re-saved, never overwritten. The live CLI login is backed up beside the Desktop backup.
+- `switch` and `save` warn, and move Desktop only, when the CLI is signed in as another account or signed out, when the profile has no CLI login, when its Keychain item is missing, when `CLAUDE_CONFIG_DIR` is set, or when the item is too large for `security -i`. `switch` warns when a `claude` process is running and when `claude auth status` reports another org after the restore.
+- `rename` moves the profile's CLI item; `remove` and a forced `save` delete it; `doctor` names profiles without a CLI login; `list --json` gains `cliSaved` and `show` prints the CLI login state; `add` says to run `claude auth login` before `save`.
+- The menu bar app shows `· CLI` on profiles with a CLI login, shows the tool's warnings under the row after a switch or save, finds the native `claude` in `~/.local/bin`, and needs tool 0.3.0 or newer.
+- The self-check's `security` stub is stateful and the script reads `CLAUDE_CLI_CONFIG` and `CLAUDE_CLI_HOME`, so the real `~/.claude.json` and Keychain are never touched.
+
 ## 0.2.2 (2026-10-26)
 
 - The "Save this login as" row keeps showing a failed save's message while the name is edited; it used to vanish on the first keystroke.
