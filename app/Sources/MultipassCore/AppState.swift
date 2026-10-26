@@ -35,6 +35,7 @@ public final class AppState: ObservableObject {
   @Published public private(set) var lastError: String?
   @Published public private(set) var rowError: RowError?
   @Published public private(set) var cliStatus: CLIStatus = .unknown
+  @Published public private(set) var cliLocation: String?
   @Published public private(set) var settings: AppSettings
 
   public var currentUsage: UsageEntry? { usage[snapshot?.current ?? "(signed in)"] }
@@ -83,6 +84,7 @@ public final class AppState: ObservableObject {
     probeGeneration += 1
     let generation = probeGeneration
     runner = makeRunner(settings)
+    cliLocation = runner?.location
     guard let runner else {
       cliStatus = .missing
       return

@@ -36,6 +36,11 @@ private func stubScript() throws -> URL {
   #expect(CLI.locate(override: "", isExecutable: isExecutable) == URL(fileURLWithPath: CLI.candidates[1]))
 }
 
+@Test func locationIsTheExecutablePath() throws {
+  let stub = try stubScript()
+  #expect(CLI(executable: stub).location == stub.path)
+}
+
 @Test func runParsesVersion() async throws {
   let cli = CLI(executable: try stubScript())
   #expect(CLI.parseVersion(try await cli.run(["--version"])) == "0.2.0")
