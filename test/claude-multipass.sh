@@ -52,16 +52,22 @@ run() {
     esac
     shift
   done
+  # Failure hooks for the self-check: a refused write, a failed read of the CLI item.
+  [[ -z ${SECURITY_FAIL_ADD:-} || $cmd != add-generic-password ]] || return 1
+  [[ -z ${SECURITY_FAIL_FIND:-} || $cmd != find-generic-password || $s != 'Claude Code-credentials' ]] || return "$SECURITY_FAIL_FIND"
   case $cmd in
     add-generic-password)
-      [[ -n $hex ]] && v=$(printf %s "$hex" | xxd -r -p)
       mkdir -p "$kc/$s"
-      printf %s "$v" > "$kc/$s/$a"
+      # Decoded straight to the file: a $(...) would strip a trailing newline the tool must not store.
+      if [[ -n $hex ]]; then printf %s "$hex" | xxd -r -p > "$kc/$s/$a"; else printf %s "$v" > "$kc/$s/$a"; fi
       ;;
     find-generic-password)
       if [[ $s == 'Claude Safe Storage' ]]; then printf %s "$pw"; return 0; fi
       [[ -f $kc/$s/$a ]] || { echo "security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain." >&2; return 44; }
-      [[ -n $want_w ]] && cat "$kc/$s/$a"
+      # Like the real tool: a value with any non-printable byte (a newline) prints as hex.
+      if [[ -n $want_w ]]; then
+        if [[ $(LC_ALL=C tr -d '[:print:]' < "$kc/$s/$a" | wc -c) -gt 0 ]]; then xxd -p "$kc/$s/$a" | tr -d '\n'; else cat "$kc/$s/$a"; fi
+      fi
       ;;
     delete-generic-password)
       [[ -f $kc/$s/$a ]] || return 44
@@ -77,9 +83,10 @@ if [[ ${1:-} == -i ]]; then
     # The exact shape the script emits; the service name carries a space.
     [[ $line =~ ^add-generic-password\ -U\ -a\ \"([^\"]*)\"\ -s\ \"([^\"]*)\"\ -X\ ([0-9a-f]*)$ ]] \
       || { echo "security: unparsed line: $line" >&2; exit 1; }
-    run add-generic-password -a "${BASH_REMATCH[1]}" -s "${BASH_REMATCH[2]}" -X "${BASH_REMATCH[3]}"
+    run add-generic-password -a "${BASH_REMATCH[1]}" -s "${BASH_REMATCH[2]}" -X "${BASH_REMATCH[3]}" || st=$?
   done
-  exit 0
+  # The real tool propagates the inner command's status (measured).
+  exit "${st:-0}"
 fi
 run "$@"
 EOF
@@ -121,6 +128,9 @@ check "security stub reports a missing item" 44 "$(
 )"
 security delete-generic-password -a u -s t > /dev/null
 check "security stub deletes" absent "$(kc_get t u)"
+kc_put t u "$(printf 'a\nb')"
+check "security stub prints a value with a newline as hex, like the real tool" 610a62 "$(kc_get t u)"
+security delete-generic-password -a u -s t > /dev/null
 
 mkdir -p "$d" "$p/beta" "$s/aaaaaaaa-1111/org-a" "$s/bbbbbbbb-2222/org-b"
 tab=$'\t'
@@ -161,7 +171,7 @@ err=$(cda save alpha --no-relaunch 2>&1 > /dev/null)
 check_true "save warns when the CLI is on another account" grep -q 'Claude Code is signed in as a different account, or signed out; saved the Desktop login only' <<< "$err"
 check "a mismatched save keeps cli.json" aaaaaaaa-1111 "$(jq -r .oauthAccount.accountUuid "$p/alpha/cli.json")"
 check "a mismatched save keeps the saved item" at-alpha "$(kc_get claude-multipass alpha | jq -r .claudeAiOauth.accessToken)"
-check_true "save with CLAUDE_CONFIG_DIR skips the CLI login" grep -q 'CLAUDE_CONFIG_DIR is set; the CLI login is not switched' <<< "$(CLAUDE_CONFIG_DIR=/x cda save alpha --no-relaunch 2>&1 > /dev/null)"
+check_true "save with CLAUDE_CONFIG_DIR skips the CLI login" grep -q 'CLAUDE_CONFIG_DIR is set; the CLI login is not saved or switched' <<< "$(CLAUDE_CONFIG_DIR=/x cda save alpha --no-relaunch 2>&1 > /dev/null)"
 cp "$tmp/claude-alpha.json" "$tmp/claude.json"
 security delete-generic-password -a "$USER" -s "Claude Code-credentials" > /dev/null
 check_true "save warns when the CLI is signed out" grep -q 'signed in as a different account, or signed out' <<< "$(cda save alpha --no-relaunch 2>&1 > /dev/null)"
@@ -235,6 +245,8 @@ check "switch re-saves the outgoing CLI login" at-alpha "$(kc_get claude-multipa
 check "switch releases the CLI locks" 0 "$(ls -d "$tmp"/claude.json.lock "$tmp"/claude-home/.oauth_refresh.lock "$tmp"/claude-home.lock 2> /dev/null | wc -l | tr -d ' ')"
 check "a matching org raises no warning" 0 "$(grep -c 'different org' "$tmp/switch-err")"
 check "the CLI locks are released before claude auth status runs" 0 "$(cat "$tmp/locks-at-verify")"
+check "a clean switch warns nothing" "" "$(cat "$tmp/switch-err")"
+check "the stored CLI value has no trailing newline" '}' "$(kc_get claude-multipass alpha | tail -c 1)"
 check "switch never puts a token on argv" 0 "$(grep -c -- '-w ' "$tmp/security-calls")"
 
 # sync (run by switch)
@@ -297,6 +309,57 @@ check "and leaves the live item alone" at-alpha "$(kc_get "Claude Code-credentia
 mv "$tmp/claude-aside.json" "$tmp/claude.json"
 cda switch alpha --no-relaunch > /dev/null 2>&1
 
+# security refuses the write (a locked Keychain, a denied prompt): nothing is written over a login that has no copy
+err=$(SECURITY_FAIL_ADD=1 cda switch beta --no-relaunch 2>&1 > /dev/null)
+check_true "a failed CLI backup warns" grep -q 'could not back up the CLI login; switched Desktop only' <<< "$err"
+check "and leaves the live CLI item alone" at-alpha "$(kc_get "Claude Code-credentials" "$USER" | jq -r .claudeAiOauth.accessToken)"
+check "and leaves oauthAccount alone" aaaaaaaa-1111 "$(jq -r .oauthAccount.accountUuid "$tmp/claude.json")"
+check "and still switches Desktop" bbbbbbbb-2222 "$(jq -r .lastKnownAccountUuid "$d/config.json")"
+cda switch alpha --no-relaunch > /dev/null 2>&1
+
+# security fails the read of the CLI item with another status: the status is named, nothing moves
+err=$(SECURITY_FAIL_FIND=36 cda switch beta --no-relaunch 2>&1 > /dev/null)
+check_true "a failed read on the way out names the status and the profile" grep -q 'alpha: security exited 36 reading the CLI login; saved the Desktop login only' <<< "$err"
+check_true "a failed read on the restore names the status" grep -q 'security exited 36 reading the CLI login; switched Desktop only' <<< "$err"
+check "and leaves the live CLI item alone" at-alpha "$(kc_get "Claude Code-credentials" "$USER" | jq -r .claudeAiOauth.accessToken)"
+check "and leaves oauthAccount alone" aaaaaaaa-1111 "$(jq -r .oauthAccount.accountUuid "$tmp/claude.json")"
+cda switch alpha --no-relaunch > /dev/null 2>&1
+
+# CLAUDE_CONFIG_DIR: the CLI has a per-directory item the tool does not know
+check_true "switch with CLAUDE_CONFIG_DIR skips the CLI login" grep -q 'CLAUDE_CONFIG_DIR is set; the CLI login is not saved or switched' <<< "$(CLAUDE_CONFIG_DIR=/x cda switch beta --no-relaunch 2>&1 > /dev/null)"
+check "and leaves oauthAccount alone" aaaaaaaa-1111 "$(jq -r .oauthAccount.accountUuid "$tmp/claude.json")"
+CLAUDE_CONFIG_DIR=/x cda switch alpha --no-relaunch > /dev/null 2>&1
+
+# A corrupt ~/.claude.json (the CLI rewrites it often): Desktop only, nothing aborted
+cp "$tmp/claude.json" "$tmp/claude-good.json"
+printf 'not json' > "$tmp/claude.json"
+st=0
+err=$(cda switch beta --no-relaunch 2>&1 > "$tmp/corrupt-cfg-out") || st=$?
+check "a corrupt claude.json does not abort the switch" 0 "$st"
+check_true "and warns" grep -q 'claude.json is not valid JSON; switched Desktop only' <<< "$err"
+check_true "and the session lists were still merged" grep -q written "$tmp/corrupt-cfg-out"
+check "and the live CLI item is left alone" at-alpha "$(kc_get "Claude Code-credentials" "$USER" | jq -r .claudeAiOauth.accessToken)"
+cp "$tmp/claude-good.json" "$tmp/claude.json"
+check "a switch after repairing claude.json succeeds" 0 "$(exit_code cda switch alpha --no-relaunch)"
+
+# The claude.json write fails after the Keychain write: the live item is put back, nothing half-moved
+mkdir "$tmp/claude.json.tmp"
+err=$(cda switch beta --no-relaunch 2>&1 > /dev/null)
+check_true "a failed claude.json write warns and names the backup" grep -q "could not write $tmp/claude.json; the CLI login was put back" <<< "$err"
+check "and the live CLI item is back to the previous login" at-alpha "$(kc_get "Claude Code-credentials" "$USER" | jq -r .claudeAiOauth.accessToken)"
+check "and oauthAccount still names it" aaaaaaaa-1111 "$(jq -r .oauthAccount.accountUuid "$tmp/claude.json")"
+rmdir "$tmp/claude.json.tmp"
+cda switch alpha --no-relaunch > /dev/null 2>&1
+check "claude.json is written 2-space indented with a final newline, as the CLI writes it" "$(jq --indent 2 . "$tmp/claude.json")" "$(cat "$tmp/claude.json")"
+
+# A held CLI lock during save: the Desktop login is saved, the CLI part skipped with a warning
+mkdir "$tmp/claude.json.lock"
+st=0
+err=$(cda save alpha --no-relaunch 2>&1 > /dev/null) || st=$?
+check "a held lock does not fail save" 0 "$st"
+check_true "and says the CLI part was skipped" grep -q 'Claude Code holds .*claude.json.lock; saved the Desktop login only' <<< "$err"
+rmdir "$tmp/claude.json.lock"
+
 # A live item that is not JSON (another tool's truncated write): Desktop only, nothing aborted
 kc_put "Claude Code-credentials" "$USER" 'not json'
 st=0
@@ -305,7 +368,7 @@ check "a corrupt live CLI item does not abort the switch" 0 "$st"
 check_true "and warns" grep -q 'the live CLI login is not valid JSON; switched Desktop only' <<< "$err"
 check_true "and the session lists were still merged" grep -q written "$tmp/corrupt-out"
 check "and the corrupt item is left alone" 'not json' "$(kc_get "Claude Code-credentials" "$USER")"
-check_true "a corrupt live item on the way out saves the Desktop login only" grep -q 'not valid JSON; saved the Desktop login only' <<< "$(cda switch alpha --no-relaunch 2>&1 > /dev/null)"
+check_true "a corrupt live item never passes for the target's login" grep -q 'the live CLI login is not valid JSON; switched Desktop only' <<< "$(cda switch alpha --no-relaunch 2>&1 > /dev/null)"
 check "and keeps the profile item" at-beta-fresh "$(kc_get claude-multipass beta | jq -r .claudeAiOauth.accessToken)"
 kc_put "Claude Code-credentials" "$USER" "$live_item"
 
@@ -563,7 +626,7 @@ n_sec=$(wc -l < "$tmp/security-calls" | tr -d ' ')
 cda doctor > /dev/null
 check "doctor never calls security" "$n_sec" "$(wc -l < "$tmp/security-calls" | tr -d ' ')"
 check_true "doctor names a profile without a CLI login" grep -q '^warn: legacy: no CLI login saved' <<< "$(cda doctor)"
-check_true "doctor warns on CLAUDE_CONFIG_DIR" grep -q '^warn: CLAUDE_CONFIG_DIR is set; the CLI login is not switched' <<< "$(CLAUDE_CONFIG_DIR=/x cda doctor)"
+check_true "doctor warns on CLAUDE_CONFIG_DIR" grep -q '^warn: CLAUDE_CONFIG_DIR is set; the CLI login is not saved or switched' <<< "$(CLAUDE_CONFIG_DIR=/x cda doctor)"
 cp "$p/usagey/config.json" "$tmp/usagey-config"
 printf '{"oauth:tokenCacheV2":""}' > "$p/usagey/config.json"
 check "doctor fails on an empty token" 1 "$(exit_code cda doctor)"

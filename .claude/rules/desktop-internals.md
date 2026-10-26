@@ -49,7 +49,7 @@ Untested or unverified claims, from the digest. Settle one before building on it
 4. Whether Settings > Memory still has an export control.
 5. `claude_desktop_config.json` unchanged across a Desktop sign-out and sign-in.
 6. Closed 2026-10-26: `security find-generic-password -s "Claude Code-credentials"` finds the item, account the macOS user name. The `-<8 hex>` variant for `CLAUDE_CONFIG_DIR` stays R.
-7. Refresh-token rotation across a tool round trip: whether a login saved by `save`, left while the other account is used, then restored by `switch` still refreshes (or fails with `invalid_grant`). Settled by the real-Mac round trip in the plan's Task 8.
+7. Refresh-token rotation across a tool round trip: whether a login saved by `save`, left while the other account is used, then restored by `switch` still refreshes (or fails with `invalid_grant`). To be settled by the real-Mac round trip in the plan's Task 8.
 8. The exit code of `security` when the Keychain prompt is denied, and whether a running `claude` waits on the lock dirs or fails.
 9. Whether Desktop's cross-session tools (`mcp__ccd_session_mgmt__list_sessions` and friends) read copied index entries: stage a titled `local_<uuid>.json`, copy it, ask about it.
 10. claude-swap mid-session switch behaviour (`/status` Email row).
