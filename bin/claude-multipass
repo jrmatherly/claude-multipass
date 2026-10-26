@@ -320,8 +320,9 @@ keychain_put() {
     warning "the CLI login is too large for security -i"
     return 2
   fi
+  # stderr too: an error from security -i could echo the line, hex token and all.
   printf 'add-generic-password -U -a "%s" -s "%s" -X %s\n' "$2" "$1" "$(printf %s "$v" | xxd -p | tr -d '\n')" \
-    | security -i > /dev/null
+    | security -i > /dev/null 2>&1
 }
 
 keychain_delete() {
@@ -341,20 +342,18 @@ cli_signed_in_as() { jq -r '.oauthAccount.accountUuid // empty' "$claude_json" 2
 # 44 (absent) is cached too; any other failure is retried by the next caller.
 cli_live='' cli_live_rc=''
 cli_live_read() {
-  if [[ -z $cli_live_rc ]]; then
-    cli_live_rc=0
-    cli_live=$(keychain_get "$cli_service" "$cli_account") || cli_live_rc=$?
-    [[ $cli_live_rc -eq 0 || $cli_live_rc -eq 44 ]] || cli_live_rc=''
-  fi
-  [[ -n $cli_live_rc ]] || return 1
-  return "$cli_live_rc"
+  local rc=0
+  [[ -z $cli_live_rc ]] || return "$cli_live_rc"
+  cli_live=$(keychain_get "$cli_service" "$cli_account") || rc=$?
+  [[ $rc -ne 0 && $rc -ne 44 ]] || cli_live_rc=$rc
+  return "$rc"
 }
 
 # The CLI part of a save: the tokens into the profile's Keychain item, the
 # identity into cli.json. Any doubt leaves the profile's earlier CLI login
 # untouched, so a hand `claude auth login` never overwrites a saved one.
 cli_capture() {
-  local name=$1 dir="$store/$1" live rc=0
+  local name=$1 dir="$store/$1" live part rc=0
   if [[ -n ${CLAUDE_CONFIG_DIR:-} ]]; then
     warning "CLAUDE_CONFIG_DIR is set; the CLI login is not switched"
     return 0
@@ -368,8 +367,11 @@ cli_capture() {
     warning "security exited $rc reading the CLI login; saved the Desktop login only"
     return 0
   fi
-  jq -c '{claudeAiOauth, trustedDeviceToken} | with_entries(select(.value != null))' <<< "$live" \
-    | keychain_put "$mp_service" "$name" || {
+  if ! part=$(jq -c '{claudeAiOauth, trustedDeviceToken} | with_entries(select(.value != null))' <<< "$live" 2> /dev/null); then
+    warning "the live CLI login is not valid JSON; saved the Desktop login only"
+    return 0
+  fi
+  keychain_put "$mp_service" "$name" <<< "$part" || {
     rc=$?
     [[ $rc -eq 2 ]] || warning "security exited $rc saving the CLI login; saved the Desktop login only"
     return 0
@@ -473,7 +475,10 @@ cli_restore() {
     return 0
   fi
   merged=$saved
-  [[ -z $live ]] || merged=$(jq -c --argjson s "$saved" 'del(.claudeAiOauth, .trustedDeviceToken) + $s' <<< "$live")
+  if [[ -n $live ]] && ! merged=$(jq -c --argjson s "$saved" 'del(.claudeAiOauth, .trustedDeviceToken) + $s' <<< "$live" 2> /dev/null); then
+    warning "the live CLI login is not valid JSON; switched Desktop only"
+    return 0
+  fi
   if (($(printf %s "$merged" | LC_ALL=C wc -c) > keychain_payload_limit)); then
     warning "the CLI login is too large for security -i; switched Desktop only"
     return 0
@@ -921,8 +926,11 @@ profile_rename() {
   mv "$store/$1" "$store/$2"
   v=$(keychain_get "$mp_service" "$1") || rc=$?
   if ((rc == 0)); then
-    keychain_put "$mp_service" "$2" <<< "$v" && keychain_delete "$mp_service" "$1" \
-      || warning "could not move the CLI login to $2; run claude auth login, then save $2"
+    if keychain_put "$mp_service" "$2" <<< "$v"; then
+      keychain_delete "$mp_service" "$1" || warning "the CLI login is now under $2 but its old item $1 could not be deleted"
+    else
+      warning "could not move the CLI login to $2; run claude auth login, then save $2"
+    fi
   elif ((rc != 44)); then
     warning "security exited $rc reading the CLI login; run claude auth login, then save $2"
   fi

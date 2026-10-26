@@ -291,6 +291,18 @@ check "and leaves the live item alone" at-alpha "$(kc_get "Claude Code-credentia
 mv "$tmp/claude-aside.json" "$tmp/claude.json"
 cda switch alpha --no-relaunch > /dev/null 2>&1
 
+# A live item that is not JSON (another tool's truncated write): Desktop only, nothing aborted
+kc_put "Claude Code-credentials" "$USER" 'not json'
+st=0
+err=$(cda switch beta --no-relaunch 2>&1 > "$tmp/corrupt-out") || st=$?
+check "a corrupt live CLI item does not abort the switch" 0 "$st"
+check_true "and warns" grep -q 'the live CLI login is not valid JSON; switched Desktop only' <<< "$err"
+check_true "and the session lists were still merged" grep -q written "$tmp/corrupt-out"
+check "and the corrupt item is left alone" 'not json' "$(kc_get "Claude Code-credentials" "$USER")"
+check_true "a corrupt live item on the way out saves the Desktop login only" grep -q 'not valid JSON; saved the Desktop login only' <<< "$(cda switch alpha --no-relaunch 2>&1 > /dev/null)"
+check "and keeps the profile item" at-beta-fresh "$(kc_get claude-multipass beta | jq -r .claudeAiOauth.accessToken)"
+kc_put "Claude Code-credentials" "$USER" "$live_item"
+
 # A profile saved by 0.2.x has no CLI login
 mkdir -p "$p/legacy"
 printf '{"oauth:tokenCache":"enc-C1","oauth:tokenCacheV2":"enc-C2","lastKnownAccountUuid":"cccccccc-3333"}' > "$p/legacy/config.json"
