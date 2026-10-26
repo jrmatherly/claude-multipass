@@ -10,6 +10,7 @@ final class StatusItemController: NSObject {
   private var statusItem: NSStatusItem?
   private var hosting: NSHostingController<StripView>?
   private var popover: PopoverController?
+  private var settingsWindow: SettingsWindowController?
 
   init(appState: AppState) {
     self.appState = appState
@@ -72,7 +73,10 @@ final class StatusItemController: NSObject {
     Task { await appState.refreshAll() }
   }
 
-  @objc func openSettings() {}
+  @objc func openSettings() {
+    if settingsWindow == nil { settingsWindow = SettingsWindowController(appState: appState) }
+    settingsWindow?.show()
+  }
 
   @objc private func quit() {
     NSApp.terminate(nil)
