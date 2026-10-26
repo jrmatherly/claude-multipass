@@ -39,7 +39,7 @@ Claude Code transcripts live in `~/.claude/projects`, shared by every account, s
 | `pick` | The fzf picker (also a bare invocation on a terminal) |
 | `doctor` | Check the setup: config, tools, store modes, profile tokens. Exits 1 on any `fail:` line |
 
-`--no-relaunch` leaves Desktop quit; `--force` overrides the refusals named in `--help`.
+`--no-relaunch` leaves Desktop quit; `--force` overrides the refusals named in `--help`. Quit any running `claude` terminal session before a switch: it keeps its old token and can write it back on its next refresh (`switch` warns when one runs). A profile saved before the CLI login existed switches Desktop only until the account is signed in with `claude auth login` and saved again (the next `switch` away from it captures the login too).
 
 ## Cautions
 
@@ -66,7 +66,7 @@ Then in Raycast, **Settings, Script Commands, Add Script Directory**, press Cmd+
 brew install --cask jrmatherly/tap/claude-multipass-app
 ```
 
-The cask depends on the `claude-multipass` formula and the app needs 0.2.0 or newer; it says so in the popover when the tool is missing or older. The first launch of a downloaded build needs the network once, for Gatekeeper to check the notarization ticket. The first switch asks once whether Claude Multipass may control Claude (the Automation prompt): allow it, or every switch waits 8 s for Desktop to be force-quit instead of asked to quit.
+The cask depends on the `claude-multipass` formula and the app needs 0.2.0 or newer; it says so in the popover when the tool is missing or older. The first launch of a downloaded build needs the network once, for Gatekeeper to check the notarization ticket. The first switch asks once whether Claude Multipass may control Claude (the Automation prompt): allow it, or every switch waits 8 s for Desktop to be force-quit instead of asked to quit. A switch that moves a CLI login may also raise a Keychain prompt for `security` once; click Always Allow.
 
 Usage in the menu bar (5-hour and weekly bars and reset countdowns) is off by default. Turning it on in Settings has the same caution as the `usage` command: the app runs `claude-multipass usage --json` on a timer, at least 5 minutes apart, which decrypts the saved tokens through this Mac's Keychain (one prompt the first time; click Always Allow) and reads Anthropic's usage endpoint outside the app. Turn it off and the polling stops.
 

@@ -175,6 +175,12 @@ kc_put "Claude Code-credentials" "$USER" "$live_item"
 printf '{"oauth:tokenCache":"enc-B1","oauth:tokenCacheV2":"enc-B2","lastKnownAccountUuid":"bbbbbbbb-2222"}' > "$p/beta/config.json"
 printf '{"account":"bbbbbbbb-2222","savedAt":"2026-01-01T00:00:00Z"}' > "$p/beta/meta.json"
 printf cookie-B > "$p/beta/Cookies"
+kc_put claude-multipass beta '{"claudeAiOauth":{"accessToken":"at-beta","refreshToken":"rt-beta","expiresAt":2,"scopes":["a"],"subscriptionType":"max"}}'
+printf '{"oauthAccount":{"accountUuid":"bbbbbbbb-2222","emailAddress":"b@example.com","organizationUuid":"org-beta"}}' > "$p/beta/cli.json"
+# claude on PATH answers the verification after a restore
+printf '#!/bin/sh\necho "{\\"orgId\\":\\"org-beta\\"}"\n' > "$tmp/bin/claude"
+chmod +x "$tmp/bin/claude"
+cp "$tmp/claude.json" "$tmp/claude-before.json"
 
 printf '{"lastActivityAt":100,"title":"one"}' > "$s/aaaaaaaa-1111/org-a/local_s1.json"
 printf '{"lastActivityAt":200}' > "$s/aaaaaaaa-1111/org-a/local_s2.json"
@@ -192,7 +198,7 @@ touch -t 202101010000 "$s/aaaaaaaa-1111/org-a/local_s2.json" "$s/bbbbbbbb-2222/o
 before=$(jq --tab '.["oauth:tokenCacheV2"] = "enc-A2-new"' "$d/config.json")
 printf '%s' "$before" > "$d/config.json"
 
-out=$(cda switch beta --no-relaunch)
+out=$(cda switch beta --no-relaunch 2> "$tmp/switch-err" | tee "$tmp/switch-out")
 check "switch merges keys in place, other keys byte-identical" \
   "{
 ${tab}\"theme\": \"dark\",
@@ -216,6 +222,19 @@ check "switch writes one backup folder beside the store" 1 "$(find "$b" -mindept
 check "backup is the previous config" "$before" "$(cat "$b"/*/config.json)"
 check "backup holds the previous cookies" cookie-A "$(cat "$b"/*/Cookies)"
 check_true "--no-relaunch does not launch" test ! -e "$tmp/calls"
+check "switch restores the CLI tokens" at-beta "$(kc_get "Claude Code-credentials" "$USER" | jq -r .claudeAiOauth.accessToken)"
+check "switch keeps the shared MCP keys" '{"srv":"shared"}' "$(kc_get "Claude Code-credentials" "$USER" | jq -c .mcpOAuth)"
+check "switch drops the previous device token" null "$(kc_get "Claude Code-credentials" "$USER" | jq -r .trustedDeviceToken)"
+check "switch replaces oauthAccount" bbbbbbbb-2222 "$(jq -r .oauthAccount.accountUuid "$tmp/claude.json")"
+check "switch leaves the other claude.json keys as they were" "$(jq -S 'del(.oauthAccount)' "$tmp/claude-before.json")" "$(jq -S 'del(.oauthAccount)' "$tmp/claude.json")"
+check "switch keeps claude.json private" 600 "$(stat -f %Lp "$tmp/claude.json")"
+dest=$(sed -n 's/^Backed up the current login to //p' "$tmp/switch-out")
+check "switch backs up the previous CLI tokens" at-alpha "$(kc_get claude-multipass "$(basename "$dest")" | jq -r .claudeAiOauth.accessToken)"
+check "switch backs up the previous identity" aaaaaaaa-1111 "$(jq -r .oauthAccount.accountUuid "$dest/cli.json")"
+check "switch re-saves the outgoing CLI login" at-alpha "$(kc_get claude-multipass alpha | jq -r .claudeAiOauth.accessToken)"
+check "switch releases the CLI locks" 0 "$(ls -d "$tmp"/claude.json.lock "$tmp"/claude-home/.oauth_refresh.lock "$tmp"/claude-home.lock 2> /dev/null | wc -l | tr -d ' ')"
+check "a matching org raises no warning" 0 "$(grep -c 'different org' "$tmp/switch-err")"
+check "switch never puts a token on argv" 0 "$(grep -c -- '-w ' "$tmp/security-calls")"
 
 # sync (run by switch)
 check "sync output" "aaaaaaaa-1111/org-a: 1 written
@@ -234,6 +253,79 @@ rm "$d/Cookies"
 cda switch beta --no-relaunch > /dev/null
 check "same-name switch repairs missing cookies" cookie-B "$(cat "$d/Cookies")"
 
+# The CLI already on the target account: its live tokens are fresher than the saved ones, so switch re-saves them and writes nothing
+kc_put "Claude Code-credentials" "$USER" "$(kc_get "Claude Code-credentials" "$USER" | jq -c '.claudeAiOauth.accessToken = "at-beta-fresh"')"
+out=$(cda switch beta --no-relaunch)
+check "switch to the signed-in account re-saves the live CLI login" "beta is already signed in" "$(head -1 <<< "$out")"
+check "and leaves the live tokens alone" at-beta-fresh "$(kc_get "Claude Code-credentials" "$USER" | jq -r .claudeAiOauth.accessToken)"
+check "and the profile now holds them" at-beta-fresh "$(kc_get claude-multipass beta | jq -r .claudeAiOauth.accessToken)"
+
+# A hand login as a foreign account on the way out: the outgoing profile's CLI login is left alone, the target's restored
+jq '.oauthAccount.accountUuid = "zzzzzzzz-9999"' "$tmp/claude.json" > "$tmp/claude.json.new" && mv "$tmp/claude.json.new" "$tmp/claude.json"
+kc_put "Claude Code-credentials" "$USER" "$(kc_get "Claude Code-credentials" "$USER" | jq -c '.claudeAiOauth.accessToken = "at-foreign"')"
+err=$(cda switch alpha --no-relaunch 2>&1 > /dev/null)
+check_true "a foreign CLI login warns on the way out" grep -q 'signed in as a different account, or signed out; saved the Desktop login only' <<< "$err"
+check "and leaves the outgoing profile's CLI login alone" at-beta-fresh "$(kc_get claude-multipass beta | jq -r .claudeAiOauth.accessToken)"
+check "and still restores the target's CLI login" at-alpha "$(kc_get "Claude Code-credentials" "$USER" | jq -r .claudeAiOauth.accessToken)"
+check "and its identity" aaaaaaaa-1111 "$(jq -r .oauthAccount.accountUuid "$tmp/claude.json")"
+
+# A live item too large for security -i: the CLI part is skipped whole, backup included
+big=$(printf 'x%.0s' $(seq 1 2000))
+kc_put "Claude Code-credentials" "$USER" "{\"claudeAiOauth\":{\"accessToken\":\"at-alpha\"},\"mcpOAuth\":\"$big\"}"
+n_backups=$(ls -1d "$b"/login-*/ | wc -l | tr -d ' ')
+err=$(cda switch beta --no-relaunch 2>&1 > /dev/null)
+check_true "an oversize CLI login warns" grep -q 'the CLI login is too large for security -i; switched Desktop only' <<< "$err"
+check "and leaves the live item alone" "$big" "$(kc_get "Claude Code-credentials" "$USER" | jq -r .mcpOAuth)"
+check "and leaves oauthAccount alone" aaaaaaaa-1111 "$(jq -r .oauthAccount.accountUuid "$tmp/claude.json")"
+check "and still switches Desktop" bbbbbbbb-2222 "$(jq -r .lastKnownAccountUuid "$d/config.json")"
+check "and backs up no CLI item" absent "$(kc_get claude-multipass "$(basename "$(ls -1d "$b"/login-*/ | sort | tail -1)")")"
+check "though the Desktop backup was made" $((n_backups + 1)) "$(ls -1d "$b"/login-*/ | wc -l | tr -d ' ')"
+kc_put "Claude Code-credentials" "$USER" "$live_item"
+
+# A profile saved by 0.2.x has no CLI login
+mkdir -p "$p/legacy"
+printf '{"oauth:tokenCache":"enc-C1","oauth:tokenCacheV2":"enc-C2","lastKnownAccountUuid":"cccccccc-3333"}' > "$p/legacy/config.json"
+printf '{"account":"cccccccc-3333","savedAt":"2026-01-01T00:00:00Z"}' > "$p/legacy/meta.json"
+check_true "switch to a legacy profile says it switched Desktop only" grep -q 'no CLI login saved for legacy; switched Desktop only' <<< "$(cda switch legacy --no-relaunch 2>&1 > /dev/null)"
+check "and leaves oauthAccount alone" aaaaaaaa-1111 "$(jq -r .oauthAccount.accountUuid "$tmp/claude.json")"
+
+# cli.json without its Keychain item
+security delete-generic-password -a beta -s claude-multipass > /dev/null
+check_true "a missing saved item warns" grep -q 'the saved CLI login for beta is missing from the Keychain; run claude auth login, then save beta' <<< "$(cda switch beta --no-relaunch 2>&1 > /dev/null)"
+check "and leaves oauthAccount alone" aaaaaaaa-1111 "$(jq -r .oauthAccount.accountUuid "$tmp/claude.json")"
+kc_put claude-multipass beta '{"claudeAiOauth":{"accessToken":"at-beta","refreshToken":"rt-beta","expiresAt":2,"scopes":["a"],"subscriptionType":"max"}}'
+
+# The CLI's locks: a stale one is removed, a fresh one fails the switch before Desktop's config is touched
+mkdir "$tmp/claude-home/.oauth_refresh.lock"
+touch -t 202001010000 "$tmp/claude-home/.oauth_refresh.lock"
+check "a stale CLI lock does not block the switch" 0 "$(exit_code cda switch alpha --no-relaunch)"
+check_true "and is removed" test ! -e "$tmp/claude-home/.oauth_refresh.lock"
+mkdir "$tmp/claude.json.lock"
+cp "$d/config.json" "$tmp/config-locked"
+check "a held CLI lock fails the switch" 1 "$(exit_code cda switch beta --no-relaunch)"
+check_true "and Desktop's config is untouched" cmp -s "$d/config.json" "$tmp/config-locked"
+check "and oauthAccount too" aaaaaaaa-1111 "$(jq -r .oauthAccount.accountUuid "$tmp/claude.json")"
+check_true "and the tool's own locks are released" test ! -e "$tmp/claude-home/.oauth_refresh.lock" -a ! -e "$tmp/claude-home.lock"
+rmdir "$tmp/claude.json.lock"
+
+# Verification after a restore: claude auth status must report the restored org
+printf '#!/bin/sh\necho "{\\"orgId\\":\\"org-other\\"}"\n' > "$tmp/bin/claude"
+err=$(cda switch beta --no-relaunch 2>&1 > /dev/null)
+check_true "an org mismatch warns and names the backup" grep -q "Claude Code reports a different org; the previous login is in $b/login-" <<< "$err"
+rm "$tmp/bin/claude"
+# a PATH without claude (jq's folder, the stub folder and the system folders only)
+noclaude="$tmp/bin:$(dirname "$(command -v jq)"):/usr/bin:/bin"
+check_true "the no-claude PATH has no claude" test -z "$(PATH=$noclaude command -v claude || true)"
+check "no claude on PATH, no verification warning" 0 "$(PATH=$noclaude "$script" switch alpha --no-relaunch 2>&1 > /dev/null | grep -c 'different org')"
+
+# A running claude keeps its token and can refresh it over the switched login
+printf '#!/bin/sh\ncase "$*" in *"-x claude"*) echo 4242; exit 0 ;; esac\nexit 1\n' > "$tmp/bin/pgrep"
+check_true "switch warns about a running claude" grep -q 'Claude Code is running (pid 4242); quit it first, or its next token refresh can overwrite the switched login' <<< "$(cda switch beta --no-relaunch 2>&1 > /dev/null)"
+printf '#!/bin/sh\nexit 1\n' > "$tmp/bin/pgrep"
+check "the CLI follows Desktop back to beta" bbbbbbbb-2222 "$(jq -r .oauthAccount.accountUuid "$tmp/claude.json")"
+# The switches away re-saved beta; the list and show cases below expect its hand-written save time.
+jq '.savedAt = "2026-01-01T00:00:00Z"' "$p/beta/meta.json" > "$tmp/meta.new" && mv "$tmp/meta.new" "$p/beta/meta.json"
+
 # list marks the active profile
 list=$(cda list)
 check_true "list marks beta active" grep -Eq '^\* beta +bbbbbbbb  2026-01-01T00:00:00Z  4 sessions$' <<< "$list"
@@ -242,7 +334,7 @@ out=$(cda list --json)
 check "list --json current" beta "$(jq -r .current <<< "$out")"
 check "list --json signedIn" true "$(jq -r .signedIn <<< "$out")"
 check "list --json desktopRunning" false "$(jq -r .desktopRunning <<< "$out")"
-check "list --json names in order" "alpha beta" "$(jq -r '[.profiles[].name] | join(" ")' <<< "$out")"
+check "list --json names in order" "alpha beta legacy" "$(jq -r '[.profiles[].name] | join(" ")' <<< "$out")"
 check "list --json sessions is a number" number "$(jq -r '.profiles[1].sessions | type' <<< "$out")"
 check "list --json sessions" 4 "$(jq -r '.profiles[1].sessions' <<< "$out")"
 check "list --json version" "$pkg_version" "$(jq -r .version <<< "$out")"
@@ -348,10 +440,17 @@ check "list with no profiles explains" "No saved accounts yet: run claude-multip
 check "list --json with no profiles is an empty array" "[]" "$(CLAUDE_MULTIPASS_DIR="$tmp/empty" cda list --json | jq -c .profiles)"
 
 # backups prune to the newest ten
-for i in $(seq 1 12); do mkdir -p "$b/login-2020010100000$i-1"; done
+for i in $(seq 1 12); do
+  mkdir -p "$b/login-2020010100000$i-1"
+  kc_put claude-multipass "login-2020010100000$i-1" '{"claudeAiOauth":{"accessToken":"old"}}'
+done
 printf '{"oauth:tokenCache":"x","oauth:tokenCacheV2":"enc-Q","lastKnownAccountUuid":"qqqqqqqq-0000"}' > "$d/config.json"
 cda add eps --no-relaunch > /dev/null 2>&1
 check "login backups pruned to ten" 10 "$(find "$b" -mindepth 1 -maxdepth 1 -type d -name 'login-*' | wc -l | tr -d ' ')"
+check "the oldest pruned backup's CLI item is gone" absent "$(kc_get claude-multipass login-20200101000001-1)"
+for i in $(seq 1 12); do
+  if [[ -d $b/login-2020010100000$i-1 ]]; then check "kept backup $i keeps its CLI item" old "$(kc_get claude-multipass "login-2020010100000$i-1" | jq -r .claudeAiOauth.accessToken)"; else check "pruned backup $i loses its CLI item" absent "$(kc_get claude-multipass "login-2020010100000$i-1")"; fi
+done
 
 # usage: a fixture token cache encrypted the way the app does; security and
 # curl are stubs on PATH, so no Keychain and no network

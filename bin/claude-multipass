@@ -18,7 +18,7 @@
 #
 # `claude-multipass save {{name}}`
 #
-# - Switch to a saved account and sync the Code tab's session list:
+# - Switch to a saved account (Desktop and the terminal's claude login) and sync the Code tab's session list:
 #
 # `claude-multipass switch {{name}}`
 #
@@ -137,6 +137,7 @@ auth_keys='["oauth:tokenCache","oauth:tokenCacheV2","lastKnownAccountUuid"]'
 # and org. A profile's copy of the tokens is a Keychain item under the tool's
 # own service, named after the profile; only the identity goes on disk.
 claude_json="${CLAUDE_CLI_CONFIG:-$HOME/.claude.json}"
+cli_home="${CLAUDE_CLI_HOME:-$HOME/.claude}"
 cli_service='Claude Code-credentials'
 cli_account=${USER:-$(id -un)}
 mp_service=claude-multipass
@@ -220,7 +221,12 @@ ${bold}Commands${reset}
                        account's list, and relaunches Desktop signed in as
                        <name>. The login you are leaving is re-saved first. If
                        that login was never saved, switch stops so you do not
-                       lose it; add --force to proceed anyway.
+                       lose it; add --force to proceed anyway. When the profile
+                       holds a CLI login, the terminal's claude login moves too
+                       (the live one is backed up first); otherwise, or when
+                       the CLI is signed in by hand as another account, switch
+                       warns and moves Desktop only. Quit running claude
+                       sessions first: one keeps its old token.
   sync                 Copies every saved account's Code session entries into
                        every other account's list, without changing accounts.
                        switch already does this; run sync by itself when a
@@ -350,6 +356,112 @@ cli_capture() {
   jq_write "$dir/cli.json" '{oauthAccount}' "$claude_json"
 }
 
+# The CLI's locks are directories: mkdir is the acquire, rmdir the release,
+# and a holder older than the CLI's own stale threshold is swept first. Five
+# tries a second apart, then the switch fails before Desktop's config moves.
+cli_locks=()
+cli_lock() {
+  local dir=$1 stale=$2 i
+  mkdir -p "$(dirname "$dir")"
+  if [[ -d $dir ]] && (($(date +%s) - $(stat -f %m "$dir") > stale)); then rm -rf "$dir"; fi
+  for ((i = 0; i < 5; i++)); do
+    if mkdir "$dir" 2> /dev/null; then
+      cli_locks+=("$dir")
+      return 0
+    fi
+    sleep 1
+  done
+  fail "Claude Code holds $dir; retry in a moment"
+}
+
+cli_lock_all() {
+  cli_lock "$cli_home/.oauth_refresh.lock" 60
+  cli_lock "$cli_home.lock" 60
+  cli_lock "$claude_json.lock" 10
+}
+
+# Runs from the EXIT trap too, so every rmdir tolerates an absent dir.
+cli_unlock() {
+  local dir
+  for dir in ${cli_locks[@]+"${cli_locks[@]}"}; do rmdir "$dir" 2> /dev/null || true; done
+  cli_locks=()
+}
+
+# A running claude keeps its token in memory and writes it back on refresh.
+cli_running_warning() {
+  local pid
+  pid=$(pgrep -x claude 2> /dev/null | head -1) || true
+  [[ -z $pid ]] || warning "Claude Code is running (pid $pid); quit it first, or its next token refresh can overwrite the switched login"
+}
+
+# The live CLI item and identity, kept under the name of the backup folder
+# backup_login just made. Fails when the item cannot be kept, so the caller
+# writes nothing over a login that has no copy.
+cli_backup() {
+  local live=$1
+  if [[ -n $live ]] && ! keychain_put "$mp_service" "$(basename "$backup_dest")" <<< "$live"; then
+    warning "could not back up the CLI login; switched Desktop only"
+    return 1
+  fi
+  [[ ! -f $claude_json ]] || jq_write "$backup_dest/cli.json" '{oauthAccount}' "$claude_json"
+}
+
+# After a restore, claude itself must agree on the org; a mismatch is a
+# warning naming the backup, never a rollback.
+cli_verify() {
+  local org
+  command -v claude > /dev/null || return 0
+  org=$(claude auth status 2> /dev/null | jq -r '.orgId // empty' 2> /dev/null) || org=''
+  [[ $org == "$1" ]] || warning "Claude Code reports a different org; the previous login is in $backup_dest"
+}
+
+# The CLI part of a restore. The saved tokens replace only the account part
+# of the live item; the shared MCP keys stay. A CLI already on the target
+# account holds fresher tokens than the profile, so it is re-saved instead.
+cli_restore() {
+  local name=$1 dir="$store/$1" saved live merged rc=0
+  if [[ ! -f $dir/cli.json ]]; then
+    warning "no CLI login saved for $name; switched Desktop only"
+    return 0
+  fi
+  if [[ -n ${CLAUDE_CONFIG_DIR:-} ]]; then
+    warning "CLAUDE_CONFIG_DIR is set; the CLI login is not switched"
+    return 0
+  fi
+  if [[ $(cli_signed_in_as) == "$(jq -r .account "$dir/meta.json")" ]]; then
+    cli_capture "$name"
+    return 0
+  fi
+  saved=$(keychain_get "$mp_service" "$name") || rc=$?
+  if ((rc == 44)); then
+    warning "the saved CLI login for $name is missing from the Keychain; run claude auth login, then save $name"
+    return 0
+  elif ((rc != 0)); then
+    warning "security exited $rc reading the saved CLI login; switched Desktop only"
+    return 0
+  fi
+  live=$(keychain_get "$cli_service" "$cli_account") || rc=$?
+  if ((rc == 44)); then live=''; elif ((rc != 0)); then
+    warning "security exited $rc reading the CLI login; switched Desktop only"
+    return 0
+  fi
+  merged=$saved
+  [[ -z $live ]] || merged=$(jq -c --argjson s "$saved" 'del(.claudeAiOauth, .trustedDeviceToken) + $s' <<< "$live")
+  if (($(printf %s "$merged" | LC_ALL=C wc -c) > keychain_payload_limit)); then
+    warning "the CLI login is too large for security -i; switched Desktop only"
+    return 0
+  fi
+  cli_backup "$live" || return 0
+  keychain_put "$cli_service" "$cli_account" <<< "$merged" || {
+    warning "security exited $? writing the CLI login; the previous login is in $backup_dest"
+    return 0
+  }
+  # A missing ~/.claude.json means the CLI never ran here; it gets the identity alone.
+  [[ -f $claude_json ]] || (umask 077 && printf '{}' > "$claude_json")
+  jq_write "$claude_json" --slurpfile c "$dir/cli.json" '.oauthAccount = $c[0].oauthAccount' "$claude_json"
+  cli_verify "$(jq -r '.oauthAccount.organizationUuid // empty' "$dir/cli.json")"
+}
+
 desktop_running() { pgrep -xq Claude; }
 
 wait_gone() {
@@ -408,18 +520,21 @@ copy_cookies() {
 
 # Keep the live login (config.json plus cookies) under a timestamped folder,
 # newest ten only: each one holds encrypted tokens.
+backup_dest=''
 backup_login() {
-  local dest old n
-  dest="$backups/login-$(date +%Y%m%d-%H%M%S)-$$"
-  (umask 077 && mkdir -p "$dest")
-  cp -p "$config" "$dest/config.json"
-  copy_cookies "$cookies" "$dest"
-  echo "Backed up the current login to $dest"
-  # BSD head has no negative count, so compute how many to drop.
+  local old n
+  backup_dest="$backups/login-$(date +%Y%m%d-%H%M%S)-$$"
+  (umask 077 && mkdir -p "$backup_dest")
+  cp -p "$config" "$backup_dest/config.json"
+  copy_cookies "$cookies" "$backup_dest"
+  echo "Backed up the current login to $backup_dest"
+  # BSD head has no negative count, so compute how many to drop. A pruned
+  # folder's CLI backup item goes with it (44: a 0.2.x folder had none).
   n=$(ls -1d "$backups"/login-*/ 2> /dev/null | wc -l | tr -d ' ')
   if ((n > 10)); then
     for old in $(ls -1d "$backups"/login-*/ | sort | head -n $((n - 10))); do
       rm -rf "$old"
+      keychain_delete "$mp_service" "$(basename "$old")" || warning "could not delete the Keychain item for $old"
     done
   fi
 }
@@ -456,6 +571,7 @@ profile_restore() {
     'reduce $k[] as $x (.; if $p[0] | has($x) then .[$x] = $p[0][$x] else del(.[$x]) end)' \
     "$config"
   copy_cookies "$dir" "$cookies"
+  cli_restore "$name"
   echo "Restored $name"
 }
 
@@ -943,15 +1059,24 @@ main() {
   # Everything past here needs the app quit. Relaunch from the trap so an
   # error midway still brings it back.
   desktop_quit
-  if [[ -n $relaunch ]]; then trap desktop_launch EXIT; fi
+  if [[ -n $relaunch ]]; then trap 'cli_unlock; desktop_launch' EXIT; else trap cli_unlock EXIT; fi
+  # The CLI's own locks guard its login while it moves; a claude.json means
+  # the CLI has run here. add leaves the CLI alone.
+  if [[ $cmd != add ]]; then
+    cli_running_warning
+    [[ ! -f $claude_json ]] || cli_lock_all
+  fi
   active=$(active_profile)
   case $cmd in
     save) profile_save "$name" ;;
     switch)
       if [[ $active == "$name" ]]; then
         echo "$name is already signed in"
-        # Cookies are idempotent to re-copy and repair a switch that died midway.
+        # Cookies are idempotent to re-copy and repair a switch that died midway;
+        # the CLI part repairs the same way, through the same backup.
         copy_cookies "$store/$name" "$cookies"
+        backup_login
+        cli_restore "$name"
       else
         # Re-save first so token refreshes since the last save aren't lost.
         [[ -z $active ]] || profile_save "$active"

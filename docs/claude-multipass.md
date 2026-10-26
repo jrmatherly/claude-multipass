@@ -37,7 +37,7 @@ Desktop quits, relaunches signed in as that account, and the Code tab lists both
 | `show <name>` | One account, with its session count per organization folder |
 | `save <name>` | Snapshot the current login as `<name>`: Desktop's, and the CLI's when `claude` is signed in as the same account (a warning says when it is not, and the profile's earlier CLI login stays). Refuses a name that holds a different account; `--force` replaces it and keeps the old profile in the backups folder |
 | `add <name>` | Re-save the current login, clear it locally, relaunch at the sign-in screen. Then sign in and run `save <name>` |
-| `switch <name>` | Quit Desktop, re-save the outgoing login, swap in `<name>`, merge the session lists, relaunch. Refuses to drop a login you never saved; `--force` drops it |
+| `switch <name>` | Quit Desktop, re-save the outgoing login, swap in `<name>`, merge the session lists, relaunch. The CLI login moves too when the profile holds one (the live CLI item and `oauthAccount` are backed up first; see below for what a warning means). Refuses to drop a login you never saved; `--force` drops it |
 | `sync` | Only the session-list merge. Needs Desktop quit, or `--force` |
 | `rename <old> <new>` | Rename a profile |
 | `remove <name>` | Move a profile to the backups folder |
@@ -54,6 +54,7 @@ Desktop quits, relaunches signed in as that account, and the Code tab lists both
 | Context | Where it lives | After a switch |
 | --- | --- | --- |
 | Claude Code sessions (Code tab and terminal) | `~/.claude/projects/<folder>/<session>.jsonl`, one store for every account | Available. `switch` adds the other account's entries to the Code tab's list. Whether Desktop's cross-session tools read the copied entries is not yet checked |
+| The terminal's `claude` login | The login-Keychain item `Claude Code-credentials` (tokens) and `oauthAccount` in `~/.claude.json` (account, org) | Moves with the profile when it holds a CLI login: `switch` swaps the account part of the item and the `oauthAccount` block, under the CLI's own lock dirs, and keeps the shared MCP keys. A `claude` process already running keeps its old token and can write it back on its next refresh, so quit terminal sessions first; `switch` warns when one runs. The Code tab is unchanged |
 | The remember plugin's handoff and auto memory | The repo's `.remember/` and `~/.claude/projects/<folder>/memory/` | Available; both key on the project folder, not the account |
 | Desktop projects (Cowork spaces) | `local-agent-mode-sessions/<account>/<org>/spaces.json` | Not synced yet; a copied session shows outside its project grouping |
 | claude.ai chats, Projects, memory | Anthropic's servers, per account | Stay with their account. Export memory with the verbatim prompt and import it on the other account by hand |
@@ -78,7 +79,7 @@ Refresh cadence:
 | Usage figures | `usage --json` | only when usage is on: every 5, 15, 30 or 60 minutes, once when turned on, on Refresh; one Keychain read per run |
 | Strip redraw and countdowns | none | every 3 s from cached data |
 
-Turning a module on or off never fetches usage. Nothing in the app runs `switch` without a click. The first switch raises the macOS Automation prompt, "Claude Multipass wants to control Claude", because the app is the responsible process for the tool's `osascript` quit; allow it, or every switch falls back to the tool's `pkill` after 8 s. Revisit it under System Settings, Privacy & Security, Automation. The first launch of a downloaded build needs the network once, for Gatekeeper to check the notarization ticket (the DMG is notarized and stapled; the app inside carries the ticket online).
+Turning a module on or off never fetches usage. Nothing in the app runs `switch` without a click. The first switch raises the macOS Automation prompt, "Claude Multipass wants to control Claude", because the app is the responsible process for the tool's `osascript` quit; allow it, or every switch falls back to the tool's `pkill` after 8 s. Revisit it under System Settings, Privacy & Security, Automation. The first switch that moves a CLI login may raise a Keychain prompt for `security`; click Always Allow, or the switch finishes Desktop only. The first launch of a downloaded build needs the network once, for Gatekeeper to check the notarization ticket (the DMG is notarized and stapled; the app inside carries the ticket online).
 
 ## Usage headroom
 
@@ -96,6 +97,7 @@ This is the one part of the tool that uses a subscription token outside Anthropi
 | `~/.config/claude-multipass/backups/login-*/` | The login each `switch` or `add` replaced, newest ten |
 | `~/.config/claude-multipass/backups/profile-*/` | Profiles that `remove` or a forced `save` set aside |
 | `~/Library/Application Support/Claude/` | Desktop's data: `config.json`, the cookie files, `claude-code-sessions/<account>/<org>/local_*.json` (the Code tab's list) |
+| `~/.claude.json` and the login Keychain | The CLI's data: `oauthAccount` in the file, the tokens in the Keychain item `Claude Code-credentials` (account: your macOS user name). The tool's own items are service `claude-multipass`, one per profile and one per `login-*` backup folder. `CLAUDE_CLI_CONFIG` and `CLAUDE_CLI_HOME` point at another file and CLI home (the self-check uses them) |
 
 `CLAUDE_MULTIPASS_DIR` moves the profile and backup folders (`XDG_CONFIG_HOME` moves their default parent); `CLAUDE_DESKTOP_DIR` points at another Desktop data folder. A store left by the tool's earlier life as `claude-desktop-account` in a dotfiles repo (`dotfiles/claude-desktop-accounts` and its `-backups` sibling under `XDG_CONFIG_HOME`, `~/.config` by default) is moved into the new location on the first run that finds it, and the run says so. When a `backups` folder already exists in the new location, the legacy `-backups` folder stays where it was and the run warns.
 
@@ -105,6 +107,9 @@ This is the one part of the tool that uses a subscription token outside Anthropi
 - Desktop relaunches signed in as the wrong account after `add` or `switch`: the previous login is under the backups folder. Copy its `config.json` keys and cookie files back by hand, or run `switch` to the profile you want.
 - A switch died midway: run the same `switch` again. It re-copies the cookies even when the account already matches.
 - `usage` says `token expired, sign in and re-save`: sign in to that account in Desktop (through `switch` or `add`) and run `save <name>` again.
+- `switch` said `switched Desktop only`, or `saved the Desktop login only`: the CLI part was skipped and the reason is in the same line (no CLI login saved for that profile, the CLI signed in as another account or signed out, its Keychain item missing, `CLAUDE_CONFIG_DIR` set, a login too large for `security -i`). Run `claude auth login` for the account you want, then `save <name>`; from then on the next `switch` away from it captures the login through the re-save.
+- `claude` fails with `invalid_grant` after a switch, possibly hours later when its access token expires: the saved refresh token was rotated past by a login the tool did not see. Run `claude auth login`, then `save <name>`.
+- The previous CLI login is in the backup folder `switch` named: `oauthAccount` in its `cli.json`, the tokens in the Keychain item `claude-multipass` / `login-<timestamp>-<pid>`. A removed profile's CLI token is not recoverable from `backups/profile-*`; its Desktop login is.
 - The Code tab does not list the other account's sessions: quit Desktop and run `sync`, then reopen. Sessions deleted in any account stay deleted.
 
 ## Safety rails
@@ -112,9 +117,11 @@ This is the one part of the tool that uses a subscription token outside Anthropi
 - `save` never overwrites a profile that holds another account without `--force`.
 - `switch` never drops an unsaved login without `--force`.
 - Every write of `config.json` goes through a temp file and keeps the app's other keys byte for byte; every replaced login is backed up first.
+- `~/.claude.json` is written only while the CLI's own lock dirs are held (`~/.claude/.oauth_refresh.lock`, `~/.claude.lock`, `~/.claude.json.lock`; a busy CLI fails the switch before Desktop's config moves), only its `oauthAccount` key changes, and the live CLI item and identity are backed up first. The CLI token never appears on a command line, in output or in a log: it goes to `security` as hex on stdin.
+- A CLI login that does not belong to the profile (another account, signed out, `CLAUDE_CONFIG_DIR` set) is never captured over a saved one, and a CLI already on the target account is re-saved, never overwritten.
 - `sync` never deletes; it honours `deleted_<id>` tombstones.
 - A failure after the app was quit still relaunches it.
-- The menu bar app polls `list --json` on a timer; that reads `config.json` and `meta.json`, never the Keychain. Usage polling is opt-in, through `usage --json`, with an interval of at least 5 minutes, one `security` call per run, and stops when the user turns it off. Still rejected: any automatic switch; usage polling that is on by default or faster than 5 minutes; a launch agent or daemon separate from the user-visible app; reading the Keychain anywhere but inside `usage`.
+- The menu bar app polls `list --json` on a timer; that reads `config.json` and `meta.json`, never the Keychain. Usage polling is opt-in, through `usage --json`, with an interval of at least 5 minutes, one `security` call per run, and stops when the user turns it off. Keychain reads and writes happen only inside `save`, `add` (its re-save and backup), `switch`, `rename`, `remove` and the backup prune, for the CLI login item and the tool's own items. Still rejected: any automatic switch; usage polling that is on by default or faster than 5 minutes; a launch agent or daemon separate from the user-visible app; reading the Keychain anywhere else.
 - Refusals that `--force` lifts exit 3, so a caller can offer the override; other failures exit 1. A refused `save` is decided before Desktop quits.
 
 The self-check `test/claude-multipass.sh` runs in `pnpm check` against a fixture folder, with `pgrep`, `osascript`, `pkill`, `open`, `fzf`, `security` and `curl` stubbed on PATH, so it never touches the real app, Keychain or network.
