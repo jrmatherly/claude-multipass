@@ -9,6 +9,7 @@ final class StatusItemController: NSObject {
   private let appState: AppState
   private var statusItem: NSStatusItem?
   private var hosting: NSHostingController<StripView>?
+  private var popover: PopoverController?
 
   init(appState: AppState) {
     self.appState = appState
@@ -37,6 +38,7 @@ final class StatusItemController: NSObject {
     button.sendAction(on: [.leftMouseUp, .rightMouseUp])
     statusItem = item
     self.hosting = hosting
+    popover = PopoverController(appState: appState) { [weak self] in self?.openSettings() }
   }
 
   @objc private func clicked(_ sender: Any?) {
@@ -47,7 +49,10 @@ final class StatusItemController: NSObject {
     }
   }
 
-  func togglePopover() {}
+  func togglePopover() {
+    guard let button = statusItem?.button else { return }
+    popover?.toggle(relativeTo: button)
+  }
 
   private func showMenu() {
     guard let item = statusItem else { return }
