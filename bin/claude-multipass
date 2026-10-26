@@ -215,7 +215,8 @@ ${bold}Commands${reset}
   add <name>           Prepares Desktop for signing in to another account: the
                        current login is saved (if it has a name), Desktop
                        relaunches at its sign-in screen, and you sign in with
-                       the email code. Then run: save <name>
+                       the email code, then claude auth login for the
+                       terminal. Then run: save <name>
   switch <name>        Quits Desktop, puts the saved login for <name> in place,
                        copies every account's Code session entries into every
                        account's list, and relaunches Desktop signed in as
@@ -233,9 +234,12 @@ ${bold}Commands${reset}
                        session is missing from the Code tab. Desktop must be
                        quit, because it rewrites these files while it runs;
                        add --force to run while it is open.
-  rename <old> <new>   Renames a saved account. Nothing else changes.
+  rename <old> <new>   Renames a saved account, its CLI login item with it.
+                       Nothing else changes.
   remove <name>        Removes a saved account by moving its folder to the
-                       backups folder. Desktop's current login is untouched.
+                       backups folder and deleting its CLI login item (the
+                       Desktop login is recoverable from the backup, the CLI
+                       token is not). Desktop's current login is untouched.
   usage [name]         Prints each saved account's 5-hour and weekly usage as a
                        percentage, with the time each window resets. Give a
                        name to see one account. Opt-in; see Cautions. With
@@ -249,9 +253,10 @@ ${bold}Commands${reset}
                        with no arguments.
   doctor               Checks the setup: Desktop's config.json, the tools on
                        PATH, the store and profile modes, each profile's token,
-                       the backups count, whether Desktop runs. One ok:, warn:
-                       or fail: line per check; exits 1 on any fail:. Reads no
-                       Keychain and no network.
+                       the backups count, whether Desktop runs, which profiles
+                       hold no CLI login, whether CLAUDE_CONFIG_DIR is set. One
+                       ok:, warn: or fail: line per check; exits 1 on any
+                       fail:. Reads no Keychain and no network.
 
 ${bold}Options${reset}
   --no-relaunch        Leave Desktop quit after save, switch, add or pick,
@@ -549,6 +554,7 @@ profile_save() {
       [[ -n $force ]] || refuse "$name already holds account ${saved:0:8}, not the signed-in ${live:0:8}: pick another name, or pass --force to replace it"
       (umask 077 && mkdir -p "$backups")
       mv "$dir" "$backups/profile-$name-$(date +%Y%m%d-%H%M%S)-$$"
+      keychain_delete "$mp_service" "$name" || warning "could not delete the CLI login item for $name"
       echo "Moved the old $name profile into $backups"
     fi
   fi
@@ -748,7 +754,7 @@ doctor_report() {
   for dir in "$store"/*/; do
     [[ -d $dir ]] || continue
     name=$(basename "$dir")
-    for file in "$dir"config.json "$dir"meta.json "$dir"Cookies "$dir"Cookies-journal; do
+    for file in "$dir"config.json "$dir"meta.json "$dir"Cookies "$dir"Cookies-journal "$dir"cli.json; do
       [[ -f $file ]] || continue
       mode=$(stat -f %Lp "$file")
       [[ $mode == 600 ]] || echo "warn: $name: $(basename "$file") is mode $mode, expected 600"
@@ -765,7 +771,9 @@ doctor_report() {
     else
       echo "ok: $name"
     fi
+    [[ -f ${dir}cli.json ]] || echo "warn: $name: no CLI login saved (claude auth login, then save $name)"
   done
+  [[ -z ${CLAUDE_CONFIG_DIR:-} ]] || echo "warn: CLAUDE_CONFIG_DIR is set; the CLI login is not switched"
   n=$(ls -1d "$backups"/login-*/ 2> /dev/null | wc -l | tr -d ' ')
   echo "ok: backups: $n saved logins in $backups"
   if desktop_running; then echo "ok: desktop: running"; else echo "ok: desktop: not running"; fi
@@ -876,10 +884,19 @@ valid_name() {
     || fail "Give a name made of letters, digits, . _ - (got: $1)"
 }
 
+# The profile's CLI item is keyed by name, so it moves too (44: none saved).
 profile_rename() {
+  local v rc=0
   require_profile "$1"
   [[ ! -e $store/$2 ]] || fail "$2 already exists"
   mv "$store/$1" "$store/$2"
+  v=$(keychain_get "$mp_service" "$1") || rc=$?
+  if ((rc == 0)); then
+    keychain_put "$mp_service" "$2" <<< "$v" && keychain_delete "$mp_service" "$1" \
+      || warning "could not move the CLI login to $2; run claude auth login, then save $2"
+  elif ((rc != 44)); then
+    warning "security exited $rc reading the CLI login; run claude auth login, then save $2"
+  fi
   echo "Renamed $1 to $2"
 }
 
@@ -920,6 +937,7 @@ profile_remove() {
   require_profile "$1"
   (umask 077 && mkdir -p "$backups")
   mv "$store/$1" "$backups/profile-$1-$(date +%Y%m%d-%H%M%S)-$$"
+  keychain_delete "$mp_service" "$1" || warning "could not delete the CLI login item for $1"
   echo "Moved $1 to $backups (Desktop's current login is untouched)"
 }
 
@@ -1093,7 +1111,7 @@ main() {
       backup_login
       jq_write "$config" --argjson k "$auth_keys" 'delpaths($k | map([.]))' "$config"
       rm -f "$cookies/Cookies" "$cookies/Cookies-journal"
-      info "Sign in with the new account (email code), then run: claude-multipass save $name"
+      info "Sign in with the new account (email code), then claude auth login for the terminal, then run: claude-multipass save $name"
       ;;
   esac
 }

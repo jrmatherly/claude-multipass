@@ -384,6 +384,7 @@ out=$(cda add gamma --no-relaunch)
 check "add clears the auth keys" '["theme","windowBounds","zeta"]' "$(jq -c keys_unsorted "$d/config.json")"
 check_true "add removes the cookie files" test ! -e "$d/Cookies"
 check_true "add prints the save step" grep -q 'claude-multipass save gamma' <<< "$out"
+check_true "add says how to sign the terminal in" grep -q 'claude auth login' <<< "$out"
 check "save refuses when signed out" 1 "$(exit_code cda save gamma --no-relaunch)"
 check "unknown command exits 2" 2 "$(exit_code cda bogus)"
 check "two names fail" 1 "$(exit_code cda switch alpha beta --no-relaunch)"
@@ -394,6 +395,10 @@ check "version" "claude-multipass $pkg_version" "$(cda --version)"
 check "version exits 0" 0 "$(exit_code cda --version)"
 check "rename moves the profile" "Renamed alpha to home" "$(cda rename alpha home)"
 check_true "renamed profile keeps its login" test -f "$p/home/config.json" -a ! -e "$p/alpha"
+check "rename moves the CLI item" at-alpha "$(kc_get claude-multipass home | jq -r .claudeAiOauth.accessToken)"
+check "rename removes the old CLI item" absent "$(kc_get claude-multipass alpha)"
+check "rename of a profile without a CLI item succeeds" 0 "$(exit_code cda rename legacy legacy2)"
+cda rename legacy2 legacy > /dev/null
 check "rename onto an existing name fails" 1 "$(exit_code cda rename home beta)"
 check "rename needs two names" 1 "$(exit_code cda rename home)"
 check "remove moves the profile to backups" 1 "$(
@@ -401,6 +406,7 @@ check "remove moves the profile to backups" 1 "$(
   find "$b" -maxdepth 1 -name 'profile-home-*' | wc -l | tr -d ' '
 )"
 check_true "removed profile is gone from the store" test ! -e "$p/home"
+check "remove deletes the CLI item" absent "$(kc_get claude-multipass home)"
 check "remove of an unknown name fails" 1 "$(exit_code cda remove home)"
 cp -R "$b"/profile-home-* "$p/alpha"
 check "--force outside sync or switch fails" 1 "$(exit_code cda list --force)"
@@ -422,6 +428,8 @@ check "the refused save left beta untouched" bbbbbbbb-2222 "$(jq -r .account "$p
 check "save --force replaces it" 0 "$(exit_code cda save beta --no-relaunch --force)"
 check "forced save moved the old profile to backups" 1 "$(find "$b" -maxdepth 1 -name 'profile-beta-*' | wc -l | tr -d ' ')"
 check "forced save holds the new account" zzzzzzzz-9999 "$(jq -r .account "$p/beta/meta.json")"
+check "forced save deletes the replaced profile's CLI item" absent "$(kc_get claude-multipass beta)"
+check_true "and the moved profile keeps no cli.json claim on it" test ! -e "$p/beta/cli.json"
 
 # an error after the quit still relaunches when relaunch is on
 rm -f "$tmp/calls"
@@ -523,6 +531,8 @@ check_true "doctor reports jq" grep -q '^ok: jq' <<< "$(cda doctor)"
 n_sec=$(wc -l < "$tmp/security-calls" | tr -d ' ')
 cda doctor > /dev/null
 check "doctor never calls security" "$n_sec" "$(wc -l < "$tmp/security-calls" | tr -d ' ')"
+check_true "doctor names a profile without a CLI login" grep -q '^warn: legacy: no CLI login saved' <<< "$(cda doctor)"
+check_true "doctor warns on CLAUDE_CONFIG_DIR" grep -q '^warn: CLAUDE_CONFIG_DIR is set; the CLI login is not switched' <<< "$(CLAUDE_CONFIG_DIR=/x cda doctor)"
 cp "$p/usagey/config.json" "$tmp/usagey-config"
 printf '{"oauth:tokenCacheV2":""}' > "$p/usagey/config.json"
 check "doctor fails on an empty token" 1 "$(exit_code cda doctor)"

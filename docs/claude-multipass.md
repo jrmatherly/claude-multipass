@@ -36,15 +36,15 @@ Desktop quits, relaunches signed in as that account, and the Code tab lists both
 | `list` | Saved accounts with a short account id, save time and Code-session count; `*` marks the signed-in one. `--json` prints one object: `version`, `signedIn`, `desktopRunning`, `current` (`null` when the login has no name) and `profiles` (`name`, `account`, `savedAt`, `sessions`) |
 | `show <name>` | One account, with its session count per organization folder |
 | `save <name>` | Snapshot the current login as `<name>`: Desktop's, and the CLI's when `claude` is signed in as the same account (a warning says when it is not, and the profile's earlier CLI login stays). Refuses a name that holds a different account; `--force` replaces it and keeps the old profile in the backups folder |
-| `add <name>` | Re-save the current login, clear it locally, relaunch at the sign-in screen. Then sign in and run `save <name>` |
+| `add <name>` | Re-save the current login, clear it locally, relaunch at the sign-in screen. Then sign in, run `claude auth login` for the terminal, and run `save <name>`. `add` leaves the CLI's login alone |
 | `switch <name>` | Quit Desktop, re-save the outgoing login, swap in `<name>`, merge the session lists, relaunch. The CLI login moves too when the profile holds one (the live CLI item and `oauthAccount` are backed up first; see below for what a warning means). Refuses to drop a login you never saved; `--force` drops it |
 | `sync` | Only the session-list merge. Needs Desktop quit, or `--force` |
-| `rename <old> <new>` | Rename a profile |
-| `remove <name>` | Move a profile to the backups folder |
+| `rename <old> <new>` | Rename a profile, its CLI login item with it |
+| `remove <name>` | Move a profile to the backups folder and delete its CLI login item (the CLI token is not recoverable from the backup; the Desktop login is) |
 | `current` | The signed-in saved name, `not saved` or `signed out` (for scripts and Raycast) |
 | `usage [name]` | 5-hour and weekly usage per saved account with reset times. Opt-in, see below. `--json` prints the figures as one object |
 | `pick` | The fzf picker |
-| `doctor` | One `ok:`, `warn:` or `fail:` line per check (config, tools, store and profile modes, each profile's token, backups, Desktop running, the pre-0.1 store). Exits 1 on any `fail:`. No Keychain, no network |
+| `doctor` | One `ok:`, `warn:` or `fail:` line per check (config, tools, store and profile modes, each profile's token, backups, Desktop running, the pre-0.1 store, profiles without a CLI login, `CLAUDE_CONFIG_DIR`). Exits 1 on any `fail:`. No Keychain, no network |
 | `--version` | Print the version |
 
 `--no-relaunch` leaves Desktop quit after `save`, `switch` or `add`.
