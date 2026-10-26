@@ -47,11 +47,11 @@ The strip width follows its content, as CCSwitcher does. Profile names longer th
 ### Popover (left click)
 
 1. Header: current account, and whether Claude Desktop is running.
-2. Saved accounts: one row per profile with name, session count and, when usage is on, `5h 42%  7d 12%` (or `–`). The current one is marked. Clicking another row asks: "Switch to work? Claude Desktop quits and relaunches signed in as work. Its Code tab will list every saved account's sessions." Buttons Switch, Cancel.
-3. During a switch every control is disabled and the row shows a spinner with "Switching to work…". The CLI takes 5 to 20 s because it quits and relaunches Desktop.
-4. When the CLI refuses (exit code 3, see below) the error text is shown with a second button, "Switch anyway", which reruns with `--force`. Any other failure shows the CLI's stderr and a Retry button.
-5. When signed in but not saved: a "Save this login as…" row with a name field (same character rule as the CLI, `^[A-Za-z0-9._-]+$`) that runs `save <name>`.
-6. Footer: Refresh, Settings…, Quit.
+2. Saved accounts: one row per profile with name, session count and, when usage is on, `5h 42%  7d 12%` (or `–`, with the CLI's reason as a tooltip). The current one is marked. Clicking another row expands it inline to: "Switch to work? Claude Desktop quits and relaunches signed in as work. Its Code tab will list every saved account's sessions." with Switch and Cancel buttons. No sheet or dialog: a transient popover and a presented sheet do not mix reliably, and one inline pattern serves the confirm, the refusal and the error.
+3. During a switch the account rows and the save row are disabled and the row shows a spinner with "Switching to work…". The CLI takes 5 to 20 s because it quits and relaunches Desktop. Refresh, Settings and Quit stay enabled at all times; a background snapshot or usage refresh disables nothing.
+4. When the CLI refuses (exit code 3, see below) the row shows the CLI's message with a "Switch anyway" button, which reruns with `--force`. Any other failure shows the CLI's stderr in the row with a Retry button.
+5. When signed in but not saved: a "Save this login as…" row with a name field. The Save button is enabled only when the name passes the CLI's rule (`^[A-Za-z0-9._-]+$`, not `.` or `..`) and is not already a saved profile, so the CLI's "another account" refusal cannot be reached from the app.
+6. Footer: Refresh, Settings…, Quit. Opening the popover also triggers a snapshot refresh.
 
 Right click on the icon: a native menu with Refresh, Settings…, Quit.
 
@@ -65,18 +65,20 @@ Right click on the icon: a native menu with Refresh, Settings…, Quit.
 
 - Snapshot (`list --json`): every 30 s, on popover open, after every switch or save, and on Refresh. No Keychain.
 - Usage (`usage --json`): only when enabled, every N minutes, on Refresh, and once when enabled. One `security` call per run, inside the CLI. Never more often than every 5 minutes on a timer.
-- Countdowns recompute every 60 s from the cached `resetsAt`.
+- The strip re-reads state on a 3 s tick (the hosting pattern CCSwitcher documents), which also recomputes the countdowns from the cached `resetsAt`. No separate countdown timer.
+- Turning a module on or off never triggers a usage fetch. Enabling usage fetches once; disabling it cancels the timer.
 - Nothing in the app ever runs `switch` without a click.
 
 ### Failure surfaces
 
-- CLI not found: the popover shows "Install the CLI: `brew install jrmatherly/tap/claude-multipass`" and Settings lets the user pick a path.
-- CLI older than 0.2.0 (no `--json`): "Update the CLI: `brew upgrade claude-multipass`".
+- CLI not found: the popover shows "Install the CLI: `brew install jrmatherly/tap/claude-multipass`" and Settings lets the user pick a path. Changing the path in Settings re-locates the CLI at once, without a relaunch.
+- CLI older than 0.2.0: "Update the CLI: `brew upgrade claude-multipass`". Detection: the 0.1.0 script answers `--version` with its usage page and exit 2 (measured on the Homebrew install), so any failure of `--version` counts as too old.
 - Usage error for one profile (cannot decrypt, 401, 429, offline): that profile shows `–` with the reason in a tooltip. The next attempt is the next scheduled tick, never an immediate retry.
 
 ## CLI changes (`bin/claude-multipass`, version 0.2.0)
 
-- `--version` prints `claude-multipass 0.2.0`. A `version=` constant near the top is bumped by the release skill.
+- `--version` prints `claude-multipass 0.2.0`. A `version=` constant near the top is the source; `package.json` carries the same number for pnpm and the app build, `test/check.sh` fails when the two differ, and the release skill bumps both. It is handled in the first `case $cmd` beside `--help`, because `main` shifts the command word off before the option loop.
+- `migrate_store`'s one-time message moves to stderr so a first run of `list --json` prints JSON only.
 - `--json` is accepted by `list` and `usage`, rejected elsewhere with `--json applies to list and usage`.
 - `list --json`:
 
@@ -120,9 +122,9 @@ Right click on the icon: a native menu with Refresh, Settings…, Quit.
   }
   ```
 
-  The unsaved signed-in login appears as `"name": "(signed in)"`, as in the text output. `resetsAt` is omitted when the endpoint gives none.
+  The unsaved signed-in login appears as `"name": "(signed in)"`, as in the text output. `error` is the CLI's full text, for example `cannot decrypt (the profile was saved on another Mac, or the app changed its key)`. `resetsAt` is normalised to `YYYY-MM-DDTHH:MM:SSZ` with the `sub()` the text path already uses (the endpoint returns `.123456+00:00`), and omitted when absent. A window whose `utilization` is null is omitted. With nothing to report the output is `{"profiles":[]}`.
 
-- Exit code 3 for the three refusals that `--force` lifts (`save` over another account, `switch` away from an unsaved login, `sync` while Desktop runs). Exit 1 stays for every other failure, exit 2 for usage errors.
+- Exit code 3 for the three refusals that `--force` lifts (`save` over another account, `switch` away from an unsaved login, `sync` while Desktop runs). Exit 1 stays for every other failure, exit 2 for usage errors. The `save` refusal moves before the Desktop quit, so a refused save no longer quits and relaunches the app for nothing.
 - `doctor`: prints `ok:`, `warn:` and `fail:` lines and exits 1 when any `fail:` was printed. Checks: `config.json` exists; `jq` on PATH; `fzf`, `python3`, `openssl`, `curl` on PATH (warn, with what each enables); the store is mode 0700 and every profile file 0600 (warn); every profile has `meta.json` and `config.json` with a non-empty `oauth:tokenCacheV2` (fail); the backups folder count; whether Claude Desktop is running; whether the pre-0.1 store at `~/.config/dotfiles/claude-desktop-accounts` still exists (warn). No Keychain, no network.
 
 ## App layout
@@ -140,40 +142,56 @@ scripts/
 .github/workflows/release.yml   on tag v*: build, sign, notarize, upload the DMG and its sha256
 ```
 
-Bundle identifier `net.matherly.claude-multipass` (the ai-kb convention), display name `Claude Multipass`, `LSUIElement` true, minimum macOS 14.0. No custom app icon in this version. No Sparkle; updates come through Homebrew.
+Bundle identifier `net.matherly.claude-multipass` (the ai-kb convention), display name `Claude Multipass`, `LSUIElement` true, minimum macOS 14.0, arm64 only in this version. No custom app icon. No Sparkle; updates come through Homebrew.
 
-Data shape in `MultipassCore`:
+The CLI quits Desktop with `osascript … tell application "Claude" to quit`, and the app is the responsible process for that Apple event. Under the hardened runtime that needs the `com.apple.security.automation.apple-events` entitlement and an `NSAppleEventsUsageDescription` string, or every switch from the app would fall back to the CLI's `pkill` after 8 s. The bundle ships both, and the signing script passes the entitlements file.
+
+Data shape in `MultipassCore` (names avoid SwiftUI's `Settings` and `Window`):
 
 ```swift
 struct Snapshot: Decodable, Equatable { version, signedIn, desktopRunning, current: String?, profiles: [Profile] }
 struct Profile: Decodable, Equatable, Identifiable { name, account, savedAt: Date, sessions: Int }   // id = name
 struct UsageReport: Decodable, Equatable { profiles: [UsageEntry] }
-struct UsageEntry: Decodable, Equatable, Identifiable { name, fiveHour: Window?, sevenDay: Window?, error: String? }
-struct Window: Decodable, Equatable { utilization: Double, resetsAt: Date? }
-enum Phase: Equatable { case idle, refreshing, switching(String), saving(String) }
-enum CLIError: Error, Equatable { case notFound, tooOld(String), refused(String), failed(status: Int32, stderr: String), badJSON(String) }
+struct UsageEntry: Decodable, Equatable, Identifiable { name, fiveHour: UsageWindow?, sevenDay: UsageWindow?, error: String? }
+struct UsageWindow: Decodable, Equatable { utilization: Double, resetsAt: Date? }
+enum Phase: Equatable { case idle, switching(String), saving(String) }     // background refreshes are separate flags, not phases
+enum CLIStatus: Equatable { case ready(String), missing, tooOld }
+enum CLIError: Error, Equatable { case refused(String), failed(status: Int32, stderr: String), badJSON(String) }
+func isValidProfileName(_ s: String) -> Bool                                // the CLI's rule
 ```
 
-`AppState` is a `@MainActor` `ObservableObject` holding `snapshot`, `usage`, `phase`, `lastError`, `pendingForce: String?`, the settings, and the timers. It talks to the CLI only through `protocol CommandRunner { func run(_ args: [String]) async throws -> Data }`, so tests use a fake.
+`AppState` is a `@MainActor` `ObservableObject` holding `snapshot`, `usage`, `phase`, `isRefreshing`, `isRefreshingUsage`, `lastError`, `pendingForce: String?`, `cliStatus`, the settings, and the timers. It talks to the CLI only through `protocol CommandRunner { func run(_ args: [String]) async throws -> Data }`, and gets a `makeRunner: (AppSettings) -> CommandRunner?` factory so a changed CLI path re-locates at once; tests use a fake. Percentages floor, as the CLI's text output does.
 
 ## Distribution
 
-- `scripts/build-app.sh` produces `dist/Claude Multipass.app`, signed when an identity exists, unsigned otherwise (the ai-kb script's behaviour). `--dmg` adds `dist/claude-multipass-app_<version>_arm64.dmg` with an `/Applications` symlink, signed, notarized and stapled when the API key env vars are set.
-- `release.yml` runs on tags `v*`, imports the certificate from `MACOS_CERT_P12` and `MACOS_CERT_PASSWORD`, builds with `--dmg`, and uploads the DMG and `.sha256` to the GitHub release. Secrets are the ones ai-kb already uses; the maintainer copies them into this repository.
-- The tap gains `Casks/claude-multipass-app.rb` with `depends_on formula: "jrmatherly/tap/claude-multipass"`. The cask token differs from the formula name so `brew install jrmatherly/tap/claude-multipass` keeps meaning the CLI (inferred; `brew audit --cask` in the release task verifies it).
-- The release skill gains the cask steps and the version constant bump.
+- `scripts/build-app.sh` produces `dist/Claude Multipass.app`, signed when an identity exists, unsigned otherwise (the ai-kb script's behaviour), with the version read from `package.json`. `--dmg` adds `dist/claude-multipass-app_<version>_arm64.dmg` with an `/Applications` symlink, signed, notarized and stapled when the API key env vars are set.
+- `scripts/sign-mac-app.sh` is ai-kb's script with one addition, an optional `MACOS_SIGN_ENTITLEMENTS` file passed to `codesign` for `sign-app`, reformatted by prettier and on the house `#!/bin/bash` shebang.
+- `release.yml` runs on tags `v*`, imports the certificate from `MACOS_CERT_P12` and `MACOS_CERT_PASSWORD`, builds with `--dmg`, and uploads the DMG and `.sha256` to the GitHub release with `gh` (`GH_TOKEN: ${{ github.token }}`). Secrets are the ones ai-kb already uses; the maintainer copies them into this repository.
+- The tap gains `Casks/claude-multipass-app.rb` (the folder does not exist yet) with `depends_on formula: "jrmatherly/tap/claude-multipass"` and `depends_on arch: :arm64`. The cask token differs from the formula name so `brew install jrmatherly/tap/claude-multipass` keeps meaning the CLI. The formula is bumped before the cask at release time, or the app reports the CLI as too old.
+- The release skill gains the cask steps and the version bump in both the script and `package.json`.
 
 ## Gate
 
-`pnpm check` adds `scripts/*.sh` to the ShellCheck list and runs `swift build --package-path app` and `swift test --package-path app`. CI already runs on `macos-latest`, where Swift is present. The first local run adds about a minute; later runs are incremental.
+`pnpm check` adds `scripts/*.sh` to the ShellCheck list, asserts that `version=` in the script equals `package.json`'s version, and runs `swift test --package-path app` (a debug build; the release build happens only in `build-app.sh`). CI already runs on `macos-latest`, where Swift is present. The first local run adds about a minute; later runs are incremental.
 
 ## Rails
 
-`.claude/rules/safety-and-terms.md` and `CLAUDE.md` are rewritten so the rail says what is now allowed and what is still rejected:
+The rails are rewritten in the same commit as the app package scaffold, before any polling code lands. Every line that contradicts the app, found by grep on 2026-10-25:
 
-- Allowed: the menu bar app polls `list --json` on a timer. It reads `config.json` and `meta.json`, never the Keychain. Usage polling is opt-in, through `usage --json`, with an interval of at least 5 minutes, and stops when the user turns it off.
+- `.claude/rules/safety-and-terms.md` line 22 ("Never poll it"), line 31 ("runs only when asked … never a daemon"), line 37 ("Any daemon, launch agent, cron entry, menu bar loop").
+- `CLAUDE.md` line 60 (the `usage` bullet, "run only when asked, never a daemon").
+- `README.md` line 25 ("no daemon runs").
+- `docs/claude-multipass.md` Safety rails section.
+
+The new wording, in each place at the depth that file uses:
+
+- Allowed: the menu bar app polls `list --json` on a timer. It reads `config.json` and `meta.json`, never the Keychain. Usage polling is opt-in, through `usage --json`, with an interval of at least 5 minutes, one `security` call per run, and stops when the user turns it off.
 - Still rejected: any automatic switch; usage polling that is on by default or faster than 5 minutes; a launch agent or daemon separate from the user-visible app; reading the Keychain anywhere but inside `usage`.
 
 ## Out of scope
 
-Drag reorder of modules, a custom app icon, Sparkle, a widget, `add` from the app (it needs the user to sign in with an email code in Desktop; the CLI flow stays), per-org session counts in the popover, localisation.
+Drag reorder of modules, a custom app icon, Sparkle, a widget, a universal (Intel) build, `add` from the app (it needs the user to sign in with an email code in Desktop; the CLI flow stays), per-org session counts in the popover, localisation.
+
+## Manual checks an agent may not run
+
+From `CLAUDE.md`: an agent never runs `save`, `add`, `switch`, `remove` or `sync` against the real Desktop, and leaves `usage` (which prompts for the Keychain) to the user. So in the plan's manual checks an agent builds and launches the app, reads the strip and the popover, opens and cancels the inline confirm, and stops there. Pressing Switch, enabling usage, and toggling Launch at login are the maintainer's steps. A throwaway bundle must have Launch at login turned off before it is deleted, or `SMAppService` keeps a dangling login item.
