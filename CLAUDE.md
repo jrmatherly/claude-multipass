@@ -74,4 +74,5 @@ Keep these when changing the script. The rules a reviewer rejects a change for a
 
 Add project-specific notes here. This section is never auto-modified.
 
-- Standing approval: on `main`, once `pnpm check` passes (the commit-gate hook runs it) and the change is what was asked, commit and push without asking.
+- Never commit to `main`. Every change, a one-line fix included, goes on its own branch in its own git worktree, becomes a pull request against `main`, and lands only through that PR after CI (`check.yml`) is green. Start work by creating the worktree and branch; never edit or commit in the `main` checkout.
+- Standing approval on a feature branch: once `pnpm check` passes (the commit-gate hook runs it) and the change is what was asked, commit, push the branch and open the PR without asking. Merging the PR is Jason's call.
