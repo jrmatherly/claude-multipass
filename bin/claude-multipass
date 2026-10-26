@@ -653,24 +653,22 @@ list_profiles() {
     || echo "Signed in now: ${live:0:8} (not saved; run: claude-multipass save <name>)"
 }
 
-# One JSON object for the menu bar app; --slurpfile turns a file of bare
-# objects into an array, [] when it is empty
+# One JSON object for the menu bar app; [inputs] gathers the bare objects
+# into an array, [] when there are none
 list_json() {
-  local meta account tmpfile signed_in=false running=false
-  tmpfile=$(mktemp)
+  local meta account profiles='' signed_in=false running=false
   for meta in "$store"/*/meta.json; do
     [[ -f $meta ]] || continue
     account=$(jq -r .account "$meta")
-    jq -n --arg name "$(basename "$(dirname "$meta")")" --arg account "$account" \
+    profiles+=$(jq -n --arg name "$(basename "$(dirname "$meta")")" --arg account "$account" \
       --arg savedAt "$(jq -r .savedAt "$meta")" --argjson sessions "$(count_sessions "$sessions/$account")" \
-      '{name: $name, account: $account, savedAt: $savedAt, sessions: $sessions}' >> "$tmpfile"
+      '{name: $name, account: $account, savedAt: $savedAt, sessions: $sessions}')
   done
   signed_in && signed_in=true
   desktop_running && running=true
   jq -n --arg v "$version" --argjson signedIn "$signed_in" --argjson running "$running" \
-    --arg current "$(active_profile)" --slurpfile p "$tmpfile" \
-    '{version: $v, signedIn: $signedIn, desktopRunning: $running, current: (if $current == "" then null else $current end), profiles: $p}'
-  rm -f "$tmpfile"
+    --arg current "$(active_profile)" \
+    '{version: $v, signedIn: $signedIn, desktopRunning: $running, current: (if $current == "" then null else $current end), profiles: [inputs]}' <<< "$profiles"
 }
 
 require_profile() {

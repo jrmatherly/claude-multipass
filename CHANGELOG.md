@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- The "Save this login as" row keeps showing a failed save's message while the name is edited; it used to vanish on the first keystroke.
+- `list --json` builds its output in memory; a failure midway no longer leaves a temp file behind.
+- `scripts/build-app.sh` names the DMG after the architecture of the machine that built it, not a fixed `arm64`.
+
 ## 0.2.1 (2026-10-26)
 
 - Settings shows the path of the detected command line tool beside its version.

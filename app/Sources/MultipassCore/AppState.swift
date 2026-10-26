@@ -179,7 +179,6 @@ public final class AppState: ObservableObject {
       rowError = RowError(name: name, message: describe(error), refused: false)
       return
     }
-    self.phase = .idle
     await refresh()
   }
 

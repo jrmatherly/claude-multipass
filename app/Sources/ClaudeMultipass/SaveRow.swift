@@ -7,6 +7,7 @@ import SwiftUI
 struct SaveRow: View {
   @ObservedObject var appState: AppState
   @State private var name = ""
+  @State private var attempted = ""
 
   private var canSave: Bool {
     isValidProfileName(name) && !(appState.snapshot?.profiles.contains { $0.name == name } ?? false)
@@ -21,9 +22,9 @@ struct SaveRow: View {
           .onSubmit { if canSave { save() } }
         Button("Save", action: save).disabled(!canSave)
       }
-      if appState.phase == .saving(name) {
-        Text("Saving as \(name)…").font(.caption).foregroundStyle(.secondary)
-      } else if let error = appState.rowError, error.name == name {
+      if appState.phase == .saving(attempted) {
+        Text("Saving as \(attempted)…").font(.caption).foregroundStyle(.secondary)
+      } else if let error = appState.rowError, error.name == attempted {
         Text(error.message).font(.caption).foregroundStyle(.red).textSelection(.enabled)
       }
     }
@@ -32,6 +33,7 @@ struct SaveRow: View {
 
   private func save() {
     let chosen = name
+    attempted = chosen
     Task { await appState.saveCurrent(as: chosen) }
   }
 }
