@@ -2,6 +2,12 @@ import Foundation
 
 public protocol CommandRunner: Sendable {
   func run(_ args: [String]) async throws -> Data
+  /// Where the command lives, for display; nil when there is no path to show.
+  var location: String? { get }
+}
+
+extension CommandRunner {
+  public var location: String? { nil }
 }
 
 public enum CLIError: Error, Equatable {
@@ -23,6 +29,8 @@ public struct CLI: CommandRunner {
   }
 
   public static let candidates = ["/opt/homebrew/bin/claude-multipass", "/usr/local/bin/claude-multipass"]
+
+  public var location: String? { executable.path }
 
   public static func locate(
     override: String?,

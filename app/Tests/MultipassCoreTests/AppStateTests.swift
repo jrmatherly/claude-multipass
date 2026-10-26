@@ -8,6 +8,7 @@ final class FakeRunner: CommandRunner, @unchecked Sendable {
   private var _calls: [[String]] = []
   private var responses: [String: Result<Data, CLIError>] = [:]
   var onCall: (@Sendable ([String]) async -> Void)?
+  var location: String?
 
   var calls: [[String]] {
     lock.lock()
@@ -92,6 +93,18 @@ private func enabledUsage(_ s: AppState) -> AppSettings {
   #expect(s.cliStatus == .unknown)
   await s.relocate()
   #expect(s.cliStatus == .ready("0.2.0"))
+}
+
+@Test @MainActor func relocateExposesTheRunnerLocation() async {
+  let r = readyRunner()
+  r.location = "/opt/homebrew/bin/claude-multipass"
+  let s = makeState(r)
+  #expect(s.cliLocation == nil)
+  await s.relocate()
+  #expect(s.cliLocation == "/opt/homebrew/bin/claude-multipass")
+  let none = makeState(nil)
+  await none.relocate()
+  #expect(none.cliLocation == nil)
 }
 
 @Test @MainActor func relocateTooOldWhenVersionFails() async {

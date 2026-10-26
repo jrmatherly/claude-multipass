@@ -45,7 +45,7 @@ struct SettingsView: View {
         LabeledContent("CLI path") {
           VStack(alignment: .trailing, spacing: 2) {
             TextField("auto-detected", text: cliPathBinding).textFieldStyle(.roundedBorder)
-            Text(cliStatusText).font(.caption).foregroundStyle(.secondary)
+            Text(cliStatusText).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
           }
         }
       }
@@ -67,7 +67,7 @@ struct SettingsView: View {
   private var cliStatusText: String {
     switch appState.cliStatus {
     case .unknown: return "checking…"
-    case .ready(let version): return "claude-multipass \(version)"
+    case .ready(let version): return "claude-multipass \(version)" + (appState.cliLocation.map { " at \($0)" } ?? "")
     case .missing: return "not found"
     case .tooOld: return "too old (0.2.0 or newer is needed)"
     }
