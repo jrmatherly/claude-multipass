@@ -3,6 +3,7 @@
 ## 0.2.1 (unreleased)
 
 - Settings shows the path of the detected command line tool beside its version.
+- The popover opens flush under the menu bar item; it used to be placed for a default 320 pt height and then shrink, leaving a gap.
 
 ## 0.2.0 (2026-10-26)
 

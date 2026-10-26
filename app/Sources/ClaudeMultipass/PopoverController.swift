@@ -13,8 +13,13 @@ final class PopoverController {
     self.appState = appState
     popover.behavior = .transient
     popover.animates = false
-    popover.contentViewController = NSHostingController(
+    let hosting = NSHostingController(
       rootView: PopoverView(appState: appState, openSettings: openSettings, close: { [popover] in popover.performClose(nil) }))
+    // The popover sizes itself from preferredContentSize; without this it
+    // keeps the 320x320 default, lays out for that height and then shrinks
+    // from the top, leaving a gap under the status item.
+    hosting.sizingOptions = [.preferredContentSize]
+    popover.contentViewController = hosting
   }
 
   func toggle(relativeTo button: NSView) {
