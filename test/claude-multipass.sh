@@ -63,6 +63,13 @@ run() {
       ;;
     find-generic-password)
       if [[ $s == 'Claude Safe Storage' ]]; then printf %s "$pw"; return 0; fi
+      # A slow read of the CLI item, for the lock keep-alive case: record the
+      # named lock dir's mtime before and after a 4 s hold.
+      if [[ -n ${SECURITY_HOLD:-} && $s == 'Claude Code-credentials' ]]; then
+        stat -f %m "$SECURITY_HOLD" > "${kc%/*}/lock-mtime-before"
+        sleep 4
+        stat -f %m "$SECURITY_HOLD" > "${kc%/*}/lock-mtime-after"
+      fi
       [[ -f $kc/$s/$a ]] || { echo "security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain." >&2; return 44; }
       # Like the real tool: a value with any non-printable byte (a newline) prints as hex.
       if [[ -n $want_w ]]; then
@@ -224,7 +231,10 @@ before=$(jq --tab '.["oauth:tokenCacheV2"] = "enc-A2-new"' "$d/config.json")
 printf '%s' "$before" > "$d/config.json"
 
 : > "$tmp/security-calls"
+# The CLI item is read once per run, so the switch waits 4 s once while holding the locks.
+export SECURITY_HOLD=$tmp/claude.json.lock
 out=$(cda switch beta --no-relaunch 2> "$tmp/switch-err" | tee "$tmp/switch-out")
+unset SECURITY_HOLD
 check "switch merges keys in place, other keys byte-identical" \
   "{
 ${tab}\"theme\": \"dark\",
@@ -260,6 +270,9 @@ check "switch backs up the previous CLI tokens" at-alpha "$(kc_get claude-multip
 check "switch backs up the previous identity" aaaaaaaa-1111 "$(jq -r .oauthAccount.accountUuid "$dest/cli.json")"
 check "switch re-saves the outgoing CLI login" at-alpha "$(kc_get claude-multipass alpha | jq -r .claudeAiOauth.accessToken)"
 check "switch releases the CLI locks" 0 "$(ls -d "$tmp"/claude.json.lock "$tmp"/claude-home/.oauth_refresh.lock "$tmp"/claude-home.lock 2> /dev/null | wc -l | tr -d ' ')"
+check_true "the config lock is touched while held" test "$(cat "$tmp/lock-mtime-after")" -gt "$(cat "$tmp/lock-mtime-before")"
+sleep 4
+check_true "no toucher outlives the switch" test ! -e "$tmp/claude.json.lock" -a ! -e "$tmp/claude-home/.oauth_refresh.lock" -a ! -e "$tmp/claude-home.lock"
 check "a matching org raises no warning" 0 "$(grep -c 'different org' "$tmp/switch-err")"
 check "the CLI locks are released before claude auth status runs" 0 "$(cat "$tmp/locks-at-verify")"
 check "a clean switch warns nothing" "" "$(cat "$tmp/switch-err")"
@@ -448,6 +461,24 @@ check_true "and Desktop's config is untouched" cmp -s "$d/config.json" "$tmp/con
 check "and oauthAccount too" aaaaaaaa-1111 "$(jq -r .oauthAccount.accountUuid "$tmp/claude.json")"
 check_true "and the tool's own locks are released" test ! -e "$tmp/claude-home/.oauth_refresh.lock" -a ! -e "$tmp/claude-home.lock"
 rmdir "$tmp/claude.json.lock"
+sleep 4
+check_true "and no toucher outlives the failed switch" test ! -e "$tmp/claude-home/.oauth_refresh.lock" -a ! -e "$tmp/claude-home.lock"
+
+# A tool killed outright (the app's watchdog sends SIGKILL 2 s after SIGTERM) runs no
+# trap, so the loop must notice on its own or it pins the CLI's locks for good.
+export SECURITY_HOLD=$tmp/claude.json.lock
+# The script itself, not cda: a function's & job is a subshell, and killing that would leave the script running.
+"$script" switch beta --no-relaunch > /dev/null 2>&1 &
+pid=$!
+sleep 2
+kill -9 "$pid"
+wait "$pid" 2> /dev/null || true
+unset SECURITY_HOLD
+sleep 4
+m1=$(stat -f %m "$tmp/claude.json.lock")
+sleep 4
+check "a toucher stops when the tool is killed outright" "$m1" "$(stat -f %m "$tmp/claude.json.lock")"
+rm -rf "$tmp/claude.json.lock" "$tmp/claude-home/.oauth_refresh.lock" "$tmp/claude-home.lock"
 
 # Verification after a restore: claude auth status must report the restored org
 printf '#!/bin/sh\necho "{\\"loggedIn\\":true,\\"orgId\\":\\"org-other\\"}"\n' > "$tmp/bin/claude"

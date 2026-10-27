@@ -439,6 +439,7 @@ cli_capture() {
 # holder older than the threshold claude-swap uses for it (60, 60 and 10 s)
 # is swept first. A held lock fails a switch before Desktop's config moves.
 cli_locks=()
+cli_touchers=()
 held_lock=''
 cli_lock() {
   local dir=$1 stale=$2 i
@@ -447,6 +448,22 @@ cli_lock() {
   for ((i = 0; i < 5; i++)); do
     if mkdir "$dir" 2> /dev/null; then
       cli_locks+=("$dir")
+      # Claude Code deems claude.json.lock stale after 10 s and the credential
+      # locks after 60 s, and touches its own every 5 s, so a held dir is kept
+      # fresh. The loop ends itself once the dir is gone and -c covers the race,
+      # so a lingering loop never leaves a file where the CLI expects a dir. Its
+      # fds go to /dev/null: the menu bar app and Raycast drain this script's
+      # pipes to EOF, and an inherited fd would hold them until the next sleep.
+      # It also ends when this script is gone without its trap (SIGKILL, the
+      # app's watchdog), or it would pin the CLI's locks past their staleness.
+      (while sleep 3; do
+        kill -0 $$ 2> /dev/null || exit
+        [[ -d $dir ]] || exit
+        touch -c "$dir" 2> /dev/null || exit
+      done) > /dev/null 2>&1 < /dev/null &
+      cli_touchers+=($!)
+      # Out of the job table, or bash prints "Terminated" to stderr when the kill lands.
+      disown $!
       return 0
     fi
     sleep 1
@@ -463,7 +480,9 @@ cli_lock_all() {
 
 # Runs from the EXIT trap too, so every rmdir tolerates an absent dir.
 cli_unlock() {
-  local dir
+  local dir pid
+  for pid in ${cli_touchers[@]+"${cli_touchers[@]}"}; do kill "$pid" 2> /dev/null || true; done
+  cli_touchers=()
   for dir in ${cli_locks[@]+"${cli_locks[@]}"}; do rmdir "$dir" 2> /dev/null || true; done
   cli_locks=()
 }
@@ -473,7 +492,7 @@ cli_unlock() {
 cli_running_warning() {
   local pid
   pid=$(pgrep -x claude 2> /dev/null | head -1) || true
-  [[ -z $pid ]] || warning "Claude Code is running (pid $pid); quit it first, or its next token refresh can overwrite the switched login"
+  [[ -z $pid ]] || warning "Claude Code is running (pid $pid); quit it first, or its next token refresh can overwrite the switched login; it also serves its cached login for up to 30 s after a switch"
 }
 
 # The live CLI item's account part and identity, kept under the name of this
