@@ -454,7 +454,10 @@ cli_lock() {
       # so a lingering loop never leaves a file where the CLI expects a dir. Its
       # fds go to /dev/null: the menu bar app and Raycast drain this script's
       # pipes to EOF, and an inherited fd would hold them until the next sleep.
+      # It also ends when this script is gone without its trap (SIGKILL, the
+      # app's watchdog), or it would pin the CLI's locks past their staleness.
       (while sleep 3; do
+        kill -0 $$ 2> /dev/null || exit
         [[ -d $dir ]] || exit
         touch -c "$dir" 2> /dev/null || exit
       done) > /dev/null 2>&1 < /dev/null &
