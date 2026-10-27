@@ -91,6 +91,24 @@ done
 rm -f "$STATE/check-ran"
 run "git -C $other commit -m x"
 [ "$rc" -eq 0 ] && [ ! -e "$STATE/check-ran" ] || fail "-C into a repo without the hook was gated"
+# 8a. a worktree of this repo whose hook copy differs is gated by that copy
+git -C "$proj" worktree add -q "$tmp/wt"
+# The edited copy records that it ran; mode 0644, as a tool that drops the bit leaves it
+sed -i '' "1a\\
+touch $STATE/copy-ran
+" "$tmp/wt/.claude/hooks/commit-gate.sh"
+chmod 644 "$tmp/wt/.claude/hooks/commit-gate.sh"
+echo 1 > "$STATE/check-rc"
+rm -f "$STATE/check-ran"
+run 'git commit -m x' "$tmp/wt"
+[ "$rc" -eq 2 ] && [ -e "$STATE/copy-ran" ] && [ -e "$STATE/check-ran" ] || fail "worktree with a differing hook copy: expected its copy to block with exit 2, got $rc"
+echo 0 > "$STATE/check-rc"
+# 8b. a differing copy in another repo is never run
+mkdir -p "$other/.claude/hooks"
+printf '#!/bin/bash\ntouch %q\n' "$STATE/foreign-ran" > "$other/.claude/hooks/commit-gate.sh"
+chmod +x "$other/.claude/hooks/commit-gate.sh"
+run "git -C $other commit -m x"
+[ "$rc" -eq 0 ] && [ ! -e "$STATE/foreign-ran" ] || fail "another repo's hook copy was run"
 # 9. a commit in a repo without test/check.sh is not gated
 rm "$proj/test/check.sh"
 rm -f "$STATE/check-ran"

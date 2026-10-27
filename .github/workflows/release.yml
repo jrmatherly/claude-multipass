@@ -11,7 +11,8 @@ jobs:
   release:
     runs-on: macos-latest
     env:
-      HAS_MACOS_CERT: ${{ secrets.MACOS_CERT_P12 != '' && secrets.MACOS_CERT_PASSWORD != '' }}
+      # A missing or untrusted identity fails the job instead of shipping an unsigned DMG
+      MACOS_SIGN_REQUIRED: 1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -27,10 +28,22 @@ jobs:
           HOMEBREW_NO_AUTO_UPDATE: 1
           HOMEBREW_NO_INSTALL_CLEANUP: 1
           HOMEBREW_NO_ANALYTICS: 1
+      - name: Check the tag and the release secrets
+        env:
+          HAS_SECRETS: ${{ secrets.MACOS_CERT_P12 != '' && secrets.MACOS_CERT_PASSWORD != '' && secrets.APPLE_API_KEY_ID != '' && secrets.APPLE_API_ISSUER_ID != '' && secrets.APPLE_API_KEY_P8 != '' }}
+        run: |
+          version=$(jq -r .version package.json)
+          if [ "${GITHUB_REF_NAME#v}" != "$version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME differs from package.json version $version"
+            exit 1
+          fi
+          if [ "$HAS_SECRETS" != true ]; then
+            echo "::error::MACOS_CERT_P12, MACOS_CERT_PASSWORD and the three APPLE_API_* secrets are all required to publish a signed, notarized DMG"
+            exit 1
+          fi
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       - name: Import the Developer ID certificate
-        if: env.HAS_MACOS_CERT == 'true'
         env:
           MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
           MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
@@ -51,8 +64,6 @@ jobs:
           security import "$P12" -k "$KEYCHAIN" -P "$MACOS_CERT_PASSWORD" -f pkcs12 -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
           rm -f "$P12"
-          # An untrusted chain lists no valid identity; required turns that into a failed job, not an unsigned DMG.
-          echo "MACOS_SIGN_REQUIRED=1" >> "$GITHUB_ENV"
       - name: Build, sign and notarize the DMG
         env:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
