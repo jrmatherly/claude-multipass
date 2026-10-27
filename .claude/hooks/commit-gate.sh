@@ -4,7 +4,9 @@
 # in the repo the commit targets and block the call (exit 2, the check's tail
 # on stderr) when it fails. When it passes but bin/claude-multipass changed
 # with no README.md or docs/ change, it tells Claude so through
-# additionalContext.
+# additionalContext. When the commit's worktree carries a different copy of
+# this hook, that copy runs instead, so a branch that edits the hook is gated
+# by its own version.
 # Wired up in .claude/settings.json; self-check: .claude/hooks/test-commit-gate.sh
 
 set -uo pipefail
@@ -59,9 +61,21 @@ is_commit() {
 
 is_commit "$command" || exit 0
 root=$(git -C "$dir" rev-parse --show-toplevel 2> /dev/null) || exit 0
-# Gate only repos that ship this very hook (this repo or a worktree of it),
-# so a commit in a foreign repo never runs that repo's check script
-[ -e "$root/test/check.sh" ] && cmp -s "$0" "$root/.claude/hooks/commit-gate.sh" || exit 0
+# Gate only repos that ship this hook, so a commit in a foreign repo never
+# runs that repo's check script. When a worktree's own copy differs from this
+# one, its copy gates instead, so a branch that edits the hook is still gated
+[ -e "$root/test/check.sh" ] || exit 0
+copy=$root/.claude/hooks/commit-gate.sh
+if ! cmp -s "$0" "$copy"; then
+  # Delegate only to a worktree of the session's own repository, never to a
+  # copy some other repo ships. The copy runs as $0 == $copy, so it never
+  # delegates again
+  [ -f "$copy" ] || exit 0
+  common=$(git -C "$root" rev-parse --path-format=absolute --git-common-dir 2> /dev/null) || exit 0
+  [ "$common" = "$(git -C "${CLAUDE_PROJECT_DIR:-$(pwd -P)}" rev-parse --path-format=absolute --git-common-dir 2> /dev/null)" ] || exit 0
+  # bash, not the file itself, so a copy that lost its executable bit still gates
+  exec bash "$copy" <<< "$input"
+fi
 
 if ! out=$(cd "$root" && pnpm check 2>&1); then
   {

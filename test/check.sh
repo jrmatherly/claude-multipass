@@ -22,7 +22,10 @@ shell_scripts=(
   scripts/*.sh
 )
 
-bash -n "${shell_scripts[@]}"
+# bash -n checks only its first argument; the rest become positional args
+for script in "${shell_scripts[@]}"; do
+  bash -n "$script"
+done
 shellcheck --severity=warning "${shell_scripts[@]}"
 prettier --log-level warn --ignore-unknown --check "**/*.{js,cjs,ts,md,json,sh}" "bin/*" ".github/**/*.yml"
 # bin/claude-multipass against a fixture Desktop folder (never the real one)
