@@ -54,6 +54,7 @@ run() {
   done
   # Failure hooks for the self-check: a refused write, a failed read of the CLI item.
   [[ -z ${SECURITY_FAIL_ADD:-} || $cmd != add-generic-password ]] || return 1
+  [[ -z ${SECURITY_FAIL_DELETE:-} || $cmd != delete-generic-password ]] || return 1
   [[ -z ${SECURITY_FAIL_FIND:-} || $cmd != find-generic-password || $s != 'Claude Code-credentials' ]] || return "$SECURITY_FAIL_FIND"
   case $cmd in
     add-generic-password)
@@ -383,8 +384,8 @@ cda switch alpha --no-relaunch > /dev/null 2>&1
 
 # security fails the read of the CLI item with another status: the status is named, nothing moves
 err=$(SECURITY_FAIL_FIND=36 cda switch beta --no-relaunch 2>&1 > /dev/null)
-check_true "a failed read on the way out names the status and the profile" grep -q 'alpha: security exited 36 (no Keychain prompt is possible here: a shell over SSH, a hook, or a timer) reading the CLI login; saved the Desktop login only' <<< "$err"
-check_true "a failed read on the restore names the status" grep -q 'security exited 36 (no Keychain prompt is possible here: a shell over SSH, a hook, or a timer) reading the CLI login; switched Desktop only' <<< "$err"
+check_true "a failed read on the way out names the status and the profile" grep -q 'alpha: security exited 36 (the keychain is locked and cannot prompt here, as over SSH or in a hook; unlock it and retry) reading the CLI login; saved the Desktop login only' <<< "$err"
+check_true "a failed read on the restore names the status" grep -q 'security exited 36 (the keychain is locked and cannot prompt here, as over SSH or in a hook; unlock it and retry) reading the CLI login; switched Desktop only' <<< "$err"
 check "and leaves the live CLI item alone" at-alpha "$(kc_get "Claude Code-credentials" "$USER" | jq -r .claudeAiOauth.accessToken)"
 check "and leaves oauthAccount alone" aaaaaaaa-1111 "$(jq -r .oauthAccount.accountUuid "$tmp/claude.json")"
 cda switch alpha --no-relaunch > /dev/null 2>&1
@@ -505,6 +506,12 @@ printf '#!/bin/sh\necho "{\\"loggedIn\\":false}"\n' > "$tmp/bin/claude"
 err=$(cda switch alpha --no-relaunch 2>&1 > /dev/null)
 check_true "a signed-out claude warns and names the backup" grep -q "Claude Code reports it is signed out; the previous login is in $b/login-" <<< "$err"
 check "and not about the org" 0 "$(grep -c 'different org' <<< "$err")"
+printf '#!/bin/sh\nexit 3\n' > "$tmp/bin/claude"
+err=$(cda switch beta --no-relaunch 2>&1 > /dev/null)
+check_true "a failing claude auth status warns and names the backup" grep -q "claude auth status exited 3; could not verify the CLI login (the previous login is in $b/login-" <<< "$err"
+printf '#!/bin/sh\necho not json\n' > "$tmp/bin/claude"
+err=$(cda switch alpha --no-relaunch 2>&1 > /dev/null)
+check_true "a claude auth status without JSON warns and names the backup" grep -q "claude auth status printed no JSON; could not verify the CLI login (the previous login is in $b/login-" <<< "$err"
 rm "$tmp/bin/claude"
 # a PATH without claude (jq's folder, the stub folder and the system folders only)
 noclaude="$tmp/bin:$(dirname "$(command -v jq)"):/usr/bin:/bin"
@@ -602,6 +609,26 @@ check "sync refuses while Desktop runs" 3 "$(exit_code cda sync)"
 check "sync --force runs anyway" 0 "$(exit_code cda sync --force)"
 printf '#!/bin/sh\nexit 1\n' > "$tmp/bin/pgrep"
 
+# A Desktop that ignores the quit request gets pkill after 8 s, and the command
+# fails 10 s later if even that leaves it running. The sleep stub skips the
+# 0.5 s polls, so the waits cost nothing; Claude is gone once $tmp/gone exists.
+printf '#!/bin/sh\n[ "$1" = 0.5 ] && exit 0\nexec /bin/sleep "$@"\n' > "$tmp/bin/sleep"
+printf '#!/bin/sh\ncase "$*" in *Claude*) test ! -e "%s/gone" ;; *) exit 1 ;; esac\n' "$tmp" > "$tmp/bin/pgrep"
+printf '#!/bin/sh\necho "pkill $*" >> "%s/calls"\n[ -z "$PKILL_WORKS" ] || touch "%s/gone"\n' "$tmp" "$tmp" > "$tmp/bin/pkill"
+chmod +x "$tmp/bin/sleep"
+rm -f "$tmp/calls" "$tmp/gone"
+check "a Desktop that ignores quit is killed" 0 "$(PKILL_WORKS=1 exit_code cda switch beta --no-relaunch)"
+check_true "after it was asked to quit" grep -q '^osascript ' "$tmp/calls"
+check_true "with pkill -x Claude" grep -qx 'pkill -x Claude' "$tmp/calls"
+rm -f "$tmp/gone"
+rc=0
+err=$(cda switch beta --no-relaunch 2>&1 > /dev/null) || rc=$?
+check "a Desktop that survives pkill fails the command" 1 "$rc"
+check_true "and says to quit it by hand" grep -q 'Claude did not quit; quit it by hand and retry' <<< "$err"
+rm "$tmp/bin/sleep"
+printf '#!/bin/sh\nexit 1\n' > "$tmp/bin/pgrep"
+printf '#!/bin/sh\necho "pkill $*" >> "%s/calls"\n' "$tmp" > "$tmp/bin/pkill"
+
 # add re-saves the active login and signs out locally
 out=$(cda add gamma --no-relaunch)
 check "add clears the auth keys" '["theme","windowBounds","zeta"]' "$(jq -c keys_unsorted "$d/config.json")"
@@ -635,11 +662,16 @@ check "remove moves the profile to backups" 1 "$(
 )"
 check_true "removed profile is gone from the store" test ! -e "$p/home"
 check "remove deletes the CLI item" absent "$(kc_get claude-multipass home)"
+cp -R "$p/beta" "$p/doomed"
+err=$(SECURITY_FAIL_DELETE=1 cda remove doomed 2>&1 > /dev/null)
+check_true "remove warns when the CLI item will not delete" grep -q 'could not delete the CLI login item for doomed' <<< "$err"
+check_true "and still moves the profile aside" test ! -e "$p/doomed"
 check "remove of an unknown name fails" 1 "$(exit_code cda remove home)"
 check "--force is rejected for remove" 1 "$(exit_code cda remove home --force)"
 check "and for rename" 1 "$(exit_code cda rename home x --force)"
 check_true "and names the commands that take it" grep -q -- '--force applies to sync, switch, save and add' <<< "$(cda remove home --force 2>&1 > /dev/null)"
 check "and --help lists --force on save, switch and add only" 1 "$(cda --help | grep -c 'save|switch|add <name> \[--no-relaunch\] \[--force\]')"
+check "and gives remove no --no-relaunch, since it never quits Desktop" 1 "$(cda --help | grep -cx '  claude-multipass remove <name>')"
 cp -R "$b"/profile-home-* "$p/alpha"
 check "--force outside sync or switch fails" 1 "$(exit_code cda list --force)"
 # an unsaved login must not be switched away from silently
@@ -724,6 +756,9 @@ for i in $(seq 1 12); do mkdir -p "$spaced/backups/login-2020010100000$i-1"; don
 (cd "$tmp" && CLAUDE_MULTIPASS_DIR=$spaced cda add zed --no-relaunch > /dev/null 2>&1)
 check_true "a spaced store path spares a sibling directory" test -d "$tmp/my/keep"
 check "and still prunes to ten" 10 "$(find "$spaced/backups" -mindepth 1 -maxdepth 1 -type d -name 'login-*' | wc -l | tr -d ' ')"
+err=$(SECURITY_FAIL_DELETE=1 CLAUDE_MULTIPASS_DIR=$spaced cda add zed --no-relaunch 2>&1 > /dev/null)
+check_true "a prune whose Keychain delete fails warns" grep -q "could not delete the Keychain item for $spaced/backups/login-" <<< "$err"
+check "and still prunes the folder" 10 "$(find "$spaced/backups" -mindepth 1 -maxdepth 1 -type d -name 'login-*' | wc -l | tr -d ' ')"
 
 # usage: a fixture token cache encrypted the way the app does; security and
 # curl are stubs on PATH, so no Keychain and no network
@@ -787,6 +822,18 @@ check "usage --json omits a null window" null "$(jq -r '.profiles[0].sevenDay' <
 cp "$tmp/usage-full.json" "$tmp/usage.json"
 mkdir -p "$tmp/emptyd" && printf '{"theme":"dark"}' > "$tmp/emptyd/config.json"
 check "usage --json with nothing saved" '{"profiles":[]}' "$(CLAUDE_DESKTOP_DIR="$tmp/emptyd" CLAUDE_MULTIPASS_DIR="$tmp/empty" cda usage --json)"
+cp "$p/usagey/meta.json" "$tmp/usagey-meta"
+printf 'not json' > "$p/usagey/meta.json"
+bad_meta="usagey: $p/usagey/meta.json is not valid; remove usagey, then save it again"
+n_login=$(find "$b" -mindepth 1 -maxdepth 1 -name 'login-*' | wc -l | tr -d ' ')
+for c in show usage switch; do
+  rc=0
+  err=$(cda "$c" usagey --no-relaunch 2>&1 > /dev/null) || rc=$?
+  check "$c of a name with an unreadable meta.json fails" 1 "$rc"
+  check_true "and names the file" grep -qF "$bad_meta" <<< "$err"
+done
+check "switch fails before quitting Desktop, so no login is backed up" "$n_login" "$(find "$b" -mindepth 1 -maxdepth 1 -name 'login-*' | wc -l | tr -d ' ')"
+cp "$tmp/usagey-meta" "$p/usagey/meta.json"
 
 # doctor: one line per check, exit 1 on any fail:, no Keychain, no network
 rm -f "$tmp/calls"
@@ -800,6 +847,8 @@ check "doctor never calls security" "$n_sec" "$(wc -l < "$tmp/security-calls" | 
 check_true "doctor names a profile without a CLI login" grep -q '^warn: legacy: no CLI login saved' <<< "$(cda doctor)"
 check_true "doctor warns on CLAUDE_CONFIG_DIR" grep -q '^warn: CLAUDE_CONFIG_DIR is set; the CLI login is not saved or switched' <<< "$(CLAUDE_CONFIG_DIR=/x cda doctor)"
 check_true "doctor warns on CLAUDE_SECURESTORAGE_CONFIG_DIR" grep -q '^warn: CLAUDE_SECURESTORAGE_CONFIG_DIR is set; the CLI login is not saved or switched' <<< "$(CLAUDE_SECURESTORAGE_CONFIG_DIR=/x cda doctor)"
+mkdir -p "$tmp/legacy-home/dotfiles/claude-desktop-accounts"
+check_true "doctor warns about a leftover dotfiles-era store" grep -q "^warn: legacy store: $tmp/legacy-home/dotfiles/claude-desktop-accounts still exists" <<< "$(XDG_CONFIG_HOME="$tmp/legacy-home" cda doctor)"
 cp "$p/usagey/config.json" "$tmp/usagey-config"
 printf '{"oauth:tokenCacheV2":""}' > "$p/usagey/config.json"
 check "doctor fails on an empty token" 1 "$(exit_code cda doctor)"
@@ -814,6 +863,14 @@ check_true "doctor names the store mode" grep -q '^warn: store: mode 755' <<< "$
 chmod 700 "$p"
 printf '{"oauth:tokenCache":"x","oauth:tokenCacheV2":"enc","lastKnownAccountUuid":"uuuuuuuu-1"}' > "$d/config.json"
 check "Raycast usage command shows the active account's figures" "usagey           $expected" "$("$raycast/claude-account-usage.sh")"
+# an unsaved live login gets its own row, read from Desktop's config.json
+cp "$d/config.json" "$tmp/config-saved-live"
+plain='{"acct:vvvvvvvv-1|c:o:a:user:profile user:inference":{"token":"tok-v","expiresAt":FUTURE}}'
+enc=$(encrypt "${plain//FUTURE/$future}")
+jq -n --arg v "$enc" '{"oauth:tokenCacheV2":$v,"lastKnownAccountUuid":"vvvvvvvv-1"}' > "$d/config.json"
+check "usage adds a (signed in) row for an unsaved live login" "(signed in)      $expected" "$(cda usage | grep '^(signed in) ')"
+check "but not when one name is asked for" 0 "$(cda usage usagey | grep -c '^(signed in)' || true)"
+cp "$tmp/config-saved-live" "$d/config.json"
 
 # the dotfiles-era store moves into the default location once, backups too
 # (XDG_CONFIG_HOME, not HOME: tools on PATH may read their own config from HOME)

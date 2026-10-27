@@ -13,17 +13,20 @@ gated_bin=bin/hooktest-$$
 swift_bin=bin/hooktest-swift-$$
 gated_raycast=raycast/hooktest-$$.sh
 gated_scripts=scripts/hooktest-$$.sh
+gated_test=test/hooktest-$$.sh
 mkdir -p "$tmp" private
-trap 'rm -rf "$root/$tmp" "$root/private/hooktest-$$.sh" "$root/$gated_bin" "$root/$swift_bin" "$root/$gated_raycast" "$root/$gated_scripts"' EXIT
+# One trap for every fixture; foreign and repos are made further down
+trap 'rm -rf "$root/$tmp" "$root/private/hooktest-$$.sh" "$root/$gated_bin" "$root/$swift_bin" "$root/$gated_raycast" "$root/$gated_scripts" "$root/$gated_test" ${foreign:+"$foreign"} ${repos:+"$repos"}' EXIT
 
 fail() {
   echo "FAIL: $1" >&2
   exit 1
 }
-# Feed the hook a PostToolUse payload; prints nothing, returns the hook's exit code
+# Feed the hook a PostToolUse payload; prints nothing (stderr goes to
+# $run_err when set), returns the hook's exit code
 run() {
   printf '{"tool_name":"Edit","tool_input":{"file_path":"%s"}}' "$1" \
-    | CLAUDE_PROJECT_DIR=$root "$hook" 2> /dev/null
+    | CLAUDE_PROJECT_DIR=$root "$hook" 2> "${run_err:-/dev/null}"
 }
 
 # 1. Unformatted Markdown gets formatted, exit 0
@@ -31,13 +34,15 @@ printf '# T\n\n* a\n' > "$tmp/a.md"
 run "$root/$tmp/a.md" || fail "markdown: non-zero exit"
 grep -q '^- a$' "$tmp/a.md" || fail "markdown: not formatted"
 
-# 2. Bash syntax error → exit 2
-printf '#!/bin/bash\nif then\n' > "$tmp/b.sh"
+# 2. Bash syntax error on a gated path → exit 2, reported by bash -n itself
+# (prettier rejects it too, so the exit code alone would not prove bash -n ran)
+printf '#!/bin/bash\nif then\n' > "$gated_test"
 set +e
-run "$root/$tmp/b.sh"
+run_err=$tmp/err run "$root/$gated_test"
 rc=$?
 set -e
 [ "$rc" -eq 2 ] || fail "bash syntax error: expected exit 2, got $rc"
+grep -q "^\\$ bash -n $gated_test$" "$tmp/err" || fail "bash syntax error: bash -n did not report it"
 
 # 3. Paths outside the project and missing paths are ignored
 run /etc/hosts || fail "outside path: non-zero exit"
@@ -83,7 +88,6 @@ grep -q '^- c$' "$tmp/w.md" || fail "other project dir: file in this checkout no
 # 10. A file in a repo without this hook is left alone
 foreign=$(mktemp -d "${TMPDIR:-/tmp}/lint-edited.XXXXXX")
 repos=$(mktemp -d "${TMPDIR:-/tmp}/lint-edited.XXXXXX")
-trap 'rm -rf "$root/$tmp" "$root/private/hooktest-$$.sh" "$root/$gated_bin" "$root/$swift_bin" "$root/$gated_raycast" "$root/$gated_scripts" "$foreign" "$repos"' EXIT
 git -C "$foreign" init -q
 printf '# T\n\n* d\n' > "$foreign/f.md"
 run "$foreign/f.md" || fail "foreign repo: non-zero exit"

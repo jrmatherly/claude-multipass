@@ -13,7 +13,7 @@ tmp=hooktest-$$
 scratch=private/hooktest-$$
 mkdir -p "$tmp" "$scratch"
 err=$scratch/err
-trap 'rm -rf "$root/$tmp" "$root/$scratch"' EXIT
+trap 'rm -rf "$root/$tmp" "$root/$scratch" "$root/test/hooktest-$$.sh"' EXIT
 
 fail() {
   echo "FAIL: $1" >&2
@@ -32,12 +32,15 @@ expect_rc() {
   [ "$1" -eq "$2" ] || fail "$3: expected exit $2, got $1"
 }
 
-# 1. A listed shell file with a syntax error → exit 2, problem names the file
-printf '#!/bin/bash\nif then\n' > "$tmp/b.sh"
+# 1. A listed gated shell file with a syntax error → exit 2, bash -n names the file
+gated=test/hooktest-$$.sh
+printf '#!/bin/bash\nif then\n' > "$gated"
 rc=0
-payload "$root/$tmp/b.sh" | lint || rc=$?
+payload "$root/$gated" | lint || rc=$?
+# Later cases reuse this broken file outside the gate (prettier still fails it)
+mv "$gated" "$tmp/b.sh"
 expect_rc "$rc" 2 "syntax error"
-grep -q "$tmp/b.sh" "$err" || fail "syntax error: file not named in stderr"
+grep -q "^\\$ bash -n $gated$" "$err" || fail "syntax error: bash -n did not report the file"
 
 # 2. No bashEditDiff in the payload (older Claude Code, non-git cwd, recording off) → exit 0
 printf '{"tool_name":"Bash","tool_input":{"command":"true"},"tool_response":{"stdout":"","stderr":""}}' \

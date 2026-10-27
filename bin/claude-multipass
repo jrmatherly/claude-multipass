@@ -173,7 +173,7 @@ ${bold}Usage${reset}
   claude-multipass list
   claude-multipass show <name>
   claude-multipass save|switch|add <name> [--no-relaunch] [--force]
-  claude-multipass remove <name> [--no-relaunch]
+  claude-multipass remove <name>
   claude-multipass rename <old> <new>
   claude-multipass sync [--force]
   claude-multipass usage [name]
@@ -358,7 +358,7 @@ keychain_delete() {
 # measured); its stderr is dropped above, so the reason is named here.
 keychain_exit() {
   case $1 in
-    36) echo "security exited 36 (no Keychain prompt is possible here: a shell over SSH, a hook, or a timer)" ;;
+    36) echo "security exited 36 (the keychain is locked and cannot prompt here, as over SSH or in a hook; unlock it and retry)" ;;
     51) echo "security exited 51 (the Keychain prompt was declined, or the password was wrong)" ;;
     128) echo "security exited 128 (the Keychain prompt was cancelled)" ;;
     *) echo "security exited $1" ;;
@@ -962,7 +962,10 @@ doctor_report() {
 # fetches run in parallel; one key derivation serves them all.
 usage_report() {
   local only=${1:-} key out meta dir name live account i=0
-  [[ -z $only ]] || require_profile "$only"
+  if [[ -n $only ]]; then
+    require_profile "$only"
+    require_meta "$only" > /dev/null
+  fi
   key=$(safe_storage_key)
   out=$(mktemp -d)
   for meta in "$store"/*/meta.json; do
@@ -1058,6 +1061,13 @@ require_profile() {
     || fail "No saved account named $1 (see: claude-multipass list)"
 }
 
+# A profile's account id, or a clean failure when its meta.json is unreadable;
+# for the commands that name one profile and need its account.
+require_meta() {
+  meta_account "$store/$1/meta.json" 2> /dev/null \
+    || fail "$1: $store/$1/meta.json is not valid; remove $1, then save it again"
+}
+
 valid_name() {
   [[ $1 =~ ^[A-Za-z0-9._-]+$ && $1 != . && $1 != .. ]] \
     || fail "Give a name made of letters, digits, . _ - (got: $1)"
@@ -1085,7 +1095,7 @@ profile_rename() {
 
 profile_show() {
   local account org n
-  account=$(jq -r .account "$store/$1/meta.json")
+  account=$(require_meta "$1")
   echo "$1"
   echo "account ${account:0:8}"
   echo "saved at $(jq -r .savedAt "$store/$1/meta.json")"
@@ -1252,7 +1262,10 @@ main() {
       [[ -z $other || -n $force ]] || refuse "$other already holds the signed-in account: run save $other, or rename $other $name, or pass --force to move $other to backups and save as $name"
       ;;
     switch | add)
-      [[ $cmd == add ]] || require_profile "$name"
+      if [[ $cmd == switch ]]; then
+        require_profile "$name"
+        require_meta "$name" > /dev/null
+      fi
       if signed_in && [[ -z $(active_profile) && -z $force ]]; then
         refuse "The signed-in account isn't saved and would need its email code again: run save <name> first, or pass --force"
       fi

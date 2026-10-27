@@ -11,7 +11,7 @@ Preconditions: on `main`, clean tree, `pnpm check` passes, the tap is cloned at 
 
 1. Check that `main` already carries the release: `CHANGELOG.md` has a `## X.Y.Z (YYYY-MM-DD)` section at the top (no `v`, matching the existing headings; a `## Unreleased` heading becomes the dated one) and `version=` in `bin/claude-multipass` equals `"version"` in `package.json` equals `X.Y.Z`. Those edits are code and land through a PR like any other (CLAUDE.md, Custom Notes), so a release never commits on `main`: when they are missing, open that PR first and come back after it merges.
 2. Tag: `git tag -a vX.Y.Z -m "vX.Y.Z"`.
-3. Push the tag: `git push --follow-tags`. The tag starts `release.yml`; wait with `gh run watch --exit-status <run id>` (`gh run list --workflow release.yml --limit 1` finds it). It publishes `claude-multipass-app_X.Y.Z_arm64.dmg` and its `.sha256` on the GitHub release (the suffix is the runner's `uname -m`; `macos-latest` is arm64). Confirm the DMG is notarized: download it and run `spctl -a -vv -t open --context context:primary-signature <dmg>`, expected `accepted`.
+3. Push the tag: `git push --follow-tags`. The tag starts `release.yml`; wait with `gh run watch --exit-status <run id>` (`gh run list --workflow release.yml --limit 1` finds it). It publishes `claude-multipass-app_X.Y.Z_arm64.dmg` and its `.sha256` on the GitHub release (the suffix is the runner's `uname -m`; the build job runs on `macos-26`, which is arm64). Confirm the DMG is notarized: download it and run `spctl -a -vv -t open --context context:primary-signature <dmg>`, expected `accepted`.
 4. Compute the tarball digest (GitHub builds the archive from the tag; wait for the push to land):
 
    ```sh
