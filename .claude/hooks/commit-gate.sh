@@ -28,34 +28,57 @@ enter() {
   esac
 }
 
-# A segment is a commit when its command word (after NAME=value prefixes) is
-# git and a later word is `commit`; quoted text is not parsed. dir follows
-# each `cd <dir>` segment before it and the commit's own `git -C <dir>`
+# A segment is a commit when its command word, after NAME=value prefixes and
+# wrappers such as env or time, is git and its subcommand (the first word
+# after git's own options) is commit, or the --continue of a command whose
+# conflicts were just resolved: the gate runs before the command, so for a
+# plain merge or rebase the tree to check is not on disk yet. dir follows
+# each `cd <dir>` segment; a commit's `git -C <dir>` moves only that segment's
+# target
 is_commit() {
-  local seg w first prev gitdir
-  dir=$cwd
+  local seg w first prev gitdir sub cddir
+  cddir=$cwd
   while IFS= read -r seg; do
     first=""
     prev=""
-    gitdir=$dir
+    sub=""
+    gitdir=$cddir
     for w in $seg; do
       if [ -z "$first" ]; then
-        [[ $w =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] && continue
+        [[ $w =~ ^[A-Za-z_][A-Za-z0-9_]*= || $w == -* ]] && continue
+        case ${w##*/} in env | command | builtin | exec | nohup | time | nice | bash | sh | zsh) continue ;; esac
         first=${w##*/}
         [ "$first" = git ] || [ "$first" = cd ] || break
       elif [ "$first" = cd ]; then
-        enter "$w" "$dir"
+        enter "$w" "$cddir"
+        cddir=$dir
         break
-      elif [ "$prev" = -C ]; then
-        enter "$w" "$gitdir"
-        gitdir=$dir
-      elif [ "$w" = commit ]; then
+      elif [ -z "$sub" ]; then
+        case $prev in
+          -C)
+            enter "$w" "$gitdir"
+            gitdir=$dir
+            prev=""
+            continue
+            ;;
+          -c | --git-dir | --work-tree | --namespace | --config-env | --super-prefix)
+            prev=""
+            continue
+            ;;
+        esac
+        if [[ $w != -* ]]; then
+          sub=$w
+          [ "$sub" = commit ] && dir=$gitdir && return 0
+          case $sub in merge | cherry-pick | revert | rebase | am) ;; *) break ;; esac
+        fi
+      elif [ "$w" = --continue ]; then
         dir=$gitdir
         return 0
       fi
       prev=$w
     done
-  done < <(sed -E 's/(&&|\|\||;|\|)/\n/g' <<< "$1")
+    # Quotes dropped, so `bash -c "git commit"` reads as a commit
+  done < <(sed -E "s/(&&|\|\||;|\|)/\n/g; s/[\"']//g" <<< "$1")
   return 1
 }
 
