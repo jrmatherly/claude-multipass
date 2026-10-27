@@ -416,10 +416,10 @@ kc_put "Claude Code-credentials" "$USER" 'not json'
 st=0
 err=$(cda switch beta --no-relaunch 2>&1 > "$tmp/corrupt-out") || st=$?
 check "a corrupt live CLI item does not abort the switch" 0 "$st"
-check_true "and warns" grep -q 'the live CLI login is not valid JSON; switched Desktop only' <<< "$err"
+check_true "and warns" grep -q 'the live or saved CLI login is not valid JSON; switched Desktop only' <<< "$err"
 check_true "and the session lists were still merged" grep -q written "$tmp/corrupt-out"
 check "and the corrupt item is left alone" 'not json' "$(kc_get "Claude Code-credentials" "$USER")"
-check_true "a corrupt live item never passes for the target's login" grep -q 'the live CLI login is not valid JSON; switched Desktop only' <<< "$(cda switch alpha --no-relaunch 2>&1 > /dev/null)"
+check_true "a corrupt live item never passes for the target's login" grep -q 'the live or saved CLI login is not valid JSON; switched Desktop only' <<< "$(cda switch alpha --no-relaunch 2>&1 > /dev/null)"
 check "and keeps the profile item" at-beta-fresh "$(kc_get claude-multipass beta | jq -r .claudeAiOauth.accessToken)"
 kc_put "Claude Code-credentials" "$USER" "$live_item"
 

@@ -551,8 +551,9 @@ cli_restore() {
     return 0
   fi
   merged=$saved
-  if [[ -n $live ]] && ! merged=$(jq -c --argjson s "$saved" "{$cli_shared} | with_entries(select(.value != null)) + \$s" <<< "$live" 2> /dev/null); then
-    warning "the live CLI login is not valid JSON; switched Desktop only"
+  # Both items reach jq on stdin: --argjson would put the saved tokens on its argv.
+  if [[ -n $live ]] && ! merged=$(printf '%s\n%s\n' "$live" "$saved" | jq -c -s "(.[0] | {$cli_shared} | with_entries(select(.value != null))) + .[1]" 2> /dev/null); then
+    warning "the live or saved CLI login is not valid JSON; switched Desktop only"
     return 0
   fi
   cli_backup "$live" || return 0
