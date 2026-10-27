@@ -28,49 +28,74 @@ printf '#!/bin/sh\nexit 1\n' > "$tmp/bin/pgrep"
 for stub in osascript pkill open; do
   printf '#!/bin/sh\necho "%s $*" >> "%s/calls"\n' "$stub" "$tmp" > "$tmp/bin/$stub"
 done
-# The script reaches the Keychain through a helper (CLAUDE_MULTIPASS_KEYCHAIN,
-# the system python3 on a real Mac). The stub keeps items as files under
-# $tmp/keychain/<service>/<account>, logs each call to $tmp/security-calls
-# (argv only, so a token on a command line would show up there), and takes
-# the value on stdin. security itself only answers the Safe Storage read.
+# A stateful security stub. Every call and every `-i` stdin line goes to
+# $tmp/security-calls, so the log tells the stdin route from the argv one the
+# script takes for an item too large for a security -i line. The "Claude Safe
+# Storage" read answers with the fixture password for usage.
 pw='fixture pass!$'
-cat > "$tmp/bin/keychain" << EOF
+cat > "$tmp/bin/security" << EOF
 #!/bin/bash
 kc="$tmp/keychain"
 log="$tmp/security-calls"
+pw='$pw'
 EOF
-cat >> "$tmp/bin/keychain" << 'EOF'
-# argv is: -I -c <code> op service account
-op=$4 s=$5 a=$6
-echo "keychain $*" >> "$log"
-# Failure hooks for the self-check: a refused write, a failed read of the CLI
-# item. Like the real helper, the reason goes to stderr.
-[[ -z ${SECURITY_FAIL_ADD:-} || $op != put ]] || { echo "keychain put $s: OSStatus -25293 access denied (stub)" >&2; exit 1; }
-[[ -z ${SECURITY_FAIL_FIND:-} || $op != get || $s != 'Claude Code-credentials' ]] || { echo "keychain get $s: OSStatus -25308 (stub)" >&2; exit "$SECURITY_FAIL_FIND"; }
-case $op in
-  put)
-    mkdir -p "$kc/$s"
-    cat > "$kc/$s/$a"
-    ;;
-  get)
-    [[ -f $kc/$s/$a ]] || exit 44
-    cat "$kc/$s/$a"
-    ;;
-  delete)
-    [[ -f $kc/$s/$a ]] || exit 44
-    rm "$kc/$s/$a"
-    ;;
-  *) exit 1 ;;
-esac
+cat >> "$tmp/bin/security" << 'EOF'
+run() {
+  local cmd=$1 a='' s='' hex='' want_w=''
+  shift
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      -a) a=$2; shift ;;
+      -s) s=$2; shift ;;
+      -w) want_w=1 ;;
+      -X) hex=$2; shift ;;
+    esac
+    shift
+  done
+  # Failure hooks for the self-check: a refused write, a failed read of the CLI item.
+  [[ -z ${SECURITY_FAIL_ADD:-} || $cmd != add-generic-password ]] || return 1
+  [[ -z ${SECURITY_FAIL_FIND:-} || $cmd != find-generic-password || $s != 'Claude Code-credentials' ]] || return "$SECURITY_FAIL_FIND"
+  case $cmd in
+    add-generic-password)
+      mkdir -p "$kc/$s"
+      # Decoded straight to the file: a $(...) would strip a trailing newline the tool must not store.
+      printf %s "$hex" | xxd -r -p > "$kc/$s/$a"
+      ;;
+    find-generic-password)
+      if [[ $s == 'Claude Safe Storage' ]]; then printf %s "$pw"; return 0; fi
+      [[ -f $kc/$s/$a ]] || { echo "security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain." >&2; return 44; }
+      # Like the real tool: a value with any non-printable byte (a newline) prints as hex.
+      if [[ -n $want_w ]]; then
+        if [[ $(LC_ALL=C tr -d '[:print:]' < "$kc/$s/$a" | wc -c) -gt 0 ]]; then xxd -p "$kc/$s/$a" | tr -d '\n'; else cat "$kc/$s/$a"; fi
+      fi
+      ;;
+    delete-generic-password)
+      [[ -f $kc/$s/$a ]] || return 44
+      rm "$kc/$s/$a"
+      ;;
+    *) echo "security: unknown command $cmd" >&2; return 1 ;;
+  esac
+}
+echo "security $*" >> "$log"
+if [[ ${1:-} == -i ]]; then
+  while IFS= read -r line; do
+    echo "stdin $line" >> "$log"
+    # The exact shape the script emits; the service name carries a space.
+    [[ $line =~ ^add-generic-password\ -U\ -a\ \"([^\"]*)\"\ -s\ \"([^\"]*)\"\ -X\ ([0-9a-f]*)$ ]] \
+      || { echo "security: unparsed line: $line" >&2; exit 1; }
+    run add-generic-password -a "${BASH_REMATCH[1]}" -s "${BASH_REMATCH[2]}" -X "${BASH_REMATCH[3]}" || st=$?
+  done
+  # The real tool propagates the inner command's status (measured).
+  exit "${st:-0}"
+fi
+run "$@"
 EOF
-printf '#!/bin/sh\necho "security $*" >> "%s/security-calls"\nprintf %%s "%s"\n' "$tmp" "$pw" > "$tmp/bin/security"
-export CLAUDE_MULTIPASS_KEYCHAIN="$tmp/bin/keychain"
-kc_get() { "$tmp/bin/keychain" -I -c x get "$1" "$2" 2> /dev/null || echo absent; }
-kc_put() { printf %s "$3" | "$tmp/bin/keychain" -I -c x put "$1" "$2"; }
-kc_delete() { "$tmp/bin/keychain" -I -c x delete "$1" "$2" > /dev/null 2>&1 || true; }
+kc_get() { security find-generic-password -a "$2" -s "$1" -w 2> /dev/null || echo absent; }
+kc_put() { printf 'add-generic-password -U -a "%s" -s "%s" -X %s\n' "$2" "$1" "$(printf %s "$3" | xxd -p | tr -d '\n')" | security -i > /dev/null; }
+kc_delete() { security delete-generic-password -a "$2" -s "$1" > /dev/null 2>&1 || true; }
 chmod +x "$tmp"/bin/*
 export PATH="$tmp/bin:$PATH"
-export CLAUDE_CLI_CONFIG="$tmp/claude.json" CLAUDE_CLI_HOME="$tmp/claude-home"
+export CLAUDE_CLI_CONFIG="$tmp/claude.json" CLAUDE_CLI_HOME="$tmp/claude-home" CLAUDE_MULTIPASS_BIN="$script"
 mkdir -p "$tmp/claude-home"
 cda() { "$script" "$@"; }
 pkg_version=$(jq -r .version "$(dirname "$script")/../package.json")
@@ -95,28 +120,19 @@ exit_code() {
   "$@" > /dev/null 2>&1 && echo 0 || echo $?
 }
 
-# The real helper: the embedded python parses, and a read of an item that
-# does not exist walks every binding (CFString, CFDictionary with its
-# callbacks, SecItemCopyMatching) without a write or a prompt
-if [[ -x /usr/bin/python3 ]] && xcode-select -p > /dev/null 2>&1; then
-  helper_py=$(sed -n "/^read -r -d '' keychain_py << 'PY'/,/^PY\$/p" "$script" | sed '1d;$d')
-  check "the embedded Keychain helper parses" ok "$(printf %s "$helper_py" | /usr/bin/python3 -I -c 'import ast, sys; ast.parse(sys.stdin.read()); print("ok")')"
-  check "the real helper reports an absent item as 44" 44 "$(
-    /usr/bin/python3 -I -c "$helper_py" get claude-multipass-selftest nobody > /dev/null 2> "$tmp/helper-err"
-    echo $?
-  )"
-  check "and says nothing on stderr for absent" "" "$(cat "$tmp/helper-err")"
-fi
-
-# the keychain stub itself
-printf 'a "b" c'"'"'d\n' | "$tmp/bin/keychain" -I -c x put t u
-check "keychain stub stores bytes as given" "$(printf 'a "b" c'"'"'d\n' | xxd -p)" "$(kc_get t u | xxd -p)"
-check "keychain stub reports a missing item" 44 "$(
-  "$tmp/bin/keychain" -I -c x get none u > /dev/null 2>&1
+kc_put t u 'a "b" c'"'"'d'
+check "security stub decodes a hex value" 'a "b" c'"'"'d' "$(kc_get t u)"
+security add-generic-password -U -a u -s t -X "$(printf argv | xxd -p)"
+check "security stub takes a hex value on argv too" argv "$(kc_get t u)"
+check "security stub reports a missing item" 44 "$(
+  security find-generic-password -a u -s none -w > /dev/null 2>&1
   echo $?
 )"
 kc_delete t u
-check "keychain stub deletes" absent "$(kc_get t u)"
+check "security stub deletes" absent "$(kc_get t u)"
+kc_put t u "$(printf 'a\nb')"
+check "security stub prints a value with a newline as hex, like the real tool" 610a62 "$(kc_get t u)"
+kc_delete t u
 
 mkdir -p "$d" "$p/beta" "$s/aaaaaaaa-1111/org-a" "$s/bbbbbbbb-2222/org-b"
 tab=$'\t'
@@ -132,11 +148,14 @@ live_item='{"claudeAiOauth":{"accessToken":"at-alpha","refreshToken":"rt-alpha",
 kc_put "Claude Code-credentials" "$USER" "$live_item"
 
 # save captures exactly the three keys and the cookie files
+: > "$tmp/security-calls"
 cda save alpha > /dev/null
 check "save writes cli.json with the identity block" "$(jq -c .oauthAccount "$tmp/claude.json")" "$(jq -c .oauthAccount "$p/alpha/cli.json")"
 check "save keeps cli.json private" 600 "$(stat -f %Lp "$p/alpha/cli.json")"
 check "save stores the CLI tokens in the Keychain" '{"claudeAiOauth":{"accessToken":"at-alpha","refreshToken":"rt-alpha","expiresAt":1,"scopes":["a"],"subscriptionType":"max"},"trustedDeviceToken":"dev-alpha"}' "$(kc_get claude-multipass alpha)"
 check "save never puts the token on a command line" 0 "$(grep -c 'rt-alpha' "$tmp/security-calls")"
+check "a small CLI item goes to security -i on stdin" 1 "$(grep -c '^stdin add-generic-password -U -a "alpha" -s "claude-multipass" -X [0-9a-f]*$' "$tmp/security-calls")"
+check "and not on argv" 0 "$(grep -c '^security add-generic-password' "$tmp/security-calls")"
 check "no token on disk in the store" 0 "$(grep -rl rt-alpha "$p" | wc -l | tr -d ' ')"
 check "save keeps only the auth keys, in order" \
   '{"oauth:tokenCache":"enc-A1","oauth:tokenCacheV2":"enc-A2","lastKnownAccountUuid":"aaaaaaaa-1111"}' \
@@ -163,16 +182,9 @@ check_true "save warns when the CLI is signed out" grep -q 'signed in as a diffe
 check "a signed-out save keeps the saved item" at-alpha "$(kc_get claude-multipass alpha | jq -r .claudeAiOauth.accessToken)"
 kc_put "Claude Code-credentials" "$USER" "$live_item"
 err=$(SECURITY_FAIL_ADD=1 cda save alpha --no-relaunch 2>&1 > /dev/null)
-check_true "a refused Keychain write on save warns with the helper's reason" grep -q 'alpha: the Keychain helper exited 1 saving the CLI login; saved the Desktop login only' <<< "$err"
-check_true "and the reason reaches the user" grep -q 'OSStatus -25293 access denied' <<< "$err"
+check_true "a refused Keychain write on save warns" grep -q 'alpha: security exited 1 saving the CLI login; saved the Desktop login only' <<< "$err"
 check "and keeps the earlier saved item" at-alpha "$(kc_get claude-multipass alpha | jq -r .claudeAiOauth.accessToken)"
 check "and still saved the Desktop login" aaaaaaaa-1111 "$(jq -r .lastKnownAccountUuid "$p/alpha/config.json")"
-# No Command Line Tools: the helper is a shim that pops an installer, so the CLI part is skipped
-printf '#!/bin/sh\nexit 2\n' > "$tmp/bin/xcode-select"
-chmod +x "$tmp/bin/xcode-select"
-check_true "save without the Command Line Tools skips the CLI login" grep -q 'alpha: the Command Line Tools are not installed (xcode-select --install); saved the Desktop login only' <<< "$(cda save alpha --no-relaunch 2>&1 > /dev/null)"
-check_true "doctor warns without the Command Line Tools" grep -q '^warn: Command Line Tools: not installed (xcode-select --install), needed for the CLI login and usage' <<< "$(cda doctor)"
-rm "$tmp/bin/xcode-select"
 
 printf '{"oauth:tokenCache":"enc-B1","oauth:tokenCacheV2":"enc-B2","lastKnownAccountUuid":"bbbbbbbb-2222"}' > "$p/beta/config.json"
 printf '{"account":"bbbbbbbb-2222","savedAt":"2026-01-01T00:00:00Z"}' > "$p/beta/meta.json"
@@ -180,7 +192,7 @@ printf cookie-B > "$p/beta/Cookies"
 kc_put claude-multipass beta '{"claudeAiOauth":{"accessToken":"at-beta","refreshToken":"rt-beta","expiresAt":2,"scopes":["a"],"subscriptionType":"max"}}'
 printf '{"oauthAccount":{"accountUuid":"bbbbbbbb-2222","emailAddress":"b@example.com","organizationUuid":"org-beta"}}' > "$p/beta/cli.json"
 # claude on PATH answers the verification after a restore
-printf '#!/bin/sh\nls -d "%s"/claude.json.lock "%s"/claude-home/.oauth_refresh.lock "%s"/claude-home.lock 2> /dev/null | wc -l | tr -d " " > "%s/locks-at-verify"\necho "{\\"orgId\\":\\"org-beta\\"}"\n' "$tmp" "$tmp" "$tmp" "$tmp" > "$tmp/bin/claude"
+printf '#!/bin/sh\nls -d "%s"/claude.json.lock "%s"/claude-home/.oauth_refresh.lock "%s"/claude-home.lock 2> /dev/null | wc -l | tr -d " " > "%s/locks-at-verify"\necho "{\\"loggedIn\\":true,\\"orgId\\":\\"org-beta\\"}"\n' "$tmp" "$tmp" "$tmp" "$tmp" > "$tmp/bin/claude"
 chmod +x "$tmp/bin/claude"
 cp "$tmp/claude.json" "$tmp/claude-before.json"
 
@@ -200,6 +212,7 @@ touch -t 202101010000 "$s/aaaaaaaa-1111/org-a/local_s2.json" "$s/bbbbbbbb-2222/o
 before=$(jq --tab '.["oauth:tokenCacheV2"] = "enc-A2-new"' "$d/config.json")
 printf '%s' "$before" > "$d/config.json"
 
+: > "$tmp/security-calls"
 out=$(cda switch beta --no-relaunch 2> "$tmp/switch-err" | tee "$tmp/switch-out")
 check "switch merges keys in place, other keys byte-identical" \
   "{
@@ -281,15 +294,20 @@ check "and leaves the outgoing profile's CLI login alone" at-beta-fresh "$(kc_ge
 check "and still restores the target's CLI login" at-alpha "$(kc_get "Claude Code-credentials" "$USER" | jq -r .claudeAiOauth.accessToken)"
 check "and its identity" aaaaaaaa-1111 "$(jq -r .oauthAccount.accountUuid "$tmp/claude.json")"
 
-# A live item the size of a real one (15 KB of MCP logins) moves whole: the
-# 4019-byte security -i line limit no longer applies
-big=$(printf 'x%.0s' $(seq 1 15000))
-kc_put "Claude Code-credentials" "$USER" "{\"claudeAiOauth\":{\"accessToken\":\"at-alpha\"},\"mcpOAuth\":\"$big\"}"
-err=$(cda switch beta --no-relaunch 2>&1 > /dev/null)
-check "a 15 KB live item warns nothing" "" "$err"
-check "and the CLI tokens are restored" at-beta-fresh "$(kc_get "Claude Code-credentials" "$USER" | jq -r .claudeAiOauth.accessToken)"
-check "and the 15 KB of shared keys survive" 15000 "$(kc_get "Claude Code-credentials" "$USER" | jq -r '.mcpOAuth | length')"
-check "and the backup item holds the whole previous item" 15000 "$(kc_get claude-multipass "$(basename "$(ls -1d "$b"/login-*/ | sort | tail -1)")" | jq -r '.mcpOAuth | length')"
+# A live item larger than a real one (20 KB of MCP logins) moves whole: too
+# long for a security -i line, its hex goes on security's argv, as Claude
+# Code writes it. The backup item keeps the account part only.
+big=$(printf 'x%.0s' $(seq 1 20000))
+big_item="{\"claudeAiOauth\":{\"accessToken\":\"at-alpha\"},\"mcpOAuth\":\"$big\"}"
+kc_put "Claude Code-credentials" "$USER" "$big_item"
+: > "$tmp/security-calls"
+out=$(cda switch beta --no-relaunch 2> "$tmp/big-err")
+check "a 20 KB live item warns nothing" "" "$(cat "$tmp/big-err")"
+check "and the live item is the shared keys plus the saved account part, byte for byte" "$(jq -c --argjson s "$(kc_get claude-multipass beta)" 'del(.claudeAiOauth, .trustedDeviceToken) + $s' <<< "$big_item")" "$(kc_get "Claude Code-credentials" "$USER")"
+check "and its write went on security's argv" 1 "$(grep -c "^security add-generic-password -U -a $USER -s Claude Code-credentials -X [0-9a-f]*$" "$tmp/security-calls")"
+check "and only that write did" 1 "$(grep -c '^security add-generic-password' "$tmp/security-calls")"
+check "and nothing about the token reached stdout or stderr" 0 "$(grep -c 'at-beta\|61742d62657461' <<< "$out$(cat "$tmp/big-err")")"
+check "and the backup item holds the account part only" '["claudeAiOauth"]' "$(kc_get claude-multipass "$(basename "$(ls -1d "$b"/login-*/ | sort | tail -1)")" | jq -c keys)"
 cda switch alpha --no-relaunch > /dev/null 2>&1
 kc_put "Claude Code-credentials" "$USER" "$live_item"
 
@@ -304,6 +322,7 @@ cda switch alpha --no-relaunch > /dev/null 2>&1
 # security refuses the write (a locked Keychain, a denied prompt): nothing is written over a login that has no copy
 err=$(SECURITY_FAIL_ADD=1 cda switch beta --no-relaunch 2>&1 > /dev/null)
 check_true "a failed CLI backup warns" grep -q 'could not back up the CLI login; switched Desktop only' <<< "$err"
+check "and the profile's saved item survives" at-beta-fresh "$(kc_get claude-multipass beta | jq -r .claudeAiOauth.accessToken)"
 check "and leaves the live CLI item alone" at-alpha "$(kc_get "Claude Code-credentials" "$USER" | jq -r .claudeAiOauth.accessToken)"
 check "and leaves oauthAccount alone" aaaaaaaa-1111 "$(jq -r .oauthAccount.accountUuid "$tmp/claude.json")"
 check "and still switches Desktop" bbbbbbbb-2222 "$(jq -r .lastKnownAccountUuid "$d/config.json")"
@@ -311,9 +330,8 @@ cda switch alpha --no-relaunch > /dev/null 2>&1
 
 # security fails the read of the CLI item with another status: the status is named, nothing moves
 err=$(SECURITY_FAIL_FIND=36 cda switch beta --no-relaunch 2>&1 > /dev/null)
-check_true "a failed read on the way out names the status and the profile" grep -q 'alpha: the Keychain helper exited 36 reading the CLI login; saved the Desktop login only' <<< "$err"
-check_true "a failed read on the restore names the status" grep -q 'the Keychain helper exited 36 reading the CLI login; switched Desktop only' <<< "$err"
-check_true "and the helper's reason reaches the user" grep -q 'OSStatus -25308' <<< "$err"
+check_true "a failed read on the way out names the status and the profile" grep -q 'alpha: security exited 36 reading the CLI login; saved the Desktop login only' <<< "$err"
+check_true "a failed read on the restore names the status" grep -q 'security exited 36 reading the CLI login; switched Desktop only' <<< "$err"
 check "and leaves the live CLI item alone" at-alpha "$(kc_get "Claude Code-credentials" "$USER" | jq -r .claudeAiOauth.accessToken)"
 check "and leaves oauthAccount alone" aaaaaaaa-1111 "$(jq -r .oauthAccount.accountUuid "$tmp/claude.json")"
 cda switch alpha --no-relaunch > /dev/null 2>&1
@@ -392,9 +410,13 @@ check_true "and the tool's own locks are released" test ! -e "$tmp/claude-home/.
 rmdir "$tmp/claude.json.lock"
 
 # Verification after a restore: claude auth status must report the restored org
-printf '#!/bin/sh\necho "{\\"orgId\\":\\"org-other\\"}"\n' > "$tmp/bin/claude"
+printf '#!/bin/sh\necho "{\\"loggedIn\\":true,\\"orgId\\":\\"org-other\\"}"\n' > "$tmp/bin/claude"
 err=$(cda switch beta --no-relaunch 2>&1 > /dev/null)
 check_true "an org mismatch warns and names the backup" grep -q "Claude Code reports a different org; the previous login is in $b/login-" <<< "$err"
+printf '#!/bin/sh\necho "{\\"loggedIn\\":false}"\n' > "$tmp/bin/claude"
+err=$(cda switch alpha --no-relaunch 2>&1 > /dev/null)
+check_true "a signed-out claude warns and names the backup" grep -q "Claude Code reports it is signed out; the previous login is in $b/login-" <<< "$err"
+check "and not about the org" 0 "$(grep -c 'different org' <<< "$err")"
 rm "$tmp/bin/claude"
 # a PATH without claude (jq's folder, the stub folder and the system folders only)
 noclaude="$tmp/bin:$(dirname "$(command -v jq)"):/usr/bin:/bin"
@@ -453,12 +475,14 @@ check "bare without a terminal prints usage and exits 2" 2 "$(exit_code bare)"
 # bare on a real terminal runs the picker: `script` lends one
 printf '#!/bin/sh\ngrep "^beta "\n' > "$tmp/bin/fzf"
 check "bare on a terminal switches through the picker" "beta is already signed in" "$(script -q /dev/null "$script" < /dev/null 2>&1 | grep -o 'beta is already signed in')"
-# The Raycast scripts call claude-multipass by name
-ln -s "$script" "$tmp/bin/claude-multipass"
 raycast="$(cd "$(dirname "$script")/.." && pwd -P)/raycast"
 check "current prints the active name" beta "$(cda current)"
 check "Raycast inline shows the active account" beta "$("$raycast/claude-account.sh")"
-check "Raycast switch ends with a toast line" "Switched to beta" "$("$raycast/switch-claude-account.sh" beta | tail -1)"
+: > "$tmp/security-calls"
+check "Raycast switch ends with a toast line" "Switched to alpha" "$("$raycast/switch-claude-account.sh" alpha 2> /dev/null | tail -1)"
+# Raycast puts Homebrew's bin first; an installed tool would have answered instead.
+check "and ran the checkout, whose CLI write reached the stub" 1 "$(grep -c '^stdin add-generic-password -U -a "'"$USER"'" -s "Claude Code-credentials"' "$tmp/security-calls")"
+cda switch beta --no-relaunch > /dev/null 2>&1
 
 # Run from a shell inside Desktop (the Code tab's terminal): BSD pgrep excludes
 # its own ancestors, so plain pgrep says "not running" while pgrep -a finds it.
