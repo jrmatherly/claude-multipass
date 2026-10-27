@@ -2,7 +2,12 @@
 
 ## Unreleased
 
-- `--help` lists `--force` on `save` and `switch` only; `add` and `remove` never took it (the tool refused it with `--force applies to sync, switch and save`).
+- `save` refuses a second name for an account already saved under another name (exit 3, before Desktop quits). Two names for one account made `switch` to the second restore its older tokens. `--force` moves the other profile to `backups/` and saves under the new name, which keeps the other name's CLI login when the terminal is on another account.
+- `add` refuses to clear a login that was never saved (exit 3), as `switch` does; it only warned before. `--force` clears it anyway, and `--help` now lists `--force` on `save`, `switch` and `add`.
+- `list` and `list --json` skip a profile whose `meta.json` cannot be read, with a warning, instead of failing (exit 5). `list --json` sends a missing `savedAt` as `null`, not the string `"null"`.
+- The menu bar app decodes `savedAt` leniently, so one profile without a save time no longer empties the account list.
+- The menu bar app gives `save`, `switch` and the other commands that quit Desktop 10 minutes instead of 2, since they can wait on an Automation or Keychain prompt. A timeout now SIGKILLs the tool's whole process group, so an `osascript` or `security` child that outlives the SIGTERM is gone too.
+- A failed usage fetch in the menu bar app clears the old usage figures, and its error stays shown until a usage fetch succeeds or usage is turned off. A snapshot success used to hide it.
 - `switch` and `save` honour all three of the CLI's lock dirs. Only `~/.claude.json.lock` stopped them before; a held `~/.claude/.oauth_refresh.lock` or `~/.claude.lock` was ignored. A switch now fails naming the held lock, and a save keeps the Desktop login only.
 - The backup prune no longer splits a store path that holds a space. Before, it could `rm -rf` a sibling folder named after the path's first word.
 - `switch` to the account already signed in keeps the live cookies, which Desktop may have rotated since the save, and copies the profile's only when the live `Cookies` file is missing.

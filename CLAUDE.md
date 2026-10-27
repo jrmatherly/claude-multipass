@@ -55,7 +55,7 @@ The verified Desktop and CLI internals, with evidence labels, are in `.claude/ru
 
 Keep these when changing the script. The rules a reviewer rejects a change for are in `.claude/rules/safety-and-terms.md`.
 
-- Refusals, each lifted only by `--force`: `save` over a profile that holds a different account (the old profile moves to `backups/`); `switch` away from a login that was never saved; `sync` while Desktop runs. `--force` is rejected for any other command. `save` refuses when signed out, before quitting the app.
+- Refusals, each lifted only by `--force`: `save` over a profile that holds a different account, or under a second name for an account already saved (the other profile moves to `backups/`); `switch` or `add` away from a login that was never saved; `sync` while Desktop runs. `--force` is rejected for any other command. `save` refuses when signed out, before quitting the app.
 - `backup_login` copies `config.json` and the cookies into `backups/login-<timestamp>-<pid>` before every merge into `config.json` (`switch`, `add`).
 - `index_sync` is add-only: it copies a pointer only when the source is newer (`lastActivityAt`, else mtime), skips any id with a `deleted_*` tombstone, and never deletes or symlinks.
 - Desktop is quit before any write (`osascript` quit, then `pkill` after 8 s, fail after 10 s more), and relaunched from the `EXIT` trap so an error midway still brings it back. `--no-relaunch` leaves it quit.

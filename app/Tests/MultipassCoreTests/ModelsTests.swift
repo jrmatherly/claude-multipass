@@ -54,3 +54,11 @@ import Testing
     try MultipassJSON.decoder.decode(UsageReport.self, from: Data(json.utf8))
   }
 }
+
+@Test func savedAtIsLenient() throws {
+  // A meta.json without savedAt reached the app as null, or as "null" from earlier tools.
+  let json = #"{"version":"0.3.4","signedIn":true,"desktopRunning":false,"current":null,"profiles":[{"name":"a","account":"a","savedAt":null,"sessions":0},{"name":"b","account":"b","savedAt":"null","sessions":0},{"name":"c","account":"c","sessions":0}]}"#
+  let s = try MultipassJSON.decoder.decode(Snapshot.self, from: Data(json.utf8))
+  #expect(s.profiles.map(\.name) == ["a", "b", "c"])
+  #expect(s.profiles.allSatisfy { $0.savedAt == nil })
+}

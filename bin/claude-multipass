@@ -62,7 +62,7 @@
 #
 # `claude-multipass switch {{name}} --no-relaunch`
 #
-# - Sync while Claude runs, or switch away from a login that was never saved:
+# - Sync while Claude runs, or switch or add away from a login that was never saved:
 #
 # `claude-multipass sync --force`
 #
@@ -85,7 +85,8 @@
 # into cli.json, when the CLI is signed in as the same account as Desktop. The
 # token goes to security as hex, never to a file.
 # The backups/ folder beside it keeps the login (config.json and cookies) each
-# switch or add replaced, newest ten, plus any profile `save --force` replaced.
+# switch or add replaced, newest ten, plus any profile `save --force` replaced
+# or moved aside as a second name for the same account.
 # A store left by the tool's earlier life in a dotfiles repo
 # (~/.config/dotfiles/claude-desktop-accounts) is moved into place once, on
 # the first run that finds it and no new store; its -backups sibling moves
@@ -171,8 +172,8 @@ ${bold}Usage${reset}
   claude-multipass                    open a picker of saved accounts
   claude-multipass list
   claude-multipass show <name>
-  claude-multipass save|switch <name> [--no-relaunch] [--force]
-  claude-multipass add|remove <name> [--no-relaunch]
+  claude-multipass save|switch|add <name> [--no-relaunch] [--force]
+  claude-multipass remove <name> [--no-relaunch]
   claude-multipass rename <old> <new>
   claude-multipass sync [--force]
   claude-multipass usage [name]
@@ -209,14 +210,17 @@ ${bold}Commands${reset}
                        terminal's claude login is saved too when it is signed
                        in as the same account; otherwise save warns and keeps
                        the profile's earlier CLI login. If <name>
-                       already holds a different account, save stops; add
-                       --force to replace it (the old profile is kept in the
-                       backups folder).
+                       already holds a different account, or another name
+                       already holds this one, save stops; add --force to
+                       replace that profile (it is kept in the backups
+                       folder).
   add <name>           Prepares Desktop for signing in to another account: the
                        current login is saved (if it has a name), Desktop
                        relaunches at its sign-in screen, and you sign in with
                        the email code, then claude auth login for the
-                       terminal. Then run: save <name>
+                       terminal. Then run: save <name>. If the current
+                       login was never saved, add stops so you do not lose
+                       it; add --force to proceed anyway.
   switch <name>        Quits Desktop, puts the saved login for <name> in place,
                        copies every account's Code session entries into every
                        account's list, and relaunches Desktop signed in as
@@ -264,10 +268,10 @@ ${bold}Commands${reset}
 ${bold}Options${reset}
   --no-relaunch        Leave Desktop quit after save, switch, add or pick,
                        instead of relaunching it.
-  --force              save: replace a profile that holds a different account.
-                       switch: proceed even though the current login was never
-                       saved. sync: run while Desktop is open. A refusal
-                       exits 3.
+  --force              save: replace a profile that holds a different account,
+                       or another name for this one. switch, add: proceed
+                       even though the current login was never saved. sync:
+                       run while Desktop is open. A refusal exits 3.
   -h, --help           This page.
   --version            Print the version.
   --json               list, usage: print JSON instead of text, for scripts and
@@ -641,14 +645,24 @@ live_account() {
   jq -r '.lastKnownAccountUuid // empty' "$config"
 }
 
-# The saved profile whose account is signed in now, if any.
+# A profile's account id, or a warning and status 1 when its meta.json is
+# unreadable, so one bad row never empties the list.
+meta_account() {
+  jq -er '.account | strings' "$1" 2> /dev/null || {
+    warning "skipped $1: not a valid meta.json"
+    return 1
+  }
+}
+
+# The saved profile whose account is signed in now, if any, skipping the
+# name in $1.
 active_profile() {
   local live meta
   live=$(live_account)
   [[ -n $live ]] || return 0
   for meta in "$store"/*/meta.json; do
-    [[ -f $meta ]] || continue
-    if [[ $(jq -r .account "$meta") == "$live" ]]; then
+    [[ -f $meta && ${meta%/meta.json} != "$store/${1:-}" ]] || continue
+    if [[ $(meta_account "$meta" 2> /dev/null) == "$live" ]]; then
       basename "$(dirname "$meta")"
       return 0
     fi
@@ -694,7 +708,7 @@ profile_set_aside() {
 }
 
 profile_save() {
-  local name=$1 dir="$store/$1" live saved other
+  local name=$1 dir="$store/$1" live saved other v
   signed_in || fail "Claude Desktop is signed out: sign in first, then save"
   live=$(live_account)
   if [[ -f $dir/meta.json ]]; then
@@ -705,8 +719,21 @@ profile_save() {
       echo "Moved the old $name profile into $backups"
     fi
   fi
-  other=$(active_profile)
-  [[ -z $other || $other == "$name" ]] || warning "$other already holds this account; both names will switch to it"
+  other=$(active_profile "$name")
+  if [[ -n $other && $cmd == save ]]; then
+    # main refused this without --force. The other name's CLI login is this
+    # account's, so it moves to $name, as rename moves it, unless cli_capture
+    # replaces it below; the Desktop login goes to backups.
+    if [[ ! -f $dir/cli.json && -f $store/$other/cli.json ]] && v=$(keychain_get "$mp_service" "$other") \
+      && keychain_put "$mp_service" "$name" <<< "$v"; then
+      (umask 077 && mkdir -p "$dir")
+      cp -p "$store/$other/cli.json" "$dir/cli.json"
+    fi
+    profile_set_aside "$other"
+    echo "Moved the old $other profile into $backups"
+  elif [[ -n $other ]]; then
+    warning "$other already holds this account; both names will switch to it"
+  fi
   (umask 077 && mkdir -p "$dir")
   jq_write "$dir/config.json" --argjson k "$auth_keys" \
     'with_entries(select(.key as $x | $k | index($x)))' "$config"
@@ -934,7 +961,7 @@ doctor_report() {
 # One line per saved account plus the live login when it is unsaved. The
 # fetches run in parallel; one key derivation serves them all.
 usage_report() {
-  local only=${1:-} key out meta dir name live i=0
+  local only=${1:-} key out meta dir name live account i=0
   [[ -z $only ]] || require_profile "$only"
   key=$(safe_storage_key)
   out=$(mktemp -d)
@@ -943,8 +970,9 @@ usage_report() {
     dir=$(dirname "$meta")
     name=${dir##*/}
     [[ -z $only || $only == "$name" ]] || continue
+    account=$(meta_account "$meta") || continue
     i=$((i + 1))
-    usage_entry "$name" "$key" "$dir/config.json" "$(jq -r .account "$meta")" > "$out/$(printf %03d "$i")" &
+    usage_entry "$name" "$key" "$dir/config.json" "$account" > "$out/$(printf %03d "$i")" &
   done
   live=$(live_account)
   if [[ -z $only && -n $live && -z $(active_profile) ]]; then
@@ -993,12 +1021,12 @@ list_profiles() {
   for meta in "$store"/*/meta.json; do
     [[ -f $meta ]] || continue
     any=1
+    account=$(meta_account "$meta") || continue
     dir=$(dirname "$meta")
-    account=$(jq -r .account "$meta")
     mark='  '
     [[ $account == "$live" ]] && mark='* '
     printf '%s%-16s %s  %s  %s sessions\n' "$mark" "${dir##*/}" "${account:0:8}" \
-      "$(jq -r .savedAt "$meta")" "$(count_sessions "$sessions/$account")"
+      "$(jq -r '.savedAt // "-"' "$meta")" "$(count_sessions "$sessions/$account")"
   done
   [[ -n $any ]] || echo "No saved accounts yet: run claude-multipass save <name> for the signed-in one, add <name> for another"
   [[ -z $live || -n $(active_profile) ]] \
@@ -1011,13 +1039,12 @@ list_json() {
   local meta account profiles='' signed_in=false running=false cli_saved
   for meta in "$store"/*/meta.json; do
     [[ -f $meta ]] || continue
-    account=$(jq -r .account "$meta")
+    account=$(meta_account "$meta") || continue
     cli_saved=false
     [[ ! -f ${meta%/*}/cli.json ]] || cli_saved=true
-    profiles+=$(jq -n --arg name "$(basename "$(dirname "$meta")")" --arg account "$account" \
-      --arg savedAt "$(jq -r .savedAt "$meta")" --argjson sessions "$(count_sessions "$sessions/$account")" \
-      --argjson cliSaved "$cli_saved" \
-      '{name: $name, account: $account, savedAt: $savedAt, sessions: $sessions, cliSaved: $cliSaved}')
+    profiles+=$(jq --arg name "$(basename "$(dirname "$meta")")" \
+      --argjson sessions "$(count_sessions "$sessions/$account")" --argjson cliSaved "$cli_saved" \
+      '{name: $name, account: .account, savedAt: .savedAt, sessions: $sessions, cliSaved: $cliSaved}' "$meta")
   done
   signed_in && signed_in=true
   desktop_running && running=true
@@ -1115,7 +1142,7 @@ migrate_store() {
 }
 
 main() {
-  local cmd=${1:-} names=() name='' relaunch=1 force='' json='' arg active saved live
+  local cmd=${1:-} names=() name='' relaunch=1 force='' json='' arg active saved live other
   [[ -n $cmd ]] || {
     if [[ -t 0 ]] && command -v fzf > /dev/null; then
       cmd=pick
@@ -1135,7 +1162,7 @@ main() {
       *) names+=("$arg") ;;
     esac
   done
-  [[ -z $force || $cmd == sync || $cmd == switch || $cmd == save ]] || fail "--force applies to sync, switch and save"
+  [[ -z $force || $cmd == sync || $cmd == switch || $cmd == save || $cmd == add ]] || fail "--force applies to sync, switch, save and add"
   [[ -z $json || $cmd == list || $cmd == usage ]] || fail "--json applies to list and usage"
 
   case $cmd in
@@ -1220,9 +1247,12 @@ main() {
         live=$(live_account)
         [[ $saved == "$live" ]] || refuse "$name already holds account ${saved:0:8}, not the signed-in ${live:0:8}: pick another name, or pass --force to replace it"
       fi
+      # Two names for one account would leave the second's tokens stale.
+      other=$(active_profile "$name")
+      [[ -z $other || -n $force ]] || refuse "$other already holds the signed-in account: run save $other, or rename $other $name, or pass --force to move $other to backups and save as $name"
       ;;
-    switch)
-      require_profile "$name"
+    switch | add)
+      [[ $cmd == add ]] || require_profile "$name"
       if signed_in && [[ -z $(active_profile) && -z $force ]]; then
         refuse "The signed-in account isn't saved and would need its email code again: run save <name> first, or pass --force"
       fi

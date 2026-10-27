@@ -534,6 +534,16 @@ check "list --json version" "$pkg_version" "$(jq -r .version <<< "$out")"
 check "list --json cliSaved true" true "$(jq -r '.profiles[] | select(.name == "beta") | .cliSaved' <<< "$out")"
 check "list --json cliSaved false for a legacy profile" false "$(jq -r '.profiles[] | select(.name == "legacy") | .cliSaved' <<< "$out")"
 check "--json rejected elsewhere" 1 "$(exit_code cda current --json)"
+# one bad meta.json must not empty the list
+mkdir -p "$p/broken" "$p/nodate"
+printf 'not json' > "$p/broken/meta.json"
+printf '{"account":"dddddddd-4444"}' > "$p/nodate/meta.json"
+out=$(cda list --json 2> "$tmp/list-err")
+check "list --json skips a meta.json it cannot parse" "alpha beta legacy nodate" "$(jq -r '[.profiles[].name] | join(" ")' <<< "$out")"
+check "list --json savedAt is null when missing" null "$(jq -r '.profiles[] | select(.name == "nodate") | .savedAt | type' <<< "$out")"
+check_true "and warns about the skipped row" grep -q "$p/broken/meta.json" "$tmp/list-err"
+check "list skips it too" 0 "$(exit_code cda list)"
+rm -rf "$p/broken" "$p/nodate"
 
 # show, the fzf picker (stub fzf picks the beta row) and the Raycast scripts
 check "show prints the profile and its sessions per org" "beta
@@ -627,9 +637,9 @@ check_true "removed profile is gone from the store" test ! -e "$p/home"
 check "remove deletes the CLI item" absent "$(kc_get claude-multipass home)"
 check "remove of an unknown name fails" 1 "$(exit_code cda remove home)"
 check "--force is rejected for remove" 1 "$(exit_code cda remove home --force)"
-check "and for add" 1 "$(exit_code cda add home --force)"
-check_true "and names the commands that take it" grep -q -- '--force applies to sync, switch and save' <<< "$(cda add home --force 2>&1 > /dev/null)"
-check "and --help lists --force on save and switch only" 1 "$(cda --help | grep -c 'save|switch <name> \[--no-relaunch\] \[--force\]')"
+check "and for rename" 1 "$(exit_code cda rename home x --force)"
+check_true "and names the commands that take it" grep -q -- '--force applies to sync, switch, save and add' <<< "$(cda remove home --force 2>&1 > /dev/null)"
+check "and --help lists --force on save, switch and add only" 1 "$(cda --help | grep -c 'save|switch|add <name> \[--no-relaunch\] \[--force\]')"
 cp -R "$b"/profile-home-* "$p/alpha"
 check "--force outside sync or switch fails" 1 "$(exit_code cda list --force)"
 # an unsaved login must not be switched away from silently
@@ -653,6 +663,31 @@ check "forced save holds the new account" zzzzzzzz-9999 "$(jq -r .account "$p/be
 check "forced save deletes the replaced profile's CLI item" absent "$(kc_get claude-multipass beta)"
 check_true "and the moved profile keeps no cli.json claim on it" test ! -e "$p/beta/cli.json"
 
+# save refuses a second name for an account already saved under another
+kc_put claude-multipass beta '{"claudeAiOauth":{"accessToken":"at-zeta"}}'
+printf '{"oauthAccount":{"accountUuid":"zzzzzzzz-9999"}}' > "$p/beta/cli.json"
+rm -f "$tmp/calls"
+check "save of a second name for a saved account is refused" 3 "$(exit_code cda save beta2)"
+check_true "a refused second name does not quit or relaunch Desktop" test ! -e "$tmp/calls"
+check_true "and creates no profile" test ! -e "$p/beta2"
+check "save --force takes the second name" 0 "$(exit_code cda save beta2 --no-relaunch --force)"
+check "and moves the first name to backups" 2 "$(find "$b" -maxdepth 1 -name 'profile-beta-*' | wc -l | tr -d ' ')"
+check_true "leaving one name for the account" test ! -e "$p/beta"
+check "the second name holds the account" zzzzzzzz-9999 "$(jq -r .account "$p/beta2/meta.json")"
+check "and keeps the first name's CLI login" at-zeta "$(kc_get claude-multipass beta2 | jq -r .claudeAiOauth.accessToken)"
+check_true "with its identity" test -f "$p/beta2/cli.json"
+check "the first name's CLI item is gone" absent "$(kc_get claude-multipass beta)"
+cda rename beta2 beta > /dev/null
+
+# add refuses to sign out a login that was never saved
+printf '{"oauth:tokenCacheV2":"enc-Y","lastKnownAccountUuid":"yyyyyyyy-8888"}' > "$d/config.json"
+rm -f "$tmp/calls"
+check "add refuses to drop an unsaved login" 3 "$(exit_code cda add omega)"
+check_true "a refused add does not quit or relaunch Desktop" test ! -e "$tmp/calls"
+check "and leaves the login in place" yyyyyyyy-8888 "$(jq -r .lastKnownAccountUuid "$d/config.json")"
+check "add --force signs it out anyway" 0 "$(exit_code cda add omega --no-relaunch --force)"
+check "forced add cleared the login" null "$(jq -r .lastKnownAccountUuid "$d/config.json")"
+
 # an error after the quit still relaunches when relaunch is on
 rm -f "$tmp/calls"
 check "switch to a missing profile fails" 1 "$(exit_code cda switch nope)"
@@ -675,7 +710,7 @@ for i in $(seq 1 12); do
   kc_put claude-multipass "login-2020010100000$i-1" '{"claudeAiOauth":{"accessToken":"old"}}'
 done
 printf '{"oauth:tokenCache":"x","oauth:tokenCacheV2":"enc-Q","lastKnownAccountUuid":"qqqqqqqq-0000"}' > "$d/config.json"
-cda add eps --no-relaunch > /dev/null 2>&1
+cda add eps --no-relaunch --force > /dev/null 2>&1
 check "login backups pruned to ten" 10 "$(find "$b" -mindepth 1 -maxdepth 1 -type d -name 'login-*' | wc -l | tr -d ' ')"
 check "the oldest pruned backup's CLI item is gone" absent "$(kc_get claude-multipass login-20200101000001-1)"
 for i in $(seq 1 12); do
