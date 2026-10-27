@@ -171,7 +171,8 @@ ${bold}Usage${reset}
   claude-multipass                    open a picker of saved accounts
   claude-multipass list
   claude-multipass show <name>
-  claude-multipass save|add|switch|remove <name> [--no-relaunch] [--force]
+  claude-multipass save|switch <name> [--no-relaunch] [--force]
+  claude-multipass add|remove <name> [--no-relaunch]
   claude-multipass rename <old> <new>
   claude-multipass sync [--force]
   claude-multipass usage [name]
