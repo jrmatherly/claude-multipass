@@ -153,7 +153,7 @@ printf journal-A > "$d/Cookies-journal"
 # identity, the Keychain item the tokens plus shared MCP keys.
 jq -n '{numStartups: 3, nested: {a: [1, 2], b: {c: "d"}}, k1: 1, k2: 2, k3: 3, k4: 4, k5: 5, k6: 6, k7: 7, k8: 8, k9: 9, k10: 10, k11: 11, k12: 12, k13: 13, k14: 14, k15: 15, k16: 16, k17: 17, k18: 18,
   oauthAccount: {accountUuid: "aaaaaaaa-1111", emailAddress: "a@example.com", organizationUuid: "org-alpha", organizationRole: "admin"}}' > "$tmp/claude.json"
-live_item='{"claudeAiOauth":{"accessToken":"at-alpha","refreshToken":"rt-alpha","expiresAt":1,"scopes":["a"],"subscriptionType":"max"},"mcpOAuth":{"srv":"shared"},"trustedDeviceToken":"dev-alpha"}'
+live_item='{"claudeAiOauth":{"accessToken":"at-alpha","refreshToken":"rt-alpha","expiresAt":1,"scopes":["a"],"subscriptionType":"max"},"mcpOAuth":{"srv":"shared"},"trustedDeviceToken":"dev-alpha","trustedDeviceEnrolledAfterRefusalAtMs":5}'
 kc_put "Claude Code-credentials" "$USER" "$live_item"
 
 # save captures exactly the three keys and the cookie files
@@ -161,7 +161,7 @@ kc_put "Claude Code-credentials" "$USER" "$live_item"
 cda save alpha > /dev/null
 check "save writes cli.json with the identity block" "$(jq -c .oauthAccount "$tmp/claude.json")" "$(jq -c .oauthAccount "$p/alpha/cli.json")"
 check "save keeps cli.json private" 600 "$(stat -f %Lp "$p/alpha/cli.json")"
-check "save stores the CLI tokens in the Keychain" '{"claudeAiOauth":{"accessToken":"at-alpha","refreshToken":"rt-alpha","expiresAt":1,"scopes":["a"],"subscriptionType":"max"},"trustedDeviceToken":"dev-alpha"}' "$(kc_get claude-multipass alpha)"
+check "save stores the CLI tokens in the Keychain" '{"claudeAiOauth":{"accessToken":"at-alpha","refreshToken":"rt-alpha","expiresAt":1,"scopes":["a"],"subscriptionType":"max"},"trustedDeviceToken":"dev-alpha","trustedDeviceEnrolledAfterRefusalAtMs":5}' "$(kc_get claude-multipass alpha)"
 check "save never puts the token on a command line" 0 "$(grep -c 'rt-alpha' "$tmp/security-calls")"
 check "a small CLI item goes to security -i on stdin" 1 "$(grep -c '^stdin add-generic-password -U -a "alpha" -s "claude-multipass" -X [0-9a-f]*$' "$tmp/security-calls")"
 check "and not on argv" 0 "$(grep -c '^security add-generic-password' "$tmp/security-calls")"
@@ -251,6 +251,7 @@ check_true "--no-relaunch does not launch" test ! -e "$tmp/calls"
 check "switch restores the CLI tokens" at-beta "$(kc_get "Claude Code-credentials" "$USER" | jq -r .claudeAiOauth.accessToken)"
 check "switch keeps the shared MCP keys" '{"srv":"shared"}' "$(kc_get "Claude Code-credentials" "$USER" | jq -c .mcpOAuth)"
 check "switch drops the previous device token" null "$(kc_get "Claude Code-credentials" "$USER" | jq -r .trustedDeviceToken)"
+check "switch drops the previous account's enrolment stamp" null "$(kc_get "Claude Code-credentials" "$USER" | jq -r .trustedDeviceEnrolledAfterRefusalAtMs)"
 check "switch replaces oauthAccount" bbbbbbbb-2222 "$(jq -r .oauthAccount.accountUuid "$tmp/claude.json")"
 check "switch leaves the other claude.json keys as they were" "$(jq -S 'del(.oauthAccount)' "$tmp/claude-before.json")" "$(jq -S 'del(.oauthAccount)' "$tmp/claude.json")"
 check "switch keeps claude.json private" 600 "$(stat -f %Lp "$tmp/claude.json")"
@@ -314,7 +315,7 @@ kc_put "Claude Code-credentials" "$USER" "$big_item"
 : > "$tmp/security-calls"
 out=$(cda switch beta --no-relaunch 2> "$tmp/big-err")
 check "a 20 KB live item warns nothing" "" "$(cat "$tmp/big-err")"
-check "and the live item is the shared keys plus the saved account part, byte for byte" "$(jq -c --argjson s "$(kc_get claude-multipass beta)" 'del(.claudeAiOauth, .trustedDeviceToken) + $s' <<< "$big_item")" "$(kc_get "Claude Code-credentials" "$USER")"
+check "and the live item is the shared keys plus the saved account part, byte for byte" "$(jq -c --argjson s "$(kc_get claude-multipass beta)" '{mcpOAuth, mcpOAuthClientConfig, mcpXaaIdp, mcpXaaIdpConfig, pluginSecrets} | with_entries(select(.value != null)) + $s' <<< "$big_item")" "$(kc_get "Claude Code-credentials" "$USER")"
 check "and its write went on security's argv" 1 "$(grep -c "^security add-generic-password -U -a $USER -s Claude Code-credentials -X [0-9a-f]*$" "$tmp/security-calls")"
 check "and only that write did" 1 "$(grep -c '^security add-generic-password' "$tmp/security-calls")"
 check "and nothing about the token reached stdout or stderr" 0 "$(grep -c 'at-beta\|61742d62657461' <<< "$out$(cat "$tmp/big-err")")"

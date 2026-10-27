@@ -3,6 +3,7 @@
 ## Unreleased
 
 - `save` and `switch` leave the CLI login alone, with a warning, when `CLAUDE_SECURESTORAGE_CONFIG_DIR` is set: Claude Code 2.1.310 keeps its item under a suffixed name then. `doctor` warns about it.
+- A profile's CLI item now keeps every account-scoped key (2.1.310 adds `trustedDeviceEnrolledAfterRefusalAtMs`); only the shared MCP and plugin keys stay in the live item.
 
 ## 0.3.3 (2026-10-26)
 

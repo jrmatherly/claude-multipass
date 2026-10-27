@@ -392,9 +392,15 @@ cli_blocker() {
   [[ ! -f $claude_json ]] || jq -e . "$claude_json" > /dev/null 2>&1 || echo "$claude_json is not valid JSON"
 }
 
-# The account part of a CLI item, what a profile or a backup keeps; the shared
-# MCP keys stay in the live item.
-cli_account_part() { jq -c '{claudeAiOauth, trustedDeviceToken} | with_entries(select(.value != null))'; }
+# The keys of a CLI item shared across accounts (measured in
+# desktop-internals.md); they stay in the live item. Every other key is
+# account-scoped until proven shared, so it moves with the profile: a shared
+# key stuck in a profile costs one re-prompt, an account key carried across
+# a switch presents one account's credential under another.
+cli_shared='mcpOAuth, mcpOAuthClientConfig, mcpXaaIdp, mcpXaaIdpConfig, pluginSecrets'
+
+# The account part of a CLI item, what a profile or a backup keeps.
+cli_account_part() { jq -c "del(.${cli_shared//, /, .})"; }
 
 # The CLI part of a save: the tokens into the profile's Keychain item, the
 # identity into cli.json. Any doubt leaves the profile's earlier CLI login
@@ -545,7 +551,7 @@ cli_restore() {
     return 0
   fi
   merged=$saved
-  if [[ -n $live ]] && ! merged=$(jq -c --argjson s "$saved" 'del(.claudeAiOauth, .trustedDeviceToken) + $s' <<< "$live" 2> /dev/null); then
+  if [[ -n $live ]] && ! merged=$(jq -c --argjson s "$saved" "{$cli_shared} | with_entries(select(.value != null)) + \$s" <<< "$live" 2> /dev/null); then
     warning "the live CLI login is not valid JSON; switched Desktop only"
     return 0
   fi
