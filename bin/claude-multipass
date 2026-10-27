@@ -473,10 +473,15 @@ cli_lock() {
   return 1
 }
 
+# Callers test it with !, which turns errexit off inside, so each lock is chained.
 cli_lock_all() {
-  cli_lock "$cli_home/.oauth_refresh.lock" 60
-  cli_lock "$cli_home.lock" 60
-  cli_lock "$claude_json.lock" 10
+  cli_lock "$cli_home/.oauth_refresh.lock" 60 \
+    && cli_lock "$cli_home.lock" 60 \
+    && cli_lock "$claude_json.lock" 10 \
+    || {
+      cli_unlock
+      return 1
+    }
 }
 
 # Runs from the EXIT trap too, so every rmdir tolerates an absent dir.
@@ -663,21 +668,21 @@ copy_cookies() {
 # newest ten only: each one holds encrypted tokens.
 backup_dest=''
 backup_login() {
-  local old n
+  local old i all
   backup_dest="$backups/login-$(date +%Y%m%d-%H%M%S)-$$"
   (umask 077 && mkdir -p "$backup_dest")
   cp -p "$config" "$backup_dest/config.json"
   copy_cookies "$cookies" "$backup_dest"
   echo "Backed up the current login to $backup_dest"
-  # BSD head has no negative count, so compute how many to drop. A pruned
-  # folder's CLI backup item goes with it (44: a 0.2.x folder had none).
-  n=$(ls -1d "$backups"/login-*/ 2> /dev/null | wc -l | tr -d ' ')
-  if ((n > 10)); then
-    for old in $(ls -1d "$backups"/login-*/ | sort | head -n $((n - 10))); do
-      rm -rf "$old"
-      keychain_delete "$mp_service" "$(basename "$old")" || warning "could not delete the Keychain item for $old"
-    done
-  fi
+  # A glob, not ls, so a store path with a space never splits; names sort by
+  # time, and it matches at least backup_dest. A pruned folder's CLI backup
+  # item goes with it (44: a 0.2.x folder had none).
+  all=("$backups"/login-*/)
+  for ((i = 0; i < ${#all[@]} - 10; i++)); do
+    old=${all[i]}
+    rm -rf "$old"
+    keychain_delete "$mp_service" "$(basename "$old")" || warning "could not delete the Keychain item for $old"
+  done
 }
 
 # A profile set aside keeps its Desktop login in backups/; its CLI item goes,
@@ -1246,9 +1251,10 @@ main() {
     switch)
       if [[ $active == "$name" ]]; then
         echo "$name is already signed in"
-        # Cookies are idempotent to re-copy and repair a switch that died midway;
-        # the CLI part repairs the same way, backing up only when it writes.
-        copy_cookies "$store/$name" "$cookies"
+        # Missing cookies are repaired from the profile; present ones may be newer
+        # than the saved copy (Desktop rotates them), so they stay. The CLI part
+        # repairs too, backing up only when it writes.
+        [[ -f $cookies/Cookies ]] || copy_cookies "$store/$name" "$cookies"
         cli_restore "$name"
       else
         # Re-save first so token refreshes since the last save aren't lost.
