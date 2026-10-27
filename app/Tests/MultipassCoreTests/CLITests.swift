@@ -16,6 +16,9 @@ private func stubScript() throws -> URL {
       big) head -c 200000 /dev/zero | tr '\\0' x;;
       slow) sleep 5;;
       hang) (trap '' TERM; sleep 6 &); sleep 6;;
+      orphan) (trap '' TERM; sleep 30) & echo $! > "$2"; wait;;
+      save) sleep 2; echo saved;;
+      usage) sleep 5;;
       color) tput setaf 1; echo boom >&2; exit 1;;
       *) echo boom >&2; exit 1;;
     esac
@@ -77,7 +80,7 @@ private func stubScript() throws -> URL {
 }
 
 @Test func slowCommandTimesOut() async throws {
-  let cli = CLI(executable: try stubScript(), timeout: 1)
+  let cli = CLI(executable: try stubScript(), timeout: 1, mutatingTimeout: 1)
   let started = Date()
   await #expect(throws: CLIError.timedOut) { try await cli.run(["slow"]) }
   // terminate at 1 s; a shell that defers SIGTERM behind a child dies to the SIGKILL at 3 s
@@ -87,10 +90,28 @@ private func stubScript() throws -> URL {
 @Test func timeoutReleasesAHungGrandchild() async throws {
   // usage runs each account in a backgrounded subshell; a Keychain prompt
   // left open keeps that grandchild, and so the pipes, alive.
-  let cli = CLI(executable: try stubScript(), timeout: 1)
+  let cli = CLI(executable: try stubScript(), timeout: 1, mutatingTimeout: 1)
   let started = Date()
   await #expect(throws: CLIError.timedOut) { try await cli.run(["hang"]) }
   #expect(Date().timeIntervalSince(started) < 4.5)
+}
+
+@Test func timeoutKillsTheWholeProcessGroup() async throws {
+  // switch waits on osascript and security; a timeout must not leave them
+  // running, even one that outlives the SIGTERM.
+  let cli = CLI(executable: try stubScript(), timeout: 1, mutatingTimeout: 1)
+  let pidFile = FileManager.default.temporaryDirectory.appendingPathComponent("orphan-\(UUID().uuidString)")
+  await #expect(throws: CLIError.timedOut) { try await cli.run(["orphan", pidFile.path]) }
+  let pid = try #require(Int32(String(contentsOf: pidFile, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)))
+  try await Task.sleep(nanoseconds: 300_000_000)
+  #expect(kill(pid, 0) != 0)
+}
+
+@Test func mutatingCommandsGetTheLongerTimeout() async throws {
+  // save and switch can sit on an Automation or Keychain prompt.
+  let cli = CLI(executable: try stubScript(), timeout: 1, mutatingTimeout: 10)
+  #expect(String(decoding: try await cli.run(["save", "x"]), as: UTF8.self) == "saved\n")
+  await #expect(throws: CLIError.timedOut) { try await cli.run(["usage", "--json"]) }
 }
 
 @Test func versionCompare() {

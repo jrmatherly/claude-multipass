@@ -382,6 +382,39 @@ private func enabledUsage(_ s: AppState) -> AppSettings {
   #expect(s.isRefreshingUsage == false)
 }
 
+@Test @MainActor func usageFailureClearsOldFiguresAndOutlivesASnapshot() async {
+  let (s, r) = await readyState()
+  await s.apply(enabledUsage(s))
+  #expect(s.usage["beta"] != nil)
+  r.fail("usage", .failed(status: 1, stderr: "keychain locked"))
+  await s.refreshUsage()
+  #expect(s.usage.isEmpty)
+  await s.refresh()
+  #expect(s.lastError == "keychain locked")
+  r.answer("usage", usageBoth)
+  await s.refreshUsage()
+  #expect(s.lastError == nil)
+  #expect(s.usage["beta"] != nil)
+}
+
+@Test @MainActor func snapshotErrorWinsAndUsageSuccessKeepsIt() async {
+  let (s, r) = await readyState()
+  await s.apply(enabledUsage(s))
+  r.fail("list", .failed(status: 1, stderr: "No config.json"))
+  await s.refresh()
+  await s.refreshUsage()
+  #expect(s.lastError == "No config.json")
+}
+
+@Test @MainActor func disablingUsageClearsItsError() async {
+  let (s, r) = await readyState()
+  r.fail("usage", .timedOut)
+  await s.apply(enabledUsage(s))
+  #expect(s.lastError != nil)
+  await s.apply(AppSettings())
+  #expect(s.lastError == nil)
+}
+
 @Test @MainActor func refreshDoesNotChangePhase() async {
   let (s, r) = await readyState()
   final class Seen: @unchecked Sendable { var phases: [Phase] = []; var refreshing: [Bool] = [] }

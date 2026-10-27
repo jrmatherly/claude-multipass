@@ -39,13 +39,14 @@ public struct Snapshot: Decodable, Equatable {
 public struct Profile: Decodable, Equatable, Identifiable {
   public var name: String
   public var account: String
-  public var savedAt: Date
+  /// nil when the profile's meta.json has no readable save time.
+  public var savedAt: Date?
   public var sessions: Int
   /// Whether the profile holds the terminal's claude login (tool 0.3.0+).
   public var cliSaved: Bool
   public var id: String { name }
 
-  public init(name: String, account: String, savedAt: Date, sessions: Int, cliSaved: Bool = false) {
+  public init(name: String, account: String, savedAt: Date?, sessions: Int, cliSaved: Bool = false) {
     self.name = name
     self.account = account
     self.savedAt = savedAt
@@ -59,7 +60,8 @@ public struct Profile: Decodable, Equatable, Identifiable {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     name = try c.decode(String.self, forKey: .name)
     account = try c.decode(String.self, forKey: .account)
-    savedAt = try c.decode(Date.self, forKey: .savedAt)
+    // Lenient: one bad row must not fail the whole snapshot (earlier tools sent "null").
+    savedAt = try? c.decodeIfPresent(Date.self, forKey: .savedAt)
     sessions = try c.decode(Int.self, forKey: .sessions)
     cliSaved = try c.decodeIfPresent(Bool.self, forKey: .cliSaved) ?? false
   }

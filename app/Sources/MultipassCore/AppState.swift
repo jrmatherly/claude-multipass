@@ -44,7 +44,8 @@ public final class AppState: ObservableObject {
   @Published public private(set) var phase: Phase = .idle
   @Published public private(set) var isRefreshing = false
   @Published public private(set) var isRefreshingUsage = false
-  @Published public private(set) var lastError: String?
+  /// A snapshot error, else a usage error; each clears only on its own success.
+  public var lastError: String? { snapshotError ?? usageError }
   @Published public private(set) var rowError: RowError?
   @Published public private(set) var rowNote: RowNote?
   @Published public private(set) var cliStatus: CLIStatus = .unknown
@@ -62,6 +63,8 @@ public final class AppState: ObservableObject {
   private var mainTask: Task<Void, Never>?
   private var snapshotTask: Task<Void, Never>?
   private var usageTask: Task<Void, Never>?
+  @Published private var snapshotError: String?
+  @Published private var usageError: String?
 
   public init(makeRunner: @escaping (AppSettings) -> CommandRunner?, store: SettingsStore, now: @escaping () -> Date = Date.init) {
     self.makeRunner = makeRunner
@@ -84,6 +87,7 @@ public final class AppState: ObservableObject {
     case (true, false):
       usageTask?.cancel()
       usageTask = nil
+      usageError = nil
     case (true, true) where old.usageIntervalMinutes != new.usageIntervalMinutes:
       startUsageTimer()
     default:
@@ -121,9 +125,9 @@ public final class AppState: ObservableObject {
     do {
       let data = try await runner.run(["list", "--json"])
       snapshot = try decode(Snapshot.self, data)
-      lastError = nil
+      snapshotError = nil
     } catch {
-      lastError = describe(error)
+      snapshotError = describe(error)
     }
   }
 
@@ -135,9 +139,11 @@ public final class AppState: ObservableObject {
       let data = try await runner.run(["usage", "--json"])
       let report = try decode(UsageReport.self, data)
       usage = Dictionary(report.profiles.map { ($0.name, $0) }, uniquingKeysWith: { _, last in last })
-      lastError = nil
+      usageError = nil
     } catch {
-      lastError = describe(error)
+      // Old figures would read as current; the error says why they are gone.
+      usage = [:]
+      usageError = describe(error)
     }
   }
 

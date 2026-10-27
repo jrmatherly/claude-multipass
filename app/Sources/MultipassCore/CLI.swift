@@ -37,11 +37,18 @@ public enum CLIError: Error, Equatable {
 public struct CLI: CommandRunner {
   public let executable: URL
   public let timeout: TimeInterval
+  /// For every command but the read-only ones: save and switch can wait on
+  /// an Automation or Keychain prompt the user has not answered yet.
+  public let mutatingTimeout: TimeInterval
 
-  public init(executable: URL, timeout: TimeInterval = 120) {
+  public init(executable: URL, timeout: TimeInterval = 120, mutatingTimeout: TimeInterval = 600) {
     self.executable = executable
     self.timeout = timeout
+    self.mutatingTimeout = mutatingTimeout
   }
+
+  /// The short timeout's commands; anything else, a new command included, gets the long one.
+  public static let readOnlyCommands: Set<String> = ["--version", "list", "usage", "show", "current", "doctor"]
 
   public static let candidates = ["/opt/homebrew/bin/claude-multipass", "/usr/local/bin/claude-multipass"]
 
@@ -86,16 +93,22 @@ public struct CLI: CommandRunner {
     // write ends open, so the drains are only awaited on the normal path.
     let outData = PipeDrain(stdout.fileHandleForReading)
     let errData = PipeDrain(stderr.fileHandleForReading)
+    let limit = Self.readOnlyCommands.contains(args.first ?? "") ? timeout : mutatingTimeout
+    // Process makes the child a group leader and terminate() signals that
+    // group (measured), so the kills below reach osascript and security too.
+    let group = -process.processIdentifier
     let watchdog = Task {
-      try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+      try await Task.sleep(nanoseconds: UInt64(limit * 1_000_000_000))
       exit.markTimedOut()
       process.terminate()
       try await Task.sleep(nanoseconds: 2_000_000_000)
-      kill(process.processIdentifier, SIGKILL)
+      kill(group, SIGKILL)
     }
     let status = await exit.wait()
     watchdog.cancel()
     if exit.timedOut {
+      // bash can die to the SIGTERM while a child that ignores it lives on.
+      kill(group, SIGKILL)
       outData.stop()
       errData.stop()
       throw CLIError.timedOut
