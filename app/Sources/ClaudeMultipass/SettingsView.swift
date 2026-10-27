@@ -69,7 +69,7 @@ struct SettingsView: View {
     case .unknown: return "checking…"
     case .ready(let version): return "claude-multipass \(version)" + (appState.cliLocation.map { " at \($0)" } ?? "")
     case .missing: return "not found"
-    case .tooOld: return "too old (0.2.0 or newer is needed)"
+    case .tooOld: return "too old (0.3.0 or newer is needed)"
     }
   }
 

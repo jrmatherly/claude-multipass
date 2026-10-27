@@ -12,6 +12,11 @@
 - The backup prune no longer splits a store path that holds a space. Before, it could `rm -rf` a sibling folder named after the path's first word.
 - `switch` to the account already signed in keeps the live cookies, which Desktop may have rotated since the save, and copies the profile's only when the live `Cookies` file is missing.
 - Opening the menu bar popover refreshes the account list only. It ran `usage --json` too, so each open read the Keychain and the usage endpoint outside the 5-minute usage interval.
+- `show`, `usage` and `switch` given a profile whose `meta.json` cannot be read fail with a message naming the file. `show` died with a raw `jq` parse error (exit 5), `usage` printed nothing, and `switch` quit Desktop before failing on it.
+- A Keychain read that fails with `security` exit 36 now says the keychain is locked and the failure is transient (unlock it and retry).
+- `--help` no longer lists `--no-relaunch` for `remove`, which never quits Desktop.
+- The menu bar app's Settings asks for claude-multipass 0.3.0 or newer, the version it checks for; it said 0.2.0.
+- The release workflow builds and signs with a read-only token and hands the DMG to a separate job, the only one that can write to the release. CI and the release build run on the `macos-26` image instead of `macos-latest`, and `.nvmrc` pins Node 24.
 
 ## 0.3.4 (2026-10-26)
 
