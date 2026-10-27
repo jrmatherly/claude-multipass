@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.3 (2026-10-26)
+
+- The CLI login moves through `security` again, and only through it. 0.3.2 read and wrote the Keychain items from the system `python3`, which left every item it wrote in another partition than `/usr/bin/security`, so Claude Code's own reads asked for the login password on every run, Always Allow could not stop it, and after Claude Code's next write the tool asked again. Items are now read with `security find-generic-password -w` and written exactly as Claude Code writes its own: the hex on a `security -i` stdin line when the line fits, on `security`'s own command line otherwise, so no item is too large. The Command Line Tools are needed for `usage` only. A profile item 0.3.2 saved stays in the `python3` partition until 0.3.3 saves it again, which the re-save on the way out of the next switch does. Until then a switch to that profile may ask once or twice to let `security` use the item (click Always Allow and enter the login password), and a `login-*` backup item 0.3.2 wrote may ask once when the prune deletes it. Claude Code's own item asks once only if 0.3.2 wrote it last.
+- A Keychain read decodes the hex `security -w` prints for a value with a non-ASCII byte, so a live item with such an MCP value still moves. A Keychain failure still names its reason (a declined prompt, a cancelled prompt, no prompt possible over SSH or from a timer).
+- A backup's Keychain item holds the account part of the CLI login only (`claudeAiOauth`, `trustedDeviceToken`), as a profile does; the shared MCP keys stay in the live item.
+- `switch` warns when `claude auth status` reports it is signed out after the restore, naming the backup, instead of reporting a different org.
+- The Raycast commands run `$CLAUDE_MULTIPASS_BIN` when it is set, else `claude-multipass` by name, so the self-check's Raycast cases run the checkout. On a Mac with an older tool installed, the old fixture ran the installed tool against the fixture and reached the real Keychain. Nothing changes for Raycast.
+
 ## 0.3.2 (2026-10-26)
 
 - The CLI login now moves whatever its size. 0.3.0 wrote Keychain items through `security -i`, which holds at most 4019 bytes of a line, and a real item with MCP logins is about 15 KB, so a switch on a Mac with MCP logins said `too large for security -i; switched Desktop only`. Items are read and written through the Security framework from the system `python3`, the value on stdin, so the Command Line Tools are now required and `doctor` checks for them. A Keychain failure names its OSStatus and what to do (a declined prompt, no prompt possible over SSH).
