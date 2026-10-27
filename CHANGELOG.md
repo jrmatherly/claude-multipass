@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 (2026-10-27)
 
 - After a `switch`, a signed-out terminal `claude` is reported as `Claude Code reports it is signed out`. `claude auth status` exits 1 when signed out, so the tool said only that the check exited 1; it now reads the JSON before the exit code.
 - `save` over a profile whose `meta.json` cannot be read refuses with a message naming the file (exit 3, before Desktop quits), and `--force` moves that profile to `backups/` and saves fresh. It failed with a raw `jq` error, and with `--force` only after quitting Desktop, so `save` could not repair it.
