@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- `--help` lists `--force` on `save` and `switch` only; `add` and `remove` never took it (the tool refused it with `--force applies to sync, switch and save`).
+
 ## 0.3.4 (2026-10-26)
 
 - `save` and `switch` leave the CLI login alone, with a warning, when `CLAUDE_SECURESTORAGE_CONFIG_DIR` is set: Claude Code 2.1.310 keeps its item under a suffixed name then. `doctor` warns about it.

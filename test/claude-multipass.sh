@@ -609,6 +609,10 @@ check "remove moves the profile to backups" 1 "$(
 check_true "removed profile is gone from the store" test ! -e "$p/home"
 check "remove deletes the CLI item" absent "$(kc_get claude-multipass home)"
 check "remove of an unknown name fails" 1 "$(exit_code cda remove home)"
+check "--force is rejected for remove" 1 "$(exit_code cda remove home --force)"
+check "and for add" 1 "$(exit_code cda add home --force)"
+check_true "and names the commands that take it" grep -q -- '--force applies to sync, switch and save' <<< "$(cda add home --force 2>&1 > /dev/null)"
+check "and --help lists --force on save and switch only" 1 "$(cda --help | grep -c 'save|switch <name> \[--no-relaunch\] \[--force\]')"
 cp -R "$b"/profile-home-* "$p/alpha"
 check "--force outside sync or switch fails" 1 "$(exit_code cda list --force)"
 # an unsaved login must not be switched away from silently
