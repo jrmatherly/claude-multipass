@@ -528,12 +528,13 @@ cli_verify() {
   local out signed org rc=0
   [[ -n $1 ]] && command -v claude > /dev/null || return 0
   out=$(claude auth status 2> /dev/null) || rc=$?
-  if ((rc != 0)); then
-    warning "claude auth status exited $rc; could not verify the CLI login (the previous login is in $backup_dest)"
-    return 0
-  fi
+  # Signed out, it still prints its JSON but exits 1, so the JSON is read first.
   if ! read -r signed org < <(jq -r '"\(.loggedIn) \(.orgId // "")"' <<< "$out" 2> /dev/null); then
-    warning "claude auth status printed no JSON; could not verify the CLI login (the previous login is in $backup_dest)"
+    if ((rc != 0)); then
+      warning "claude auth status exited $rc; could not verify the CLI login (the previous login is in $backup_dest)"
+    else
+      warning "claude auth status printed no JSON; could not verify the CLI login (the previous login is in $backup_dest)"
+    fi
     return 0
   fi
   if [[ $signed != true ]]; then

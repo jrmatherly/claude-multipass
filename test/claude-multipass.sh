@@ -502,7 +502,8 @@ rm -rf "$tmp/claude.json.lock" "$tmp/claude-home/.oauth_refresh.lock" "$tmp/clau
 printf '#!/bin/sh\necho "{\\"loggedIn\\":true,\\"orgId\\":\\"org-other\\"}"\n' > "$tmp/bin/claude"
 err=$(cda switch beta --no-relaunch 2>&1 > /dev/null)
 check_true "an org mismatch warns and names the backup" grep -q "Claude Code reports a different org; the previous login is in $b/login-" <<< "$err"
-printf '#!/bin/sh\necho "{\\"loggedIn\\":false}"\n' > "$tmp/bin/claude"
+# A signed-out claude prints its JSON and exits 1 (measured with 2.1.311, as the CLI reference says)
+printf '#!/bin/sh\necho "{\\"loggedIn\\":false,\\"authMethod\\":\\"none\\"}"\nexit 1\n' > "$tmp/bin/claude"
 err=$(cda switch alpha --no-relaunch 2>&1 > /dev/null)
 check_true "a signed-out claude warns and names the backup" grep -q "Claude Code reports it is signed out; the previous login is in $b/login-" <<< "$err"
 check "and not about the org" 0 "$(grep -c 'different org' <<< "$err")"
