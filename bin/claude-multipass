@@ -712,7 +712,8 @@ profile_save() {
   signed_in || fail "Claude Desktop is signed out: sign in first, then save"
   live=$(live_account)
   if [[ -f $dir/meta.json ]]; then
-    saved=$(jq -r .account "$dir/meta.json")
+    # An unreadable meta.json counts as another account, so --force replaces it.
+    saved=$(meta_account "$dir/meta.json" 2> /dev/null) || saved=''
     if [[ $saved != "$live" ]]; then
       [[ -n $force ]] || refuse "$name already holds account ${saved:0:8}, not the signed-in ${live:0:8}: pick another name, or pass --force to replace it"
       profile_set_aside "$name"
@@ -1253,7 +1254,8 @@ main() {
       signed_in || fail "Claude Desktop is signed out: sign in first, then save"
       # Decided before the quit, so a refused save never bounces Desktop.
       if [[ -f $store/$name/meta.json && -z $force ]]; then
-        saved=$(jq -r .account "$store/$name/meta.json")
+        saved=$(meta_account "$store/$name/meta.json" 2> /dev/null) \
+          || refuse "$name: $store/$name/meta.json is not valid: pass --force to replace the profile"
         live=$(live_account)
         [[ $saved == "$live" ]] || refuse "$name already holds account ${saved:0:8}, not the signed-in ${live:0:8}: pick another name, or pass --force to replace it"
       fi

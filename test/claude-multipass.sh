@@ -711,6 +711,23 @@ check_true "with its identity" test -f "$p/beta2/cli.json"
 check "the first name's CLI item is gone" absent "$(kc_get claude-multipass beta)"
 cda rename beta2 beta > /dev/null
 
+# save over a profile whose meta.json is unreadable: refused before the quit, replaced with --force
+cp "$d/config.json" "$tmp/config-before-broken"
+printf '{"oauth:tokenCacheV2":"enc-Y","lastKnownAccountUuid":"yyyyyyyy-8888"}' > "$d/config.json"
+mkdir -p "$p/broken"
+printf 'not json' > "$p/broken/meta.json"
+rm -f "$tmp/calls"
+st=0
+err=$(cda save broken 2>&1 > /dev/null) || st=$?
+check "save over an unreadable meta.json is refused" 3 "$st"
+check_true "and names the file" grep -q "broken: $p/broken/meta.json is not valid" <<< "$err"
+check_true "and does not quit or relaunch Desktop" test ! -e "$tmp/calls"
+check "save --force replaces the broken profile" 0 "$(exit_code cda save broken --no-relaunch --force)"
+check "and moves it to backups" 1 "$(find "$b" -maxdepth 1 -name 'profile-broken-*' | wc -l | tr -d ' ')"
+check "and saves the signed-in account" yyyyyyyy-8888 "$(jq -r .account "$p/broken/meta.json")"
+cda remove broken > /dev/null
+cp "$tmp/config-before-broken" "$d/config.json"
+
 # add refuses to sign out a login that was never saved
 printf '{"oauth:tokenCacheV2":"enc-Y","lastKnownAccountUuid":"yyyyyyyy-8888"}' > "$d/config.json"
 rm -f "$tmp/calls"

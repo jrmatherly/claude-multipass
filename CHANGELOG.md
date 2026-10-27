@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `save` over a profile whose `meta.json` cannot be read refuses with a message naming the file (exit 3, before Desktop quits), and `--force` moves that profile to `backups/` and saves fresh. It failed with a raw `jq` error, and with `--force` only after quitting Desktop, so `save` could not repair it.
+- The menu bar app gives `usage` the 10-minute limit too, since its Safe Storage read can wait on a Keychain prompt.
 - `save` refuses a second name for an account already saved under another name (exit 3, before Desktop quits). Two names for one account made `switch` to the second restore its older tokens. `--force` moves the other profile to `backups/` and saves under the new name, which keeps the other name's CLI login when the terminal is on another account.
 - `add` refuses to clear a login that was never saved (exit 3), as `switch` does; it only warned before. `--force` clears it anyway, and `--help` now lists `--force` on `save`, `switch` and `add`.
 - `list` and `list --json` skip a profile whose `meta.json` cannot be read, with a warning, instead of failing (exit 5). `list --json` sends a missing `savedAt` as `null`, not the string `"null"`.
