@@ -28,6 +28,7 @@ final class PopoverController {
       return
     }
     popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-    Task { await appState.refreshAll() }
+    // The snapshot only: usage runs on its own timer, at most every 5 minutes.
+    Task { await appState.refresh() }
   }
 }

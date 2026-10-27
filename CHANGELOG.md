@@ -3,6 +3,10 @@
 ## Unreleased
 
 - `--help` lists `--force` on `save` and `switch` only; `add` and `remove` never took it (the tool refused it with `--force applies to sync, switch and save`).
+- `switch` and `save` honour all three of the CLI's lock dirs. Only `~/.claude.json.lock` stopped them before; a held `~/.claude/.oauth_refresh.lock` or `~/.claude.lock` was ignored. A switch now fails naming the held lock, and a save keeps the Desktop login only.
+- The backup prune no longer splits a store path that holds a space. Before, it could `rm -rf` a sibling folder named after the path's first word.
+- `switch` to the account already signed in keeps the live cookies, which Desktop may have rotated since the save, and copies the profile's only when the live `Cookies` file is missing.
+- Opening the menu bar popover refreshes the account list only. It ran `usage --json` too, so each open read the Keychain and the usage endpoint outside the 5-minute usage interval.
 
 ## 0.3.4 (2026-10-26)
 

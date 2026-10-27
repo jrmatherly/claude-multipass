@@ -295,6 +295,10 @@ check "switch to the signed-in account only syncs" "beta is already signed in" "
 rm "$d/Cookies"
 cda switch beta --no-relaunch > /dev/null
 check "same-name switch repairs missing cookies" cookie-B "$(cat "$d/Cookies")"
+# Desktop rotated its cookies since the switch: a same-name switch must not put the profile's older copy back
+printf cookie-B-rotated > "$d/Cookies"
+cda switch beta --no-relaunch > /dev/null
+check "same-name switch keeps rotated live cookies" cookie-B-rotated "$(cat "$d/Cookies")"
 
 # The CLI already on the target account: its live tokens are fresher than the saved ones, so switch re-saves them and writes nothing
 kc_put "Claude Code-credentials" "$USER" "$(kc_get "Claude Code-credentials" "$USER" | jq -c '.claudeAiOauth.accessToken = "at-beta-fresh"')"
@@ -463,6 +467,19 @@ check_true "and the tool's own locks are released" test ! -e "$tmp/claude-home/.
 rmdir "$tmp/claude.json.lock"
 sleep 4
 check_true "and no toucher outlives the failed switch" test ! -e "$tmp/claude-home/.oauth_refresh.lock" -a ! -e "$tmp/claude-home.lock"
+# Each of the other two locks, held fresh, fails the switch the same way
+cp "$d/config.json" "$tmp/config-locked"
+for lock in "$tmp/claude-home/.oauth_refresh.lock" "$tmp/claude-home.lock"; do
+  mkdir "$lock"
+  st=0
+  err=$(cda switch beta --no-relaunch 2>&1 > /dev/null) || st=$?
+  check "a held ${lock##*/} fails the switch" 1 "$st"
+  check_true "and names it" grep -q "Claude Code holds $lock; retry in a moment" <<< "$err"
+  check_true "and Desktop's config is untouched" cmp -s "$d/config.json" "$tmp/config-locked"
+  check "and oauthAccount too" aaaaaaaa-1111 "$(jq -r .oauthAccount.accountUuid "$tmp/claude.json")"
+  rmdir "$lock"
+  check_true "and the tool's own locks are released" test ! -e "$tmp/claude-home/.oauth_refresh.lock" -a ! -e "$tmp/claude-home.lock" -a ! -e "$tmp/claude.json.lock"
+done
 
 # A tool killed outright (the app's watchdog sends SIGKILL 2 s after SIGTERM) runs no
 # trap, so the loop must notice on its own or it pins the CLI's locks for good.
@@ -664,6 +681,14 @@ check "the oldest pruned backup's CLI item is gone" absent "$(kc_get claude-mult
 for i in $(seq 1 12); do
   if [[ -d $b/login-2020010100000$i-1 ]]; then check "kept backup $i keeps its CLI item" old "$(kc_get claude-multipass "login-2020010100000$i-1" | jq -r .claudeAiOauth.accessToken)"; else check "pruned backup $i loses its CLI item" absent "$(kc_get claude-multipass "login-2020010100000$i-1")"; fi
 done
+# A store path with a space: the prune must not split it and rm a sibling
+# named after its first word. Run from $tmp so a split's relative half lands there.
+spaced="$tmp/my store"
+mkdir -p "$tmp/my/keep"
+for i in $(seq 1 12); do mkdir -p "$spaced/backups/login-2020010100000$i-1"; done
+(cd "$tmp" && CLAUDE_MULTIPASS_DIR=$spaced cda add zed --no-relaunch > /dev/null 2>&1)
+check_true "a spaced store path spares a sibling directory" test -d "$tmp/my/keep"
+check "and still prunes to ten" 10 "$(find "$spaced/backups" -mindepth 1 -maxdepth 1 -type d -name 'login-*' | wc -l | tr -d ' ')"
 
 # usage: a fixture token cache encrypted the way the app does; security and
 # curl are stubs on PATH, so no Keychain and no network
