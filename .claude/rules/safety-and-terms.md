@@ -14,7 +14,7 @@ paths:
 - Only the three login keys change in `config.json`; every other key stays byte-identical (the self-check compares the whole file).
 - Never overwrite a saved profile that holds a different account; `save` refuses unless `--force`, and then moves the old profile into `backups/` (a reproduced data-loss defect, now a case in the self-check).
 - Never switch away from a login that was never saved; `switch` refuses unless `--force`, because that login would need its email code again.
-- Refusals that `--force` lifts exit 3, so a caller can offer the override; other failures exit 1. A refused `save` is decided before Desktop quits.
+- Refusals that `--force` lifts exit 3, so a caller can offer the override; other failures exit 1, and a usage error (an unknown command, a bare run without a terminal or `fzf`) exits 2. A refused `save` is decided before Desktop quits.
 - Pointer sync is add-only: copy only when the source is newer, honour `deleted_*` tombstones, never delete, never symlink the folders (Desktop refuses a symlinked private dir), never touch a record a running Desktop owns.
 - `spaces.json` has org-bound keys (`projects`, `migration`); a future sync of it must leave them out.
 - `signed_in` requires a non-empty `oauth:tokenCacheV2` string. An empty session list must not crash under bash 3.2 `set -u` (reproduced, fixed, in the self-check).

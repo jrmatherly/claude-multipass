@@ -29,7 +29,7 @@ Evidence labels: **M** measured on a Mac or in cloned source, **O** official Ant
 **Code-tab process environment (M, `ps -E`, names only)**
 
 - Each Desktop-spawned `claude` has `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_ACCOUNT_UUID`, `CLAUDE_CODE_ORGANIZATION_UUID`, `CLAUDE_CODE_USER_EMAIL`, `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH` and a `--settings` flag.
-- `CLAUDE_CODE_OAUTH_TOKEN` outranks the Keychain login (O precedence: cloud-provider variables, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, `apiKeyHelper`, `CLAUDE_CODE_OAUTH_TOKEN`, then `/login`). Consequence: a terminal `/login` or a Keychain swap does not move a Code-tab session; only changing Desktop's own sign-in does. The host app refreshes the token itself.
+- `CLAUDE_CODE_OAUTH_TOKEN` outranks the Keychain login (O precedence: cloud-provider variables, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, `apiKeyHelper`, `CLAUDE_CODE_OAUTH_TOKEN`, an Anthropic profile or federation credential when one is named, then `/login`). Consequence: a terminal `/login` or a Keychain swap does not move a Code-tab session; only changing Desktop's own sign-in does. The host app refreshes the token itself.
 - The Code-tab argv lists `mcp__ccd_session_mgmt__list_sessions`, `get_session`, `search_session_transcripts` and `send_message` (M). Their universe is inferred (R, issue 74662) to be the index folder below.
 - Plugin SessionStart hooks and plugin MCP tools do run in Code-tab sessions (M).
 
@@ -68,7 +68,7 @@ Cloned and source-read 2026-10-23, none executed.
 ## 4. Recommendation and rejected alternatives
 
 - CLI and VS Code: `uv tool install claude-swap`, manual `cswap switch`, avoid the TUI and `cswap auto`. CCSwitcher is the GUI alternative that never touches the private endpoint. `/login` is the no-tool fallback.
-- Desktop: claude-multipass. Commands `list`, `show`, `save`, `add`, `switch`, `sync`, `rename`, `remove`, `usage`, `current`, `pick`. `switch` quits Desktop via AppleScript, re-saves the outgoing login, merges the target's three keys into `config.json` (other keys byte-identical), copies the cookies, union-syncs `local_*.json` across every account folder (newer `lastActivityAt` wins, tombstones honoured, nothing deleted) and relaunches. No private endpoints (except the opt-in `usage`), no daemon, manual by construction.
+- Desktop: claude-multipass. Commands `list`, `show`, `save`, `add`, `switch`, `sync`, `rename`, `remove`, `usage`, `current`, `pick`, `doctor`. `switch` quits Desktop via AppleScript, re-saves the outgoing login, merges the target's three keys into `config.json` (other keys byte-identical), copies the cookies, union-syncs `local_*.json` across every account folder (newer `lastActivityAt` wins, tombstones honoured, nothing deleted) and relaunches. No private endpoints (except the opt-in `usage`), no daemon, manual by construction.
 - Recall: a transcript-search MCP reading the shared store (obra/episodic-memory ranked first; thedotmack/claude-mem rejected).
 - Routine after a switch: sign Desktop in as the other account, open a new Code-tab session in the same project folder, ask to continue (handoff notes, auto memory, CLAUDE.md, past transcripts), or `claude --resume <id>` and `claude --desktop --resume <id>`.
 - Chat side: usage credits first, then a second Desktop instance with email-code sign-in.
@@ -82,7 +82,7 @@ Cloned and source-read 2026-10-23, none executed.
 3. `claude://resume?session=<id>` import across accounts on macOS.
 4. Whether Settings > Memory still has an export control.
 5. `claude_desktop_config.json` unchanged across a Desktop sign-out and sign-in.
-6. Keychain item names via `security find-generic-password -s "Claude Code-credentials"` and the `-<8 hex>` variant.
+6. Closed 2026-10-26: `security find-generic-password -s "Claude Code-credentials"` finds the item, account the macOS user name. The `-<8 hex>` variant for `CLAUDE_CONFIG_DIR` stays R.
 7. Whether the cross-session tools read copied index entries (stage a titled `local_<uuid>.json`, copy it, ask about it).
 8. claude-swap mid-session switch behaviour (the `/status` Email row).
 9. Whether two personal accounts pool limits at all.

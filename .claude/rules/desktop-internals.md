@@ -28,7 +28,7 @@ Verified facts the tool rests on. Do not re-derive them; cite them. Evidence lab
 ## Code tab process environment
 
 - Each Desktop-spawned `claude` has `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_ACCOUNT_UUID`, `CLAUDE_CODE_ORGANIZATION_UUID`, `CLAUDE_CODE_USER_EMAIL`, `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH` and a `--settings` flag (M, `ps -E`, names only).
-- `CLAUDE_CODE_OAUTH_TOKEN` outranks the Keychain login (O precedence: cloud-provider vars, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, `apiKeyHelper`, `CLAUDE_CODE_OAUTH_TOKEN`, then `/login`). So a terminal `/login` or a Keychain swap never moves a Code-tab session; only changing Desktop's own sign-in does. The host app refreshes the token itself.
+- `CLAUDE_CODE_OAUTH_TOKEN` outranks the Keychain login (O precedence: cloud-provider vars, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, `apiKeyHelper`, `CLAUDE_CODE_OAUTH_TOKEN`, an Anthropic profile or federation credential when one is named, then `/login`). So a terminal `/login` or a Keychain swap never moves a Code-tab session; only changing Desktop's own sign-in does. The host app refreshes the token itself.
 - Plugin SessionStart hooks and plugin MCP tools run in Code-tab sessions (M).
 
 ## CLI credentials
