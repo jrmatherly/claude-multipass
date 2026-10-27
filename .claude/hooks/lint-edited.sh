@@ -3,26 +3,38 @@
 # Claude Code PostToolUse hook (Edit, Write and Serena's edit tools): format
 # and lint the one file that was just edited, in whichever checkout or
 # worktree of this repo it lives, with the same tools and scope as
-# `pnpm check`. Problems go to stderr with exit 2, which Claude Code shows to
-# Claude so it fixes them in the same turn (exit 1 would only reach the user).
+# `pnpm check`. When that worktree's own copy of this hook differs from this
+# one, its copy runs instead, so a branch that edits the hook lints with it.
+# Problems go to stderr with exit 2, which Claude Code shows to Claude so it
+# fixes them in the same turn (exit 1 would only reach the user).
 # Wired up in .claude/settings.json; self-check: .claude/hooks/test-lint-edited.sh
 
 set -uo pipefail
 
 project=${CLAUDE_PROJECT_DIR:-$(pwd -P)}
+input=$(cat)
 # Edit/Write send an absolute file_path; Serena's edit tools a relative_path
-file=$(jq -r '.tool_input.file_path // .tool_input.relative_path // empty')
+file=$(jq -r '.tool_input.file_path // .tool_input.relative_path // empty' <<< "$input")
 [ -n "$file" ] || exit 0
 [[ $file == /* ]] || file="$project/$file"
 
 # Only existing files (a directory, e.g. from replace_in_files, is skipped:
-# pnpm check covers multi-file edits), in a checkout that ships this very hook.
+# pnpm check covers multi-file edits), in a checkout that ships this hook.
 # CLAUDE_PROJECT_DIR stays at the session's root when Claude enters a
 # worktree, and every code change here is made in one, so the file's own
 # checkout is the scope, as commit-gate.sh does for a commit.
 [ -f "$file" ] || exit 0
 root=$(git -C "$(dirname "$file")" rev-parse --show-toplevel 2> /dev/null) || exit 0
-cmp -s "$0" "$root/.claude/hooks/lint-edited.sh" || exit 0
+copy=$root/.claude/hooks/lint-edited.sh
+if ! cmp -s "$0" "$copy"; then
+  # Delegate only to a worktree of the session's own repository, never to a
+  # copy some other repo ships
+  [ -x "$copy" ] && [ -z "${LINT_EDITED_DELEGATED:-}" ] || exit 0
+  common=$(git -C "$root" rev-parse --path-format=absolute --git-common-dir 2> /dev/null) || exit 0
+  [ "$common" = "$(git -C "$project" rev-parse --path-format=absolute --git-common-dir 2> /dev/null)" ] || exit 0
+  printf '%s' "$input" | LINT_EDITED_DELEGATED=1 "$copy"
+  exit $?
+fi
 
 # prettier resolves its plugin, .gitignore and .prettierignore from the cwd
 cd "$root" || exit 0
