@@ -18,7 +18,8 @@ private func stubScript() throws -> URL {
       hang) (trap '' TERM; sleep 6 &); sleep 6;;
       orphan) (trap '' TERM; sleep 30) & echo $! > "$2"; wait;;
       save) sleep 2; echo saved;;
-      usage) sleep 5;;
+      usage) sleep 2; echo usage;;
+      doctor) sleep 5;;
       color) tput setaf 1; echo boom >&2; exit 1;;
       *) echo boom >&2; exit 1;;
     esac
@@ -107,11 +108,12 @@ private func stubScript() throws -> URL {
   #expect(kill(pid, 0) != 0)
 }
 
-@Test func mutatingCommandsGetTheLongerTimeout() async throws {
-  // save and switch can sit on an Automation or Keychain prompt.
+@Test func promptingCommandsGetTheLongerTimeout() async throws {
+  // save and switch can sit on an Automation or Keychain prompt, usage on its Safe Storage read.
   let cli = CLI(executable: try stubScript(), timeout: 1, mutatingTimeout: 10)
   #expect(String(decoding: try await cli.run(["save", "x"]), as: UTF8.self) == "saved\n")
-  await #expect(throws: CLIError.timedOut) { try await cli.run(["usage", "--json"]) }
+  #expect(String(decoding: try await cli.run(["usage", "--json"]), as: UTF8.self) == "usage\n")
+  await #expect(throws: CLIError.timedOut) { try await cli.run(["doctor"]) }
 }
 
 @Test func versionCompare() {
