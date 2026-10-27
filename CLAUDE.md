@@ -14,7 +14,7 @@ Three Raycast script commands in `raycast/` call the tool by name (`CLAUDE_MULTI
 - `pnpm format`: prettier `--write` over the same globs.
 - One file: `bash -n <file> && shellcheck --severity=warning <file> && node_modules/.bin/prettier --check <file>`.
 - `bash test/claude-multipass.sh`: the fixture self-check, exits 1 naming the first failed assertion. It never touches the real Desktop: `CLAUDE_DESKTOP_DIR`, `CLAUDE_MULTIPASS_DIR`, `CLAUDE_CLI_CONFIG` and `CLAUDE_CLI_HOME` point into a temp dir, `CLAUDE_MULTIPASS_BIN` points the Raycast scripts at the checkout, and `pgrep`, `osascript`, `pkill`, `open`, `fzf`, `security` (stateful, items under the temp dir, the Safe Storage read answered with a fixture password) and `curl` are stubs on PATH (no app quit or launched, no Keychain, no network). The migration case sets `XDG_CONFIG_HOME` to the temp dir, not `HOME`, because tools on PATH read their own config from `HOME`. Details in `.claude/rules/testing.md`.
-- Never run `save`, `add`, `switch`, `remove` or `sync` against the real Desktop folder from an agent: they quit the app and rewrite its login. `.claude/settings.json` asks before `save`, `add`, `switch`, `remove`, `sync` and `usage`. `usage` reads the Keychain and prompts the user; leave it to them. `save`, `add`, `switch`, `rename` and `remove` also read and write the CLI login's Keychain items (`rename` moves the tool's own item only, so it is on the ask list but never quits Desktop). `list`, `show` and `current` are read-only, apart from the one-time store migration.
+- Never run `save`, `add`, `switch`, `remove` or `sync` against the real Desktop folder from an agent: they quit the app and rewrite its login. `.claude/settings.json` asks before `save`, `add`, `switch`, `rename`, `remove`, `sync` and `usage`. `usage` reads the Keychain and prompts the user; leave it to them. `save`, `add`, `switch`, `rename` and `remove` also read and write the CLI login's Keychain items (`rename` moves the tool's own item only, so it is on the ask list but never quits Desktop). `list`, `show` and `current` are read-only, apart from the one-time store migration.
 
 ## Architecture
 
@@ -25,7 +25,7 @@ test/claude-multipass.sh fixture self-check
 raycast/                 claude-account.sh (inline, current name), claude-account-usage.sh (inline, opt-in), switch-claude-account.sh (argument, confirmation)
 app/                     the menu bar app, a Swift package: Sources/MultipassCore (models, CLI runner, formatting, settings, state; Foundation only, unit tested), Sources/ClaudeMultipass (AppKit/SwiftUI shell), Tests/
 scripts/                 build-app.sh (swift build, bundle, sign, optional DMG), sign-mac-app.sh (copied from ai-kb)
-docs/                    claude-multipass.md (how it works, for users), research.md (scrubbed research digest)
+docs/                    claude-multipass.md (how it works, for users), research.md (scrubbed research digest), superpowers/ (specs and plans)
 .claude/                 settings.json (permissions, hooks), hooks/ (lint and commit gate with self-checks), rules/, skills/, agents/
 .github/workflows/       check.yml (pnpm check on PRs and main), release.yml (on v* tags: build, sign, notarize, upload the DMG)
 private/                 git-ignored research and notes, never published
