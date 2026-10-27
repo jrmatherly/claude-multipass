@@ -3,7 +3,9 @@
 # Claude Code PostToolUse hook (Bash): lint the files a Bash command changed
 # (heredocs, sed -i, tee, cp…), which the Edit/Write hook never sees. Claude
 # Code lists them in tool_response.bashEditDiff.changedFiles with gitignored
-# files already dropped (best effort, 200-file cap, v2.1.269+). Each goes
+# files already dropped (best effort, 200-file cap, v2.1.269+), recorded in
+# every permission mode because settings.json sets bashEditDiffEnabled (off
+# by default outside auto and bypassPermissions mode). Each goes
 # through lint-edited.sh, which owns the scope and the rules. Problems go to
 # stderr with exit 2, so Claude sees them although the command already ran.
 # Wired up in .claude/settings.json; self-check: .claude/hooks/test-lint-bash-edits.sh

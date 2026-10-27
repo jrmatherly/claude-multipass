@@ -73,4 +73,19 @@ for f in "$gated_bin" "$gated_raycast" "$gated_scripts"; do
   [ "$rc" -eq 2 ] || fail "$f: expected exit 2, got $rc"
 done
 
+# 9. A file in this checkout is linted whatever CLAUDE_PROJECT_DIR says: a
+# worktree session keeps the session root in that variable
+printf '# T\n\n* c\n' > "$tmp/w.md"
+printf '{"tool_name":"Edit","tool_input":{"file_path":"%s"}}' "$root/$tmp/w.md" \
+  | CLAUDE_PROJECT_DIR=/nonexistent "$hook" 2> /dev/null || fail "other project dir: non-zero exit"
+grep -q '^- c$' "$tmp/w.md" || fail "other project dir: file in this checkout not formatted"
+
+# 10. A file in a repo without this hook is left alone
+foreign=$(mktemp -d "${TMPDIR:-/tmp}/lint-edited.XXXXXX")
+trap 'rm -rf "$root/$tmp" "$root/private/hooktest-$$.sh" "$root/$gated_bin" "$root/$swift_bin" "$root/$gated_raycast" "$root/$gated_scripts" "$foreign"' EXIT
+git -C "$foreign" init -q
+printf '# T\n\n* d\n' > "$foreign/f.md"
+run "$foreign/f.md" || fail "foreign repo: non-zero exit"
+grep -q '^\* d$' "$foreign/f.md" || fail "foreign repo: file was modified"
+
 echo "lint-edited: all checks passed"

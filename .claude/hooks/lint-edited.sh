@@ -1,7 +1,8 @@
 #!/bin/bash
 #
 # Claude Code PostToolUse hook (Edit, Write and Serena's edit tools): format
-# and lint the one file that was just edited, with the same tools and scope as
+# and lint the one file that was just edited, in whichever checkout or
+# worktree of this repo it lives, with the same tools and scope as
 # `pnpm check`. Problems go to stderr with exit 2, which Claude Code shows to
 # Claude so it fixes them in the same turn (exit 1 would only reach the user).
 # Wired up in .claude/settings.json; self-check: .claude/hooks/test-lint-edited.sh
@@ -14,17 +15,18 @@ file=$(jq -r '.tool_input.file_path // .tool_input.relative_path // empty')
 [ -n "$file" ] || exit 0
 [[ $file == /* ]] || file="$project/$file"
 
-# Only existing files inside this checkout (a directory, e.g. from
-# replace_in_files, is skipped: pnpm check covers multi-file edits)
+# Only existing files (a directory, e.g. from replace_in_files, is skipped:
+# pnpm check covers multi-file edits), in a checkout that ships this very hook.
+# CLAUDE_PROJECT_DIR stays at the session's root when Claude enters a
+# worktree, and every code change here is made in one, so the file's own
+# checkout is the scope, as commit-gate.sh does for a commit.
 [ -f "$file" ] || exit 0
-case $file in
-  "$project"/*) ;;
-  *) exit 0 ;;
-esac
+root=$(git -C "$(dirname "$file")" rev-parse --show-toplevel 2> /dev/null) || exit 0
+cmp -s "$0" "$root/.claude/hooks/lint-edited.sh" || exit 0
 
 # prettier resolves its plugin, .gitignore and .prettierignore from the cwd
-cd "$project" || exit 0
-rel=${file#"$project"/}
+cd "$root" || exit 0
+rel=${file#"$root"/}
 
 # Machine-local files (private/, .codegraph/, ...) aren't ours to lint
 git check-ignore -q -- "$rel" && exit 0

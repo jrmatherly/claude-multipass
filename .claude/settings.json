@@ -1,36 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "permissions": {
-    "allow": [
-      "Bash(pnpm check *)",
-      "Bash(pnpm format *)",
-      "Bash(shellcheck *)",
-      "Bash(bash -n *)",
-      "Bash(test/check.sh *)",
-      "Bash(bash test/*)",
-      "Bash(.claude/hooks/test-*)"
-    ],
-    "ask": [
-      "Bash(claude-multipass switch *)",
-      "Bash(claude-multipass add *)",
-      "Bash(claude-multipass save *)",
-      "Bash(claude-multipass remove *)",
-      "Bash(claude-multipass sync *)",
-      "Bash(claude-multipass usage *)",
-      "Bash(bin/claude-multipass switch *)",
-      "Bash(bin/claude-multipass add *)",
-      "Bash(bin/claude-multipass save *)",
-      "Bash(bin/claude-multipass remove *)",
-      "Bash(bin/claude-multipass sync *)",
-      "Bash(bin/claude-multipass usage *)",
-      "Bash(./bin/claude-multipass switch *)",
-      "Bash(./bin/claude-multipass add *)",
-      "Bash(./bin/claude-multipass save *)",
-      "Bash(./bin/claude-multipass remove *)",
-      "Bash(./bin/claude-multipass sync *)",
-      "Bash(./bin/claude-multipass usage *)"
-    ]
-  },
+  "bashEditDiffEnabled": true,
   "hooks": {
     "PreToolUse": [
       {
@@ -72,6 +42,40 @@
           }
         ]
       }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(pnpm check *)",
+      "Bash(pnpm format *)",
+      "Bash(shellcheck *)",
+      "Bash(bash -n *)",
+      "Bash(test/check.sh *)",
+      "Bash(bash test/*)",
+      "Bash(.claude/hooks/test-*)"
+    ],
+    "ask": [
+      "Bash(claude-multipass switch *)",
+      "Bash(claude-multipass add *)",
+      "Bash(claude-multipass save *)",
+      "Bash(claude-multipass remove *)",
+      "Bash(claude-multipass rename *)",
+      "Bash(claude-multipass sync *)",
+      "Bash(claude-multipass usage *)",
+      "Bash(bin/claude-multipass switch *)",
+      "Bash(bin/claude-multipass add *)",
+      "Bash(bin/claude-multipass save *)",
+      "Bash(bin/claude-multipass remove *)",
+      "Bash(bin/claude-multipass rename *)",
+      "Bash(bin/claude-multipass sync *)",
+      "Bash(bin/claude-multipass usage *)",
+      "Bash(./bin/claude-multipass switch *)",
+      "Bash(./bin/claude-multipass add *)",
+      "Bash(./bin/claude-multipass save *)",
+      "Bash(./bin/claude-multipass remove *)",
+      "Bash(./bin/claude-multipass rename *)",
+      "Bash(./bin/claude-multipass sync *)",
+      "Bash(./bin/claude-multipass usage *)"
     ]
   }
 }
