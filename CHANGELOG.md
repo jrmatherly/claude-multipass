@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- After a `switch`, a signed-out terminal `claude` is reported as `Claude Code reports it is signed out`. `claude auth status` exits 1 when signed out, so the tool said only that the check exited 1; it now reads the JSON before the exit code.
 - `save` over a profile whose `meta.json` cannot be read refuses with a message naming the file (exit 3, before Desktop quits), and `--force` moves that profile to `backups/` and saves fresh. It failed with a raw `jq` error, and with `--force` only after quitting Desktop, so `save` could not repair it.
 - The menu bar app gives `usage` the 10-minute limit too, since its Safe Storage read can wait on a Keychain prompt.
 - `save` refuses a second name for an account already saved under another name (exit 3, before Desktop quits). Two names for one account made `switch` to the second restore its older tokens. `--force` moves the other profile to `backups/` and saves under the new name, which keeps the other name's CLI login when the terminal is on another account.
