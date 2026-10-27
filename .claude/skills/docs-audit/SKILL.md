@@ -5,6 +5,7 @@ argument-hint: '[doc path or directory; default: all docs]'
 context: fork
 agent: docs-auditor
 background: false
+allowed-tools: Bash(git log *)
 ---
 
 Audit these docs: $ARGUMENTS

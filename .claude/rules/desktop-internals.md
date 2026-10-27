@@ -7,7 +7,7 @@ paths:
 
 # Desktop and CLI internals
 
-Verified facts the tool rests on. Do not re-derive them; cite them. Evidence labels: **M** measured on a Mac or in cloned source, **O** official Anthropic doc, **R** reported (issue, README, blog), **U** unverified or inferred. Measured 2026-10-23 against Desktop 3.6556.2 and CLI 2.1.309 (Desktop bundled Claude Code 2.1.304 and 2.1.308); re-measure after an app update before trusting a layout claim. The full digest is `docs/research.md`.
+Verified facts the tool rests on. Do not re-derive them; cite them. Evidence labels: **M** measured on a Mac or in cloned source, **O** official Anthropic doc, **R** reported (issue, README, blog), **U** unverified or inferred. Measured 2026-10-23 against Desktop 3.6556.2 and CLI 2.1.309 (Desktop bundled Claude Code 2.1.304 and 2.1.308) unless a sentence names a later date or version (the 2026-10-26 Keychain and 2.1.310 binary facts below); re-measure after an app update before trusting a layout claim. The full digest is `docs/research.md`.
 
 ## Desktop paths and keys
 
