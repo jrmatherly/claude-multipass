@@ -185,6 +185,8 @@ check_true "save warns when the CLI is on another account" grep -q 'Claude Code 
 check "a mismatched save keeps cli.json" aaaaaaaa-1111 "$(jq -r .oauthAccount.accountUuid "$p/alpha/cli.json")"
 check "a mismatched save keeps the saved item" at-alpha "$(kc_get claude-multipass alpha | jq -r .claudeAiOauth.accessToken)"
 check_true "save with CLAUDE_CONFIG_DIR skips the CLI login" grep -q 'CLAUDE_CONFIG_DIR is set; the CLI login is not saved or switched' <<< "$(CLAUDE_CONFIG_DIR=/x cda save alpha --no-relaunch 2>&1 > /dev/null)"
+check_true "save with CLAUDE_SECURESTORAGE_CONFIG_DIR skips the CLI login" grep -q 'CLAUDE_SECURESTORAGE_CONFIG_DIR is set; the CLI login is not saved or switched' <<< "$(CLAUDE_SECURESTORAGE_CONFIG_DIR=/x cda save alpha --no-relaunch 2>&1 > /dev/null)"
+check "an empty CLAUDE_SECURESTORAGE_CONFIG_DIR does not block the save" 0 "$(CLAUDE_SECURESTORAGE_CONFIG_DIR='' cda save alpha --no-relaunch 2>&1 > /dev/null | grep -c 'CLAUDE_SECURESTORAGE_CONFIG_DIR is set')"
 cp "$tmp/claude-alpha.json" "$tmp/claude.json"
 kc_delete "Claude Code-credentials" "$USER"
 check_true "save warns when the CLI is signed out" grep -q 'signed in as a different account, or signed out' <<< "$(cda save alpha --no-relaunch 2>&1 > /dev/null)"
@@ -373,6 +375,10 @@ cda switch alpha --no-relaunch > /dev/null 2>&1
 check_true "switch with CLAUDE_CONFIG_DIR skips the CLI login" grep -q 'CLAUDE_CONFIG_DIR is set; the CLI login is not saved or switched' <<< "$(CLAUDE_CONFIG_DIR=/x cda switch beta --no-relaunch 2>&1 > /dev/null)"
 check "and leaves oauthAccount alone" aaaaaaaa-1111 "$(jq -r .oauthAccount.accountUuid "$tmp/claude.json")"
 CLAUDE_CONFIG_DIR=/x cda switch alpha --no-relaunch > /dev/null 2>&1
+# CLAUDE_SECURESTORAGE_CONFIG_DIR moves the item the same way (2.1.310)
+check_true "switch with CLAUDE_SECURESTORAGE_CONFIG_DIR skips the CLI login" grep -q 'CLAUDE_SECURESTORAGE_CONFIG_DIR is set; the CLI login is not saved or switched' <<< "$(CLAUDE_SECURESTORAGE_CONFIG_DIR=/x cda switch beta --no-relaunch 2>&1 > /dev/null)"
+check "and leaves oauthAccount alone too" aaaaaaaa-1111 "$(jq -r .oauthAccount.accountUuid "$tmp/claude.json")"
+CLAUDE_SECURESTORAGE_CONFIG_DIR=/x cda switch alpha --no-relaunch > /dev/null 2>&1
 
 # A corrupt ~/.claude.json (the CLI rewrites it often): Desktop only, nothing aborted
 cp "$tmp/claude.json" "$tmp/claude-good.json"
@@ -697,6 +703,7 @@ cda doctor > /dev/null
 check "doctor never calls security" "$n_sec" "$(wc -l < "$tmp/security-calls" | tr -d ' ')"
 check_true "doctor names a profile without a CLI login" grep -q '^warn: legacy: no CLI login saved' <<< "$(cda doctor)"
 check_true "doctor warns on CLAUDE_CONFIG_DIR" grep -q '^warn: CLAUDE_CONFIG_DIR is set; the CLI login is not saved or switched' <<< "$(CLAUDE_CONFIG_DIR=/x cda doctor)"
+check_true "doctor warns on CLAUDE_SECURESTORAGE_CONFIG_DIR" grep -q '^warn: CLAUDE_SECURESTORAGE_CONFIG_DIR is set; the CLI login is not saved or switched' <<< "$(CLAUDE_SECURESTORAGE_CONFIG_DIR=/x cda doctor)"
 cp "$p/usagey/config.json" "$tmp/usagey-config"
 printf '{"oauth:tokenCacheV2":""}' > "$p/usagey/config.json"
 check "doctor fails on an empty token" 1 "$(exit_code cda doctor)"
