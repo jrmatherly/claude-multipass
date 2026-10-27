@@ -82,10 +82,45 @@ grep -q '^- c$' "$tmp/w.md" || fail "other project dir: file in this checkout no
 
 # 10. A file in a repo without this hook is left alone
 foreign=$(mktemp -d "${TMPDIR:-/tmp}/lint-edited.XXXXXX")
-trap 'rm -rf "$root/$tmp" "$root/private/hooktest-$$.sh" "$root/$gated_bin" "$root/$swift_bin" "$root/$gated_raycast" "$root/$gated_scripts" "$foreign"' EXIT
+repos=$(mktemp -d "${TMPDIR:-/tmp}/lint-edited.XXXXXX")
+trap 'rm -rf "$root/$tmp" "$root/private/hooktest-$$.sh" "$root/$gated_bin" "$root/$swift_bin" "$root/$gated_raycast" "$root/$gated_scripts" "$foreign" "$repos"' EXIT
 git -C "$foreign" init -q
 printf '# T\n\n* d\n' > "$foreign/f.md"
 run "$foreign/f.md" || fail "foreign repo: non-zero exit"
 grep -q '^\* d$' "$foreign/f.md" || fail "foreign repo: file was modified"
+
+# 11. A worktree whose copy differs runs its copy with the payload: a
+# throwaway repo ships the hook, its second worktree a stub recording stdin.
+# No node_modules there, so the marker, not formatting, proves which ran.
+proj=$repos/proj
+mkdir -p "$proj/test" "$proj/.claude/hooks"
+: > "$proj/test/check.sh"
+cp "$hook" "$proj/.claude/hooks/lint-edited.sh"
+git -C "$proj" init -q
+git -C "$proj" add test/check.sh .claude/hooks/lint-edited.sh
+git -C "$proj" -c user.name=test -c user.email=test@example.com \
+  -c commit.gpgsign=false -c core.hooksPath=/dev/null commit -qm init
+git -C "$proj" worktree add -q "$repos/wt" 2> /dev/null
+marker=$repos/marker
+stub() {
+  printf '#!/bin/bash\ncat >> %q\n' "$marker" > "$1/.claude/hooks/lint-edited.sh"
+  chmod +x "$1/.claude/hooks/lint-edited.sh"
+}
+stub "$repos/wt"
+printf '# T\n\n* g\n' > "$repos/wt/g.md"
+printf '{"tool_name":"Edit","tool_input":{"file_path":"%s"}}' "$repos/wt/g.md" \
+  | CLAUDE_PROJECT_DIR=$proj "$hook" 2> /dev/null || fail "worktree copy: non-zero exit"
+grep -q "$repos/wt/g.md" "$marker" 2> /dev/null || fail "worktree copy: not delegated to"
+
+# 12. A different repo's differing copy is never run
+rm -f "$marker"
+mkdir -p "$repos/other/.claude/hooks"
+git -C "$repos/other" init -q
+stub "$repos/other"
+printf '# T\n\n* h\n' > "$repos/other/h.md"
+printf '{"tool_name":"Edit","tool_input":{"file_path":"%s"}}' "$repos/other/h.md" \
+  | CLAUDE_PROJECT_DIR=$proj "$hook" 2> /dev/null || fail "other repo copy: non-zero exit"
+[ ! -e "$marker" ] || fail "other repo copy: delegated to"
+grep -q '^\* h$' "$repos/other/h.md" || fail "other repo copy: file was modified"
 
 echo "lint-edited: all checks passed"

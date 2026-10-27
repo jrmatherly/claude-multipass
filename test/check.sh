@@ -43,10 +43,11 @@ swift test --package-path app > "$swift_log" 2>&1 || {
   exit 1
 }
 rm -f "$swift_log"
-# the Claude Code hooks against sample payloads
+# the Claude Code hooks against sample payloads, and their wiring
 bash .claude/hooks/test-lint-edited.sh > /dev/null
 bash .claude/hooks/test-lint-bash-edits.sh > /dev/null
 bash .claude/hooks/test-commit-gate.sh > /dev/null
+bash .claude/hooks/test-settings.sh > /dev/null
 # Every bin/ file has a comment on line 2
 for file in bin/*; do
   sed -n 2p "$file" | grep -q '^#' || {
