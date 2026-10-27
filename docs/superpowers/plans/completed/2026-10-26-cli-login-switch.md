@@ -8,7 +8,7 @@
 
 **Tech Stack:** bash 3.2, jq, `xxd` (ships with macOS), `/usr/bin/security`, SwiftPM (Foundation, SwiftUI), the fixture self-check.
 
-**Spec:** `docs/superpowers/specs/2026-10-26-cli-login-switch.md`
+**Spec:** `docs/superpowers/specs/completed/2026-10-26-cli-login-switch.md`
 
 ## Global constraints
 
