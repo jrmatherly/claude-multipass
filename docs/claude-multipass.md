@@ -129,7 +129,7 @@ This is the one part of the tool that uses a subscription token outside Anthropi
 - Refusals that `--force` lifts exit 3, so a caller can offer the override; other failures exit 1, and a usage error (an unknown command, a bare run without a terminal or `fzf`) exits 2. A refused `save` is decided before Desktop quits.
 - `save`, `switch` and `add` refuse (exit 1) from a shell that Desktop owns, such as the Code tab's terminal: quitting Desktop would end that shell mid-switch. BSD `pgrep` never reports its own ancestors, so the tool checks with `pgrep -a` too; run those commands from Terminal or the menu bar app.
 
-The self-check `test/claude-multipass.sh` runs in `pnpm check` against a fixture folder, with `pgrep`, `osascript`, `pkill`, `open`, `fzf`, `security` and `curl` stubbed on PATH, so it never touches the real app, Keychain or network.
+The self-check `test/claude-multipass.sh` runs in `pnpm check` against a fixture folder, with `pgrep`, `osascript`, `pkill`, `open`, `fzf`, `security`, `curl`, `claude` and `sleep` stubbed on PATH, so it never touches the real app, Keychain or network.
 
 ## Background
 
