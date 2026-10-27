@@ -255,9 +255,10 @@ ${bold}Commands${reset}
   doctor               Checks the setup: Desktop's config.json, the tools on
                        PATH, the store and profile modes, each profile's token,
                        the backups count, whether Desktop runs, which profiles
-                       hold no CLI login, whether CLAUDE_CONFIG_DIR is set. One
-                       ok:, warn: or fail: line per check; exits 1 on any
-                       fail:. Reads no Keychain and no network.
+                       hold no CLI login, whether CLAUDE_CONFIG_DIR or
+                       CLAUDE_SECURESTORAGE_CONFIG_DIR is set. One ok:, warn:
+                       or fail: line per check; exits 1 on any fail:. Reads no
+                       Keychain and no network.
 
 ${bold}Options${reset}
   --no-relaunch        Leave Desktop quit after save, switch, add or pick,
@@ -384,6 +385,9 @@ cli_skip=''
 # capture and the restore so the two never disagree.
 cli_blocker() {
   [[ -z ${CLAUDE_CONFIG_DIR:-} ]] || echo "CLAUDE_CONFIG_DIR is set; the CLI login is not saved or switched"
+  # Set and non-empty, it moves the CLI's item to a suffixed name the tool does
+  # not know (2.1.310, measured); empty selects the default item.
+  [[ -z ${CLAUDE_SECURESTORAGE_CONFIG_DIR:-} ]] || echo "CLAUDE_SECURESTORAGE_CONFIG_DIR is set; the CLI login is not saved or switched"
   [[ -f $claude_json ]] || echo "Claude Code has not run on this Mac"
   [[ ! -f $claude_json ]] || jq -e . "$claude_json" > /dev/null 2>&1 || echo "$claude_json is not valid JSON"
 }
@@ -886,6 +890,7 @@ doctor_report() {
     [[ -f ${dir}cli.json ]] || echo "warn: $name: no CLI login saved (claude auth login, then save $name)"
   done
   [[ -z ${CLAUDE_CONFIG_DIR:-} ]] || echo "warn: CLAUDE_CONFIG_DIR is set; the CLI login is not saved or switched"
+  [[ -z ${CLAUDE_SECURESTORAGE_CONFIG_DIR:-} ]] || echo "warn: CLAUDE_SECURESTORAGE_CONFIG_DIR is set; the CLI login is not saved or switched"
   n=$(ls -1d "$backups"/login-*/ 2> /dev/null | wc -l | tr -d ' ')
   echo "ok: backups: $n saved logins in $backups"
   if desktop_running; then echo "ok: desktop: running"; else echo "ok: desktop: not running"; fi
