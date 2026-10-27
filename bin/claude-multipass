@@ -292,6 +292,9 @@ ${bold}Cautions${reset}
     decision.
     The derived AES key is on the openssl command line for the moment of each
     decrypt (visible in ps to any local user while it runs).
+  - A CLI login too long for a security -i line goes on security's command
+    line as hex for the moment of the write, as Claude Code writes its own
+    (visible in ps the same way).
   - Chats, Projects and memory on claude.ai stay with their account. Only
     Claude Code sessions carry over.
   - save, switch and add refuse from a shell inside Desktop (the Code tab's
@@ -310,8 +313,13 @@ jq_write() {
   mv "$dest.tmp" "$dest"
 }
 
-# security exits 44 when the item is absent.
-keychain_get() { security find-generic-password -a "$2" -s "$1" -w 2> /dev/null; }
+# security exits 44 when the item is absent. It prints a value holding any
+# non-ASCII byte as hex (measured), and a JSON value is never all hex.
+keychain_get() {
+  local v
+  v=$(security find-generic-password -a "$2" -s "$1" -w 2> /dev/null) || return $?
+  if [[ $v =~ ^[0-9a-f]+$ ]]; then printf %s "$v" | xxd -r -p; else printf %s "$v"; fi
+}
 
 # security is the only Keychain accessor, in Claude Code's own shape: an item
 # remembers the partition of the tool that last wrote it, and a reader in
@@ -338,6 +346,17 @@ keychain_delete() {
   local rc=0
   security delete-generic-password -a "$2" -s "$1" > /dev/null 2>&1 || rc=$?
   [[ $rc -eq 0 || $rc -eq 44 ]]
+}
+
+# security exits with the low byte of the OSStatus (44 is errSecItemNotFound,
+# measured); its stderr is dropped above, so the reason is named here.
+keychain_exit() {
+  case $1 in
+    36) echo "security exited 36 (no Keychain prompt is possible here: a shell over SSH, a hook, or a timer)" ;;
+    51) echo "security exited 51 (the Keychain prompt was declined, or the password was wrong)" ;;
+    128) echo "security exited 128 (the Keychain prompt was cancelled)" ;;
+    *) echo "security exited $1" ;;
+  esac
 }
 
 # The account uuid the CLI is signed in as, or nothing when signed out. It is
@@ -391,7 +410,7 @@ cli_capture() {
     warning "$name: Claude Code is signed in as a different account, or signed out; saved the Desktop login only"
     return 0
   elif [[ $rc -ne 0 ]]; then
-    warning "$name: security exited $rc reading the CLI login; saved the Desktop login only"
+    warning "$name: $(keychain_exit "$rc") reading the CLI login; saved the Desktop login only"
     return 0
   fi
   if ! part=$(cli_account_part <<< "$live" 2> /dev/null); then
@@ -399,7 +418,7 @@ cli_capture() {
     return 0
   fi
   keychain_put "$mp_service" "$name" <<< "$part" || {
-    warning "$name: security exited $? saving the CLI login; saved the Desktop login only"
+    warning "$name: $(keychain_exit "$?") saving the CLI login; saved the Desktop login only"
     return 0
   }
   jq_write "$dir/cli.json" '{oauthAccount}' "$claude_json" \
@@ -507,7 +526,7 @@ cli_restore() {
     return 0
   fi
   if ((rc == 44)); then live=''; elif ((rc != 0)); then
-    warning "security exited $rc reading the CLI login; switched Desktop only"
+    warning "$(keychain_exit "$rc") reading the CLI login; switched Desktop only"
     return 0
   else
     live=$cli_live
@@ -518,7 +537,7 @@ cli_restore() {
     warning "the saved CLI login for $name is missing from the Keychain; run claude auth login, then save $name"
     return 0
   elif ((rc != 0)); then
-    warning "security exited $rc reading the saved CLI login; switched Desktop only"
+    warning "$(keychain_exit "$rc") reading the saved CLI login; switched Desktop only"
     return 0
   fi
   merged=$saved
@@ -528,7 +547,7 @@ cli_restore() {
   fi
   cli_backup "$live" || return 0
   keychain_put "$cli_service" "$cli_account" <<< "$merged" || {
-    warning "security exited $? writing the CLI login; the previous login is in $backup_dest"
+    warning "$(keychain_exit "$?") writing the CLI login; the previous login is in $backup_dest"
     return 0
   }
   # The identity file is written the way the CLI writes it (2 spaces, final
@@ -995,7 +1014,7 @@ profile_rename() {
       warning "could not move the CLI login to $2 (the old item stays under $1); run claude auth login, then save $2"
     fi
   elif ((rc != 44)); then
-    warning "security exited $rc reading the CLI login; run claude auth login, then save $2"
+    warning "$(keychain_exit "$rc") reading the CLI login; run claude auth login, then save $2"
   fi
   echo "Renamed $1 to $2"
 }

@@ -90,7 +90,15 @@ if [[ ${1:-} == -i ]]; then
 fi
 run "$@"
 EOF
-kc_get() { security find-generic-password -a "$2" -s "$1" -w 2> /dev/null || echo absent; }
+# Decodes a hex read like the script does, so a UTF-8 value compares as bytes.
+kc_get() {
+  local v
+  v=$(security find-generic-password -a "$2" -s "$1" -w 2> /dev/null) || {
+    echo absent
+    return
+  }
+  if [[ $v =~ ^[0-9a-f]+$ ]]; then printf %s "$v" | xxd -r -p; else printf %s "$v"; fi
+}
 kc_put() { printf 'add-generic-password -U -a "%s" -s "%s" -X %s\n' "$2" "$1" "$(printf %s "$3" | xxd -p | tr -d '\n')" | security -i > /dev/null; }
 kc_delete() { security delete-generic-password -a "$2" -s "$1" > /dev/null 2>&1 || true; }
 chmod +x "$tmp"/bin/*
@@ -131,7 +139,8 @@ check "security stub reports a missing item" 44 "$(
 kc_delete t u
 check "security stub deletes" absent "$(kc_get t u)"
 kc_put t u "$(printf 'a\nb')"
-check "security stub prints a value with a newline as hex, like the real tool" 610a62 "$(kc_get t u)"
+check "security stub prints a value with a newline as hex, like the real tool" 610a62 "$(security find-generic-password -a u -s t -w)"
+check "and kc_get decodes it" 610a62 "$(kc_get t u | xxd -p)"
 kc_delete t u
 
 mkdir -p "$d" "$p/beta" "$s/aaaaaaaa-1111/org-a" "$s/bbbbbbbb-2222/org-b"
@@ -311,6 +320,30 @@ check "and the backup item holds the account part only" '["claudeAiOauth"]' "$(k
 cda switch alpha --no-relaunch > /dev/null 2>&1
 kc_put "Claude Code-credentials" "$USER" "$live_item"
 
+# A live item with a non-ASCII byte comes back from security -w as hex (measured
+# on the real tool); the tool decodes it, so the merge still sees JSON
+utf8_item='{"claudeAiOauth":{"accessToken":"at-alpha"},"mcpOAuth":{"caf\u00e9":"\xe2\x9c\x93"}}'
+kc_put "Claude Code-credentials" "$USER" "$(printf "$utf8_item")"
+err=$(cda switch beta --no-relaunch 2>&1 > /dev/null)
+check "a live item with UTF-8 bytes warns nothing" "" "$err"
+check "and its shared keys survive the hex read" "$(printf '\xe2\x9c\x93')" "$(kc_get "Claude Code-credentials" "$USER" | jq -r '.mcpOAuth["caf\u00e9"]')"
+cda switch alpha --no-relaunch > /dev/null 2>&1
+
+# The route boundary: a security -i line of at most 4000 bytes, argv above it.
+# The profile item is the account part, so its size follows the token.
+: > "$tmp/security-calls"
+kc_put "Claude Code-credentials" "$USER" "{\"claudeAiOauth\":{\"accessToken\":\"$(printf 'y%.0s' $(seq 1 1900))\"}}"
+cda save alpha --no-relaunch > /dev/null 2>&1
+check "a profile item just under the line limit goes to security -i" 1 "$(grep -c '^stdin add-generic-password -U -a "alpha"' "$tmp/security-calls")"
+: > "$tmp/security-calls"
+kc_put "Claude Code-credentials" "$USER" "{\"claudeAiOauth\":{\"accessToken\":\"$(printf 'y%.0s' $(seq 1 1990))\"}}"
+cda save alpha --no-relaunch > /dev/null 2>&1
+check "and one just over it goes on argv" 1 "$(grep -c '^security add-generic-password -U -a alpha ' "$tmp/security-calls")"
+check "and not to security -i" 0 "$(grep -c '^stdin add-generic-password -U -a "alpha"' "$tmp/security-calls")"
+# Alpha's live item and saved item are put back for the cases that follow
+kc_put "Claude Code-credentials" "$USER" "$live_item"
+cda save alpha --no-relaunch > /dev/null 2>&1
+
 # A Mac where the CLI never ran (no ~/.claude.json): Desktop only, nothing created
 mv "$tmp/claude.json" "$tmp/claude-aside.json"
 check_true "switch without a claude.json says the CLI never ran here" grep -q 'Claude Code has not run on this Mac; switched Desktop only' <<< "$(cda switch beta --no-relaunch 2>&1 > /dev/null)"
@@ -330,8 +363,8 @@ cda switch alpha --no-relaunch > /dev/null 2>&1
 
 # security fails the read of the CLI item with another status: the status is named, nothing moves
 err=$(SECURITY_FAIL_FIND=36 cda switch beta --no-relaunch 2>&1 > /dev/null)
-check_true "a failed read on the way out names the status and the profile" grep -q 'alpha: security exited 36 reading the CLI login; saved the Desktop login only' <<< "$err"
-check_true "a failed read on the restore names the status" grep -q 'security exited 36 reading the CLI login; switched Desktop only' <<< "$err"
+check_true "a failed read on the way out names the status and the profile" grep -q 'alpha: security exited 36 (no Keychain prompt is possible here: a shell over SSH, a hook, or a timer) reading the CLI login; saved the Desktop login only' <<< "$err"
+check_true "a failed read on the restore names the status" grep -q 'security exited 36 (no Keychain prompt is possible here: a shell over SSH, a hook, or a timer) reading the CLI login; switched Desktop only' <<< "$err"
 check "and leaves the live CLI item alone" at-alpha "$(kc_get "Claude Code-credentials" "$USER" | jq -r .claudeAiOauth.accessToken)"
 check "and leaves oauthAccount alone" aaaaaaaa-1111 "$(jq -r .oauthAccount.accountUuid "$tmp/claude.json")"
 cda switch alpha --no-relaunch > /dev/null 2>&1

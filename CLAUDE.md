@@ -6,7 +6,7 @@ Guidance for Claude Code in this repository.
 
 `bin/claude-multipass` switches the Claude Desktop app between saved claude.ai accounts on one Mac without an email code, moves the Claude Code CLI's terminal login with it, and keeps every saved account's Claude Code sessions listed in the Code tab after a switch. `app/` is Claude Multipass, a menu bar app over the same script (it never touches Desktop's files itself), shipped as a notarized DMG through the `claude-multipass-app` cask. One Mac, several accounts (personal, work, a second plan). macOS only (`osascript`, `open`, `security`, Application Support paths). Runs on the system `/bin/bash` 3.2 and needs `jq`. `fzf` is optional (the picker). `usage` also needs `curl`, `openssl` and the Command Line Tools (`/usr/bin/python3` is their shim; `doctor` checks `xcode-select -p`). The CLI login's Keychain items go through `security` on PATH and nothing else.
 
-Three Raycast script commands in `raycast/` call the tool by name. `bin/claude-multipass --help` is the command reference; `docs/claude-multipass.md` explains the mechanism for users; `docs/research.md` is the scrubbed research the tool was built from.
+Three Raycast script commands in `raycast/` call the tool by name (`CLAUDE_MULTIPASS_BIN` overrides it; the self-check sets it). `bin/claude-multipass --help` is the command reference; `docs/claude-multipass.md` explains the mechanism for users; `docs/research.md` is the scrubbed research the tool was built from.
 
 ## Commands
 
