@@ -186,7 +186,7 @@ check "a mismatched save keeps cli.json" aaaaaaaa-1111 "$(jq -r .oauthAccount.ac
 check "a mismatched save keeps the saved item" at-alpha "$(kc_get claude-multipass alpha | jq -r .claudeAiOauth.accessToken)"
 check_true "save with CLAUDE_CONFIG_DIR skips the CLI login" grep -q 'CLAUDE_CONFIG_DIR is set; the CLI login is not saved or switched' <<< "$(CLAUDE_CONFIG_DIR=/x cda save alpha --no-relaunch 2>&1 > /dev/null)"
 check_true "save with CLAUDE_SECURESTORAGE_CONFIG_DIR skips the CLI login" grep -q 'CLAUDE_SECURESTORAGE_CONFIG_DIR is set; the CLI login is not saved or switched' <<< "$(CLAUDE_SECURESTORAGE_CONFIG_DIR=/x cda save alpha --no-relaunch 2>&1 > /dev/null)"
-check "an empty CLAUDE_SECURESTORAGE_CONFIG_DIR does not block the save" 0 "$(CLAUDE_SECURESTORAGE_CONFIG_DIR='' exit_code cda save alpha --no-relaunch)"
+check "an empty CLAUDE_SECURESTORAGE_CONFIG_DIR does not block the save" 0 "$(CLAUDE_SECURESTORAGE_CONFIG_DIR='' cda save alpha --no-relaunch 2>&1 > /dev/null | grep -c 'CLAUDE_SECURESTORAGE_CONFIG_DIR is set')"
 cp "$tmp/claude-alpha.json" "$tmp/claude.json"
 kc_delete "Claude Code-credentials" "$USER"
 check_true "save warns when the CLI is signed out" grep -q 'signed in as a different account, or signed out' <<< "$(cda save alpha --no-relaunch 2>&1 > /dev/null)"
