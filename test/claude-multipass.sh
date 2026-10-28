@@ -71,6 +71,16 @@ run() {
         sleep 4
         stat -f %m "$SECURITY_HOLD" > "${kc%/*}/lock-mtime-after"
       fi
+      # A read held open, as by a Keychain prompt, for the run lock case: it
+      # marks the hold, then waits until the named file is gone (30 s at most,
+      # so an aborted case never hangs the gate).
+      if [[ -n ${SECURITY_WAIT:-} && $s == 'Claude Code-credentials' ]]; then
+        touch "$SECURITY_WAIT.held"
+        for ((w = 0; w < 300; w++)); do
+          [[ -e $SECURITY_WAIT ]] || break
+          /bin/sleep 0.1
+        done
+      fi
       [[ -f $kc/$s/$a ]] || { echo "security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain." >&2; return 44; }
       # Like the real tool: a value with any non-printable byte (a newline) prints as hex.
       if [[ -n $want_w ]]; then
@@ -114,6 +124,16 @@ export PATH="$tmp/bin:$PATH"
 export CLAUDE_CLI_CONFIG="$tmp/claude.json" CLAUDE_CLI_HOME="$tmp/claude-home" CLAUDE_MULTIPASS_BIN="$script"
 mkdir -p "$tmp/claude-home"
 cda() { "$script" "$@"; }
+# jq and cat that log their stdin's file type. bash 3.2 backs a here-string
+# with a regular temp file on disk, a pipe is a FIFO, so a token sent to them
+# through a here-string shows as "Regular File". Each drops its own dir from
+# PATH before exec, since a version-manager shim looks the tool up on PATH again.
+mkdir -p "$tmp/stdin-bin"
+for tool in jq cat; do
+  printf '#!/bin/sh\necho "%s $(stat -Lf %%HT /dev/stdin)" >> "%s/stdin-types"\nPATH=${PATH#*/stdin-bin:} exec %s "$@"\n' "$tool" "$tmp" "$tool" > "$tmp/stdin-bin/$tool"
+done
+chmod +x "$tmp"/stdin-bin/*
+cda_stdin() { PATH="$tmp/stdin-bin:$PATH" "$script" "$@" < /dev/null; }
 pkg_version=$(jq -r .version "$(dirname "$script")/../package.json")
 
 check() {
@@ -590,6 +610,54 @@ check "Raycast switch ends with a toast line" "Switched to alpha" "$("$raycast/s
 check "and ran the checkout, whose CLI write reached the stub" 1 "$(grep -c '^stdin add-generic-password -U -a "'"$USER"'" -s "Claude Code-credentials"' "$tmp/security-calls")"
 cda switch beta --no-relaunch > /dev/null 2>&1
 
+# No token reaches jq or cat (keychain_put's reader) through a here-string's temp file
+: > "$tmp/stdin-types"
+cda_stdin switch alpha --no-relaunch > /dev/null 2>&1
+cda_stdin switch beta --no-relaunch > /dev/null 2>&1
+cda_stdin rename beta beta2 > /dev/null
+cda_stdin rename beta2 beta > /dev/null
+check "a switch and a rename pass the CLI login through pipes" 0 "$(grep -c 'Regular File' "$tmp/stdin-types" || true)"
+check_true "and the log saw those pipes" grep -q '^cat Fifo File' "$tmp/stdin-types"
+check "the script has no here-string, and one heredoc (the --help page)" 1 "$(grep -c '<<' "$script" || true)"
+
+# Two runs at once: the second refuses before it quits Desktop, so its EXIT
+# trap never relaunches Desktop while the first still writes config.json.
+touch "$tmp/wait"
+rm -f "$tmp/calls" "$tmp/wait.held"
+SECURITY_WAIT=$tmp/wait "$script" switch alpha > /dev/null 2>&1 &
+first=$!
+for ((i = 0; i < 100; i++)); do
+  [[ ! -e $tmp/wait.held ]] || break
+  /bin/sleep 0.1
+done
+check_true "the first run waits on the Keychain" test -e "$tmp/wait.held"
+rc=0
+err=$(cda switch beta 2>&1 > /dev/null) || rc=$?
+check "a second run refuses while the first works" 1 "$rc"
+check_true "and names the first run" grep -q "Another claude-multipass run (pid $first) is changing accounts" <<< "$err"
+check_true "and neither quits nor relaunches Desktop" test ! -e "$tmp/calls"
+rm "$tmp/wait"
+rc=0
+wait "$first" || rc=$?
+check "the first run completes" 0 "$rc"
+check "and relaunches Desktop once" "open -a Claude" "$(cat "$tmp/calls")"
+check "and switched" aaaaaaaa-1111 "$(jq -r .lastKnownAccountUuid "$d/config.json")"
+check_true "and released the run lock" test ! -L "$CLAUDE_MULTIPASS_DIR/.run.lock"
+# A lock whose holder is gone (killed without its trap), or whose pid now
+# belongs to another program, is swept.
+sh -c 'exit 0' &
+dead=$!
+wait "$dead"
+ln -s "$dead" "$CLAUDE_MULTIPASS_DIR/.run.lock"
+check "a dead holder's run lock does not block" 0 "$(exit_code cda switch beta --no-relaunch)"
+check_true "and is gone afterwards" test ! -L "$CLAUDE_MULTIPASS_DIR/.run.lock"
+/bin/sleep 30 > /dev/null 2>&1 &
+other=$!
+ln -s "$other" "$CLAUDE_MULTIPASS_DIR/.run.lock"
+check "a pid reused by another program does not block" 0 "$(exit_code cda switch beta --no-relaunch)"
+kill "$other"
+rm -f "$tmp/calls"
+
 # Run from a shell inside Desktop (the Code tab's terminal): BSD pgrep excludes
 # its own ancestors, so plain pgrep says "not running" while pgrep -a finds it.
 printf '#!/bin/sh\ncase "$1" in -a*) exit 0 ;; esac\nexit 1\n' > "$tmp/bin/pgrep"
@@ -657,6 +725,27 @@ cda rename home2 home > /dev/null
 cda rename legacy2 legacy > /dev/null
 check "rename onto an existing name fails" 1 "$(exit_code cda rename home beta)"
 check "rename needs two names" 1 "$(exit_code cda rename home)"
+# Each argument error exits 1 and names itself; err_of keeps only stderr.
+err_of() { { TERM=dumb "$@" > /dev/null; } 2>&1 || true; }
+check "an unknown option fails" 1 "$(exit_code cda list --bogus)"
+check "and names it" "Unknown option: --bogus" "$(err_of cda list --bogus)"
+check "a name with a leading - is read as an option" "Unknown option: -x" "$(err_of cda show -x)"
+check "usage takes at most one name" "usage takes at most one name" "$(err_of cda usage a b)"
+check "show with no name fails" 1 "$(exit_code cda show)"
+check "and says it takes one" "show takes exactly one name" "$(err_of cda show)"
+check "switch with no name says it takes one" "switch takes exactly one name" "$(err_of cda switch --no-relaunch)"
+check "rename with three names fails" "rename takes the old name and the new name" "$(err_of cda rename a b c)"
+bad='Give a name made of letters, digits, . _ - (got: a/b)'
+check "show refuses a name with a slash" "$bad" "$(err_of cda show a/b)"
+check "usage refuses it" "$bad" "$(err_of cda usage a/b)"
+check "rename refuses it as the old name" "$bad" "$(err_of cda rename a/b ok)"
+check "and as the new name" "$bad" "$(err_of cda rename home a/b)"
+check "show refuses .." 'Give a name made of letters, digits, . _ - (got: ..)' "$(err_of cda show ..)"
+check "a run without Desktop's config fails" 1 "$(CLAUDE_DESKTOP_DIR="$tmp/no-desktop" exit_code cda list)"
+check "and says to open Desktop once" "No $tmp/no-desktop/config.json: open Claude Desktop once first" "$(CLAUDE_DESKTOP_DIR="$tmp/no-desktop" err_of cda list)"
+mkdir -p "$tmp/no-fzf"
+ln -s "$(command -v jq)" "$tmp/no-fzf/jq"
+check "pick without fzf fails" "pick needs fzf" "$(PATH="$tmp/no-fzf:/usr/bin:/bin" err_of cda pick)"
 check "remove moves the profile to backups" 1 "$(
   cda remove home > /dev/null
   find "$b" -maxdepth 1 -name 'profile-home-*' | wc -l | tr -d ' '
@@ -888,6 +977,10 @@ enc=$(encrypt "${plain//FUTURE/$future}")
 jq -n --arg v "$enc" '{"oauth:tokenCacheV2":$v,"lastKnownAccountUuid":"vvvvvvvv-1"}' > "$d/config.json"
 check "usage adds a (signed in) row for an unsaved live login" "(signed in)      $expected" "$(cda usage | grep '^(signed in) ')"
 check "but not when one name is asked for" 0 "$(cda usage usagey | grep -c '^(signed in)' || true)"
+: > "$tmp/stdin-types"
+cda_stdin usage > /dev/null
+check "usage passes the decrypted token cache to jq through a pipe" 0 "$(grep -c 'Regular File' "$tmp/stdin-types" || true)"
+check_true "and the log saw jq read a pipe" grep -q '^jq Fifo File' "$tmp/stdin-types"
 cp "$tmp/config-saved-live" "$d/config.json"
 
 # the dotfiles-era store moves into the default location once, backups too
