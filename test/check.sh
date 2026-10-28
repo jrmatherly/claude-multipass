@@ -15,7 +15,7 @@ cd "$(dirname "$0")/.."
 PATH=$PWD/node_modules/.bin:$PATH
 
 shell_scripts=(
-  bin/claude-multipass
+  bin/*
   test/*.sh
   .claude/hooks/*.sh
   raycast/*.sh
@@ -47,10 +47,9 @@ swift test --package-path app > "$swift_log" 2>&1 || {
 }
 rm -f "$swift_log"
 # the Claude Code hooks against sample payloads, and their wiring
-bash .claude/hooks/test-lint-edited.sh > /dev/null
-bash .claude/hooks/test-lint-bash-edits.sh > /dev/null
-bash .claude/hooks/test-commit-gate.sh > /dev/null
-bash .claude/hooks/test-settings.sh > /dev/null
+for hook_check in .claude/hooks/test-*.sh; do
+  bash "$hook_check" > /dev/null
+done
 # Every bin/ file has a comment on line 2
 for file in bin/*; do
   sed -n 2p "$file" | grep -q '^#' || {

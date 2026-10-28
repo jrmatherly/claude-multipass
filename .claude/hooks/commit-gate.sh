@@ -1,6 +1,7 @@
 #!/bin/bash
 #
-# Claude Code PreToolUse hook (Bash): before a `git commit`, run `pnpm check`
+# Claude Code PreToolUse hook (Bash): before a `git commit`, or the
+# `--continue` of a merge, cherry-pick, revert, rebase or am, run `pnpm check`
 # in the repo the commit targets and block the call (exit 2, the check's tail
 # on stderr) when it fails. When it passes but bin/claude-multipass changed
 # with no README.md or docs/ change, it tells Claude so through
@@ -28,27 +29,59 @@ enter() {
   esac
 }
 
-# A segment is a commit when its command word, after NAME=value prefixes and
-# wrappers such as env or time, is git and its subcommand (the first word
+# A segment is a commit when its command word, after NAME=value prefixes,
+# options and keywords such as then, is git and its subcommand (the first word
 # after git's own options) is commit, or the --continue of a command whose
 # conflicts were just resolved: the gate runs before the command, so for a
-# plain merge or rebase the tree to check is not on disk yet. dir follows
-# each `cd <dir>` segment; a commit's `git -C <dir>` moves only that segment's
-# target
+# plain merge or rebase the tree to check is not on disk yet. After a wrapper
+# such as env, sudo or nice, every word up to a git or cd is skipped, since an
+# option's value (nice -n 10, sudo -u root) cannot be told from a command; a
+# wrapper that runs something else with git commit as its arguments is gated
+# too, which costs only a check. dir follows each `cd <dir>` segment until the
+# subshell it ran in closes; a commit's `git -C <dir>` moves only that
+# segment's target. Known misses: git -C "$(...)" commit, sudo -u git git
+# commit, and a cd inside backticks, which is not undone when they close
 is_commit() {
-  local seg w first prev gitdir sub cddir
+  local seg w first prev gitdir sub cddir wrapped depth=0
+  local -a saved
   cddir=$cwd
   while IFS= read -r seg; do
+    case $seg in
+      '(')
+        depth=$((depth + 1))
+        saved[depth]=$cddir
+        continue
+        ;;
+      ')')
+        if ((depth)); then
+          cddir=${saved[depth]}
+          depth=$((depth - 1))
+        fi
+        continue
+        ;;
+    esac
     first=""
     prev=""
     sub=""
+    wrapped=""
     gitdir=$cddir
     for w in $seg; do
       if [ -z "$first" ]; then
         [[ $w =~ ^[A-Za-z_][A-Za-z0-9_]*= || $w == -* ]] && continue
-        case ${w##*/} in env | command | builtin | exec | nohup | time | nice | bash | sh | zsh) continue ;; esac
-        first=${w##*/}
-        [ "$first" = git ] || [ "$first" = cd ] || break
+        case ${w##*/} in
+          # Wrappers that run the words after them as the command
+          env | command | builtin | exec | nohup | time | nice | sudo | xargs | bash | sh | zsh)
+            wrapped=1
+            continue
+            ;;
+          # Shell keywords that a command can follow
+          if | then | elif | else | do | while | until | !) continue ;;
+          git | cd) first=${w##*/} ;;
+          *)
+            [ -n "$wrapped" ] && continue
+            break
+            ;;
+        esac
       elif [ "$first" = cd ]; then
         enter "$w" "$cddir"
         cddir=$dir
@@ -77,8 +110,10 @@ is_commit() {
       fi
       prev=$w
     done
-    # Quotes dropped, so `bash -c "git commit"` reads as a commit
-  done < <(sed -E "s/(&&|\|\||;|\|)/\n/g; s/[\"']//g" <<< "$1")
+    # Split at every list operator, group and command substitution, with each
+    # subshell paren on a line of its own; quotes dropped, so
+    # `bash -c "git commit"` reads as a commit
+  done < <(sed -E "s/[;&|{}\`]/\n/g; s/[()]/\n&\n/g; s/[\"']//g" <<< "$1")
   return 1
 }
 

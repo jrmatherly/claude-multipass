@@ -66,14 +66,17 @@ for c in 'git -C . commit --amend' 'git -c commit.gpgsign=false commit' '/usr/bi
   'env git commit -m x' 'env -i GIT_EDITOR=true git commit' 'command git commit -m x' 'time git commit -m x' 'nohup git commit -m x' 'git --no-pager commit -m x' \
   'bash -c "git commit -m x"' "sh -c 'git commit'" \
   'git merge --continue' 'git cherry-pick --continue' 'git revert --continue' 'git rebase --continue' 'git am --continue' \
-  "git -C $other status; git commit -m x"; do
+  "git -C $other status; git commit -m x" '( git commit -m x )' 'true & git commit -m x' 'if true; then git commit -m x; fi' \
+  '{ git commit -m x; }' 'echo $(git commit -m x)' 'echo `git commit -m x`' 'sudo git commit -m x' 'sudo -u root git commit' 'sudo -n -u root git commit' 'xargs git commit' \
+  'nice -n 10 git commit' "(cd $other && ls); git commit -m x"; do
   rm -f "$STATE/check-ran"
   run "$c"
   [ -e "$STATE/check-ran" ] || fail "not gated: $c"
 done
 # 4. mentions of the word do not gate, nor do commands whose commit tree is not on disk yet
 for c in 'pre-commit run' 'echo "git commit"' 'git commit-tree HEAD^{tree}' 'git log --grep commit' 'git show commit' 'git -c commit.gpgsign=false log' \
-  'git merge feature' 'git merge --abort' 'git rebase main' 'git cherry-pick abc' 'git revert HEAD' 'git pull'; do
+  'git merge feature' 'git merge --abort' 'git rebase main' 'git cherry-pick abc' 'git revert HEAD' 'git pull' \
+  'sudo git log --grep commit'; do
   rm -f "$STATE/check-ran"
   run "$c"
   [ ! -e "$STATE/check-ran" ] || fail "wrongly gated: $c"
