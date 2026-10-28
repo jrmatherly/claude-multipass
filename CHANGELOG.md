@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.1 (2026-10-27)
+
+- The Settings About tab's documentation link reads "Open on GitHub" with an outward arrow instead of the file name `claude-multipass.md`.
+
 ## 0.5.0 (2026-10-27)
 
 - The menu bar app is redesigned. The strip is one line: a ring filled to the fuller of the 5-hour and weekly limits (orange from 70 %, red from 90 %), the account name and the percentage, or the ring or name alone. The popover leads with the signed-in account's two usage bars, reset times and when usage was last fetched, then a "Switch to" list with each account's weekly figure, in the tool's order with no ranking. Settings has General, Menu Bar, Usage and About tabs, and the tool path field appears only for a custom location. Quit moves to the right-click menu. Saved settings carry over: any usage cell on becomes the ring style, otherwise name only.
