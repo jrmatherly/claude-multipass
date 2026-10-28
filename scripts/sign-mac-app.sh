@@ -3,7 +3,8 @@
 # Copied from jrmatherly/ai-kb (scripts/sign-mac-app.sh), with MACOS_SIGN_ENTITLEMENTS added.
 # The only place the repository calls codesign, notarytool or stapler.
 #
-#   sign-mac-app.sh sign-app <App.app>   sign with the hardened runtime and verify
+#   sign-mac-app.sh sign-app <App.app>   sign with the hardened runtime and verify, then notarize,
+#                                        staple and assess with spctl
 #   sign-mac-app.sh sign-dmg <file.dmg>  sign, then notarize, staple and assess with spctl
 #
 # Environment, all optional:
@@ -14,14 +15,15 @@
 #                         an entitlements plist passed to codesign by sign-app
 #   APPLE_API_KEY_ID, APPLE_API_ISSUER_ID, APPLE_API_KEY_P8
 #                         App Store Connect API key (P8 = the .p8 file contents); all three or none.
-#                         Only sign-dmg notarizes: the ticket covers the app inside the image.
+#                         Both modes notarize: a ticket stapled to the DMG stays on the DMG, so an
+#                         app copied out of it needs its own for an offline first launch.
 #
 # State                                   sign   notarize + staple + spctl
 # API key partly set                      -      -                           exit 1
 # no identity, nothing requires one       -      -                           exit 0, target left unsigned
 # no identity, required or API key set    -      -                           exit 1
 # identity, API key absent                yes    skipped
-# identity, API key complete              yes    sign-dmg only, fatal when rejected
+# identity, API key complete              yes    yes, fatal when rejected
 set -euo pipefail
 
 usage() {
@@ -97,6 +99,13 @@ case "$mode" in
     [ -z "${MACOS_SIGN_ENTITLEMENTS:-}" ] || entitlements=(--entitlements "$MACOS_SIGN_ENTITLEMENTS")
     codesign --force --options runtime --timestamp ${entitlements[@]+"${entitlements[@]}"} --sign "$identity" "$target"
     codesign --verify --deep --strict --verbose=2 "$target"
+    if [ "$notarize" = 1 ]; then
+      # notarytool takes a zip, not a bundle; the ticket is stapled to the app itself
+      ditto -c -k --keepParent "$target" "$work/app.zip"
+      notarize_file "$work/app.zip"
+      xcrun stapler staple "$target"
+      spctl -a -vv -t exec "$target"
+    fi
     ;;
   sign-dmg)
     codesign --force --timestamp --sign "$identity" "$target"
