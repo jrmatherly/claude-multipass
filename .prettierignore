@@ -12,3 +12,4 @@ private/
 logs/
 .superpowers/
 app/.build/
+.archify/
