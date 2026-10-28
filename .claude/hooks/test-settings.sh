@@ -47,12 +47,47 @@ done < <(jq -r '.hooks[][].hooks[].command' "$settings")
 
 has '[.permissions.allow[], .permissions.ask[]] | all(startswith("Bash("))' \
   "a permissions.allow or ask entry does not start with Bash("
-for prefix in claude-multipass bin/claude-multipass ./bin/claude-multipass; do
-  for cmd in switch add save remove rename sync usage; do
-    jq -e --arg e "Bash($prefix $cmd *)" '.permissions.ask | index($e)' "$settings" > /dev/null \
-      || fail "Bash($prefix $cmd *) is not in permissions.ask"
+# Claude Code's Bash rule match as its docs give it: * is any text, and a
+# trailing " *" that is the rule's only wildcard also matches the bare command.
+# A bare run opens the picker only on a terminal, so its by-path forms are
+# exact rules: *bin/claude-multipass would also ask before a lint of the file
+allow_rules=()
+ask_rules=()
+while IFS= read -r rule; do allow_rules+=("$rule"); done < <(jq -r '.permissions.allow[]' "$settings")
+while IFS= read -r rule; do ask_rules+=("$rule"); done < <(jq -r '.permissions.ask[]' "$settings")
+matches() { # matches <rule...> -- <command>
+  local rule pat cmd=${*: -1}
+  for rule in "${@:1:$#-2}"; do
+    pat=${rule#Bash(}
+    pat=${pat%)}
+    # shellcheck disable=SC2053 # the rule is a glob on purpose
+    [[ $cmd == $pat ]] && return 0
+    [[ $pat == *' *' && ${pat%' *'} != *'*'* && $cmd == "${pat%' *'}" ]] && return 0
+  done
+  return 1
+}
+asks=(claude-multipass bin/claude-multipass ./bin/claude-multipass "bash bin/claude-multipass" "bash test/../bin/claude-multipass switch w" "/opt/homebrew/bin/claude-multipass save --force w"
+  "raycast/switch-claude-account.sh w" "bash raycast/switch-claude-account.sh w"
+  '"/Users/x/bin/claude-multipass" switch w' "bash 'bin/claude-multipass' sync")
+for prefix in claude-multipass bin/claude-multipass ./bin/claude-multipass "bash bin/claude-multipass" "$root/bin/claude-multipass"; do
+  for cmd in switch add save remove rename sync usage pick; do
+    asks+=("$prefix $cmd w")
   done
 done
+for c in "${asks[@]}"; do
+  matches "${ask_rules[@]}" -- "$c" || fail "permissions.ask does not cover: $c"
+done
+for c in "claude-multipass list" "bin/claude-multipass show w" "bash test/claude-multipass.sh" 'git commit -m "claude-multipass add refuses x"' "shellcheck bin/claude-multipass"; do
+  ! matches "${ask_rules[@]}" -- "$c" || fail "permissions.ask covers a read-only command: $c"
+done
+for c in "bash test/../bin/claude-multipass switch w" "bash test/other.sh" ".claude/hooks/test-../../bin/claude-multipass switch w"; do
+  ! matches "${allow_rules[@]}" -- "$c" || fail "permissions.allow covers: $c"
+done
+for f in "$root"/.claude/hooks/test-*.sh; do
+  matches "${allow_rules[@]}" -- ".claude/hooks/${f##*/}" \
+    || fail "permissions.allow misses .claude/hooks/${f##*/} (one rule per file: a test-* glob would also allow .claude/hooks/test-../ paths)"
+done
+matches "${allow_rules[@]}" -- "bash test/claude-multipass.sh" || fail "permissions.allow misses bash test/claude-multipass.sh"
 has '.permissions.allow | index("Bash(pnpm check *)")' "Bash(pnpm check *) is not in permissions.allow"
 has '(.permissions.deny // []) | length == 0' "permissions.deny is not empty"
 

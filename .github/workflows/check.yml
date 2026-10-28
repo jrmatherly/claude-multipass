@@ -17,6 +17,12 @@ jobs:
   check:
     # The tool targets macOS's /bin/bash 3.2, so the check runs there too
     runs-on: macos-26
+    # Runs take 2 to 6 minutes; a hung step should not hold a runner for 6 hours
+    timeout-minutes: 20
+    env:
+      # The one place the CI ShellCheck version is set; bump the digest with it
+      SHELLCHECK_VERSION: 0.11.0
+      SHELLCHECK_SHA256: 56affdd8de5527894dca6dc3d7e0a99a873b0f004d7aabc30ae407d3f48b0a79
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -27,10 +33,12 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: pnpm
-      - run: brew install shellcheck
-        env:
-          HOMEBREW_NO_AUTO_UPDATE: 1
-          HOMEBREW_NO_INSTALL_CLEANUP: 1
-          HOMEBREW_NO_ANALYTICS: 1
+      # The release binary, not brew, so a new ShellCheck warning cannot fail an unchanged tree
+      - run: |
+          tarball=shellcheck-v$SHELLCHECK_VERSION.darwin.aarch64.tar.xz
+          curl -fsSLO "https://github.com/koalaman/shellcheck/releases/download/v$SHELLCHECK_VERSION/$tarball"
+          echo "$SHELLCHECK_SHA256  $tarball" | shasum -a 256 -c
+          tar -xJf "$tarball"
+          echo "$PWD/shellcheck-v$SHELLCHECK_VERSION" >> "$GITHUB_PATH"
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
