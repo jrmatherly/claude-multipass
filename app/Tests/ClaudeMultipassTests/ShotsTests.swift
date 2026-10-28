@@ -51,9 +51,21 @@ private let usageLevels: [(String, String?)] = [
   ("off", nil),
 ]
 
+/// One suite per test target, emptied before each AppState is made, so a run
+/// leaves one plist in ~/Library/Preferences instead of one per test. AppState
+/// reads the store only in its init, on the main actor with no await between
+/// this clear and that read, so tests sharing the suite still start empty.
+@MainActor
+private func scratchDefaults() -> UserDefaults {
+  let suite = "net.matherly.claude-multipass.shots"
+  let defaults = UserDefaults(suiteName: suite)!
+  defaults.removePersistentDomain(forName: suite)
+  return defaults
+}
+
 @MainActor
 private func state(_ runner: FixtureRunner?, style: StripStyle = .ringAndName) async -> AppState {
-  let store = SettingsStore(defaults: UserDefaults(suiteName: "net.matherly.claude-multipass.shots.\(UUID().uuidString)")!)
+  let store = SettingsStore(defaults: scratchDefaults())
   let s = AppState(makeRunner: { _ in runner }, store: store)
   await s.relocate()
   await s.refresh()
