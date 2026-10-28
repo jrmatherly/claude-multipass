@@ -58,7 +58,8 @@ private func decode(_ json: String) throws -> AppSettings {
 }
 
 @Test func roundTripsThroughUserDefaults() throws {
-  let suite = "net.matherly.claude-multipass.tests.\(UUID().uuidString)"
+  // A fixed name per test: a UUID suite leaves an empty plist behind even after removePersistentDomain.
+  let suite = "net.matherly.claude-multipass.tests.roundtrip"
   let defaults = try #require(UserDefaults(suiteName: suite))
   defer { defaults.removePersistentDomain(forName: suite) }
   let store = SettingsStore(defaults: defaults)
@@ -74,7 +75,7 @@ private func decode(_ json: String) throws -> AppSettings {
 }
 
 @Test func stringWrittenByDefaultsCommandLoads() throws {
-  let suite = "net.matherly.claude-multipass.tests.\(UUID().uuidString)"
+  let suite = "net.matherly.claude-multipass.tests.defaults-command"
   let defaults = try #require(UserDefaults(suiteName: suite))
   defer { defaults.removePersistentDomain(forName: suite) }
   defaults.set(#"{"cliPathOverride":"/repo/bin/claude-multipass"}"#, forKey: "settings")
