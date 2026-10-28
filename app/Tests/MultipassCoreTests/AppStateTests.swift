@@ -51,6 +51,41 @@ final class FakeRunner: CommandRunner, @unchecked Sendable {
   }
 }
 
+/// Holds a scripted call until `open`, so a test can act while it is in flight.
+final class Gate: @unchecked Sendable {
+  private let lock = NSLock()
+  private var isOpen = false
+  private var waiters: [CheckedContinuation<Void, Never>] = []
+
+  func wait() async {
+    await withCheckedContinuation { c in
+      lock.lock()
+      if isOpen { lock.unlock(); c.resume(); return }
+      waiters.append(c)
+      lock.unlock()
+    }
+  }
+
+  func open() {
+    lock.lock()
+    isOpen = true
+    let ready = waiters
+    waiters = []
+    lock.unlock()
+    ready.forEach { $0.resume() }
+  }
+}
+
+@MainActor
+private func until(_ condition: () -> Bool) async {
+  for _ in 0..<10_000 {
+    if condition() { break }
+    await Task.yield()
+  }
+  #expect(condition())
+}
+
+private let snapshotAlpha = #"{"version":"0.2.0","signedIn":true,"desktopRunning":false,"current":"alpha","profiles":[{"name":"alpha","account":"a","savedAt":"2026-01-01T00:00:00Z","sessions":1},{"name":"beta","account":"b","savedAt":"2026-01-01T00:00:00Z","sessions":4}]}"#
 private let snapshotBeta = #"{"version":"0.2.0","signedIn":true,"desktopRunning":false,"current":"beta","profiles":[{"name":"alpha","account":"a","savedAt":"2026-01-01T00:00:00Z","sessions":1},{"name":"beta","account":"b","savedAt":"2026-01-01T00:00:00Z","sessions":4}]}"#
 private let snapshotUnsaved = #"{"version":"0.2.0","signedIn":true,"desktopRunning":false,"current":null,"profiles":[{"name":"alpha","account":"a","savedAt":"2026-01-01T00:00:00Z","sessions":1}]}"#
 private let usageBoth = #"{"profiles":[{"name":"alpha","fiveHour":{"utilization":10}},{"name":"beta","fiveHour":{"utilization":42.6,"resetsAt":"2026-10-23T19:45:00Z"},"sevenDay":{"utilization":18}}]}"#
@@ -268,6 +303,7 @@ private func enabledUsage(_ s: AppState) -> AppSettings {
   await s.switchTo("alpha")
   #expect(s.rowError?.refused == false)
   #expect(s.rowError?.message.isEmpty == false)
+  #expect(r.calls.last == ["list", "--json"])
 }
 
 @Test @MainActor func switchAnywayPassesForce() async {
@@ -436,4 +472,66 @@ private func enabledUsage(_ s: AppState) -> AppSettings {
   await s.apply(enabledUsage(s))
   s.stop()
   #expect(!s.isPollingUsage)
+}
+
+@Test @MainActor func usageTurnedOffDuringFirstFetchShowsNothing() async {
+  for failure in [nil, CLIError.timedOut] {
+    let (s, r) = await readyState()
+    if let failure { r.fail("usage", failure) }
+    let gate = Gate()
+    r.onCall = { args in if args[0] == "usage" { await gate.wait() } }
+    let turningOn = Task { await s.apply(enabledUsage(s)) }
+    await until { r.calls.count == 1 }
+    var off = s.settings
+    off.usageEnabled = false
+    await s.apply(off)
+    gate.open()
+    await turningOn.value
+    #expect(s.usage.isEmpty)
+    #expect(s.lastError == nil)
+    #expect(!s.isPollingUsage)
+  }
+}
+
+@Test @MainActor func overlappingUsageRefreshesRunOnce() async {
+  let (s, r) = await readyState()
+  await s.apply(enabledUsage(s))
+  r.clearCalls()
+  let gate = Gate()
+  r.onCall = { _ in await gate.wait() }
+  let first = Task { await s.refreshUsage() }
+  await until { r.calls.count == 1 }
+  await s.refreshUsage()
+  gate.open()
+  await first.value
+  #expect(r.calls == [["usage", "--json"]])
+}
+
+@Test @MainActor func refreshesWaitOutASwitch() async {
+  let (s, r) = await readyState()
+  await s.apply(enabledUsage(s))
+  r.clearCalls()
+  let gate = Gate()
+  r.onCall = { args in if args[0] == "switch" { await gate.wait() } }
+  let switching = Task { await s.switchTo("alpha") }
+  await until { s.phase == .switching("alpha") && r.calls.count == 1 }
+  await s.refreshAll()
+  #expect(r.calls == [["switch", "alpha"]])
+  gate.open()
+  await switching.value
+  #expect(r.calls == [["switch", "alpha"], ["list", "--json"]])
+}
+
+@Test @MainActor func refreshInFlightWhenASwitchFinishesRunsAgain() async {
+  let (s, r) = await readyState()
+  let gate = Gate()
+  r.onCall = { args in if args[0] == "list" { await gate.wait() } }
+  let tick = Task { await s.refresh() }
+  await until { r.calls.count == 1 }
+  r.answer("list", snapshotAlpha)
+  await s.switchTo("alpha")
+  gate.open()
+  await tick.value
+  #expect(s.snapshot?.current == "alpha")
+  #expect(r.calls == [["list", "--json"], ["switch", "alpha"], ["list", "--json"]])
 }
