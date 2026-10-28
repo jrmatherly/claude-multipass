@@ -60,6 +60,7 @@ public final class AppState: ObservableObject {
   private let now: () -> Date
   private var runner: CommandRunner?
   private var probeGeneration = 0
+  private var reloadPending = false
   private var mainTask: Task<Void, Never>?
   private var snapshotTask: Task<Void, Never>?
   private var usageTask: Task<Void, Never>?
@@ -83,7 +84,7 @@ public final class AppState: ObservableObject {
     switch (old.usageEnabled, new.usageEnabled) {
     case (false, true):
       await refreshUsage()
-      startUsageTimer()
+      if settings.usageEnabled { startUsageTimer() }
     case (true, false):
       usageTask?.cancel()
       usageTask = nil
@@ -114,33 +115,46 @@ public final class AppState: ObservableObject {
     cliStatus = status
   }
 
+  /// Skipped while a switch or save rewrites `config.json`; `act` loads the
+  /// snapshot once it finishes.
   public func refresh() async {
-    guard !isRefreshing else { return }
-    isRefreshing = true
-    defer { isRefreshing = false }
-    // Not ready: re-probe first, so a brew upgrade or a path fix is picked
-    // up without a relaunch, then carry on when it answered.
-    if case .ready = cliStatus {} else { await relocate() }
-    guard case .ready = cliStatus, let runner else { return }
-    do {
-      let data = try await runner.run(["list", "--json"])
-      snapshot = try decode(Snapshot.self, data)
-      snapshotError = nil
-    } catch {
-      snapshotError = describe(error)
-    }
+    guard phase == .idle, !isRefreshing else { return }
+    await loadSnapshot()
   }
 
+  private func loadSnapshot() async {
+    isRefreshing = true
+    defer { isRefreshing = false }
+    repeat {
+      reloadPending = false
+      // Not ready: re-probe first, so a brew upgrade or a path fix is picked
+      // up without a relaunch, then carry on when it answered.
+      if case .ready = cliStatus {} else { await relocate() }
+      guard case .ready = cliStatus, let runner else { return }
+      do {
+        let data = try await runner.run(["list", "--json"])
+        snapshot = try decode(Snapshot.self, data)
+        snapshotError = nil
+      } catch {
+        snapshotError = describe(error)
+      }
+    } while reloadPending
+  }
+
+  /// Usage can be turned off while a fetch waits on a Keychain prompt (up to
+  /// 10 minutes), so its result is dropped unless usage is still on.
   public func refreshUsage() async {
-    guard settings.usageEnabled, case .ready = cliStatus, let runner, !isRefreshingUsage else { return }
+    guard settings.usageEnabled, phase == .idle, case .ready = cliStatus, let runner, !isRefreshingUsage else { return }
     isRefreshingUsage = true
     defer { isRefreshingUsage = false }
     do {
       let data = try await runner.run(["usage", "--json"])
+      guard settings.usageEnabled else { return }
       let report = try decode(UsageReport.self, data)
       usage = Dictionary(report.profiles.map { ($0.name, $0) }, uniquingKeysWith: { _, last in last })
       usageError = nil
     } catch {
+      guard settings.usageEnabled else { return }
       // Old figures would read as current; the error says why they are gone.
       usage = [:]
       usageError = describe(error)
@@ -198,10 +212,11 @@ public final class AppState: ObservableObject {
       rowError = RowError(name: name, message: message, refused: true)
       return
     } catch {
+      // A failure, unlike a refusal, may come after Desktop quit and relaunched.
       rowError = RowError(name: name, message: describe(error), refused: false)
-      return
     }
-    await refresh()
+    // A load that started before the switch read the old login; run again after it.
+    if isRefreshing { reloadPending = true } else { await loadSnapshot() }
   }
 
   private func startSnapshotTimer() {
