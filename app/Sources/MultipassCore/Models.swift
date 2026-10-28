@@ -90,6 +90,18 @@ public struct UsageEntry: Decodable, Equatable, Identifiable {
   }
 }
 
+extension UsageEntry {
+  /// The fuller window, named for display; the weekly one on a tie, since it takes longer to clear.
+  public var peak: (window: String, utilization: Double)? {
+    switch (fiveHour?.utilization, sevenDay?.utilization) {
+    case let (five?, seven?): return five > seven ? ("5-hour", five) : ("weekly", seven)
+    case let (five?, nil): return ("5-hour", five)
+    case let (nil, seven?): return ("weekly", seven)
+    case (nil, nil): return nil
+    }
+  }
+}
+
 public struct UsageWindow: Decodable, Equatable {
   public var utilization: Double
   public var resetsAt: Date?

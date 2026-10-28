@@ -9,7 +9,7 @@ final class PopoverController {
   private let appState: AppState
   private let popover = NSPopover()
 
-  init(appState: AppState, openSettings: @escaping () -> Void) {
+  init(appState: AppState, openSettings: @escaping (SettingsPane?) -> Void) {
     self.appState = appState
     popover.behavior = .transient
     popover.animates = false

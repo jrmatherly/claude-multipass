@@ -1,0 +1,165 @@
+import AppKit
+import Foundation
+import MultipassCore
+import SwiftUI
+import Testing
+
+@testable import ClaudeMultipass
+
+/// Renders the strip, the popover and each settings tab to PNGs in light and
+/// dark, from fixture state. Runs only with UI_SHOTS_DIR set:
+/// `UI_SHOTS_DIR=/tmp/shots swift test --package-path app --filter Shots`.
+private let shotsDir = ProcessInfo.processInfo.environment["UI_SHOTS_DIR"]
+
+private struct FixtureRunner: CommandRunner {
+  var usage: String?
+  var usageFails = false
+  var switchHangs = false
+  var switchRefusal: String?
+  var location: String? { "/opt/homebrew/bin/claude-multipass" }
+
+  func runCapturing(_ args: [String]) async throws -> CommandOutput {
+    func out(_ text: String) -> CommandOutput { CommandOutput(stdout: Data(text.utf8), stderr: "") }
+    switch args[0] {
+    case "--version": return out("claude-multipass 0.4.0\n")
+    case "list": return out(snapshot)
+    case "usage":
+      if usageFails { throw CLIError.timedOut }
+      return out(usage ?? #"{"profiles":[]}"#)
+    case "switch":
+      if switchHangs { try await Task.sleep(nanoseconds: 3_600_000_000_000) }
+      if let switchRefusal { throw CLIError.refused(switchRefusal) }
+      return out("")
+    default: throw CLIError.failed(status: 1, stderr: "unscripted \(args)")
+    }
+  }
+}
+
+private let snapshot = #"{"version":"0.4.0","signedIn":true,"desktopRunning":true,"current":"matherly-gmail","profiles":[{"name":"matherly-gmail","account":"a","savedAt":null,"sessions":3,"cliSaved":true},{"name":"work","account":"b","savedAt":null,"sessions":9,"cliSaved":false},{"name":"max-plan","account":"c","savedAt":null,"sessions":1,"cliSaved":true}]}"#
+
+private func usageJSON(five: Double, seven: Double) -> String {
+  let iso = ISO8601DateFormatter()
+  let fiveReset = iso.string(from: Date().addingTimeInterval(2 * 3600 + 14 * 60 + 30))
+  let sevenReset = iso.string(from: Date().addingTimeInterval(3 * 86400 + 3600))
+  return #"{"profiles":[{"name":"matherly-gmail","fiveHour":{"utilization":\#(five),"resetsAt":"\#(fiveReset)"},"sevenDay":{"utilization":\#(seven),"resetsAt":"\#(sevenReset)"}},{"name":"work","fiveHour":{"utilization":4},"sevenDay":{"utilization":12}},{"name":"max-plan","fiveHour":{"utilization":20},"sevenDay":{"utilization":81}}]}"#
+}
+
+private let usageLevels: [(String, String?)] = [
+  ("normal", usageJSON(five: 38, seven: 52)),
+  ("warning", usageJSON(five: 38, seven: 73.4)),
+  ("danger", usageJSON(five: 94, seven: 73.4)),
+  ("off", nil),
+]
+
+@MainActor
+private func state(_ runner: FixtureRunner?, style: StripStyle = .ringAndName) async -> AppState {
+  let store = SettingsStore(defaults: UserDefaults(suiteName: "net.matherly.claude-multipass.shots.\(UUID().uuidString)")!)
+  let s = AppState(makeRunner: { _ in runner }, store: store)
+  await s.relocate()
+  await s.refresh()
+  var settings = s.settings
+  settings.stripStyle = style
+  settings.usageEnabled = runner?.usage != nil || runner?.usageFails == true
+  await s.apply(settings)
+  s.stop()
+  return s
+}
+
+@MainActor
+private func write(_ view: NSView, _ name: String) throws {
+  view.layoutSubtreeIfNeeded()
+  let rep = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+  view.cacheDisplay(in: view.bounds, to: rep)
+  let png = try #require(rep.representation(using: .png, properties: [:]))
+  try png.write(to: URL(fileURLWithPath: shotsDir!).appendingPathComponent(name + ".png"))
+}
+
+@MainActor
+private func render(_ view: some View, _ name: String, background: NSColor = .windowBackgroundColor) throws {
+  for dark in [false, true] {
+    let host = NSHostingView(rootView: view.background(Color(nsColor: background)))
+    let appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+    host.appearance = appearance
+    host.frame = CGRect(origin: .zero, size: host.fittingSize)
+    let window = NSWindow(contentRect: host.frame, styleMask: .borderless, backing: .buffered, defer: false)
+    window.appearance = appearance
+    window.contentView = host
+    try write(host, name + (dark ? "-dark" : "-light"))
+  }
+}
+
+@MainActor
+private func menuBar(_ view: some View) -> some View {
+  view.padding(.horizontal, 10).padding(.vertical, 3).background(Color(nsColor: .controlBackgroundColor).opacity(0.6))
+}
+
+@Suite(.enabled(if: shotsDir != nil)) @MainActor struct Shots {
+  @Test func strip() async throws {
+    for style in StripStyle.allCases {
+      for (level, usage) in usageLevels {
+        let s = await state(FixtureRunner(usage: usage), style: style)
+        try render(menuBar(StripView(appState: s)), "strip-\(style.rawValue)-\(level)")
+      }
+    }
+    try render(menuBar(StripView(appState: await state(nil))), "strip-cli-missing")
+  }
+
+  @Test func popover() async throws {
+    for (level, usage) in usageLevels where level != "warning" {
+      let s = await state(FixtureRunner(usage: usage))
+      try render(PopoverView(appState: s, openSettings: { _ in }, close: {}), "popover-usage-\(level)")
+    }
+
+    let switching = await state(FixtureRunner(usage: usageLevels[0].1, switchHangs: true))
+    Task { await switching.switchTo("work") }
+    while switching.phase == .idle { await Task.yield() }
+    try render(PopoverView(appState: switching, openSettings: { _ in }, close: {}), "popover-switching")
+
+    let refused = await state(FixtureRunner(usage: usageLevels[0].1, usageFails: true, switchRefusal: "refusing to switch: the signed-in login was never saved (claude-multipass save <name>), or --force"))
+    await refused.switchTo("work")
+    try render(PopoverView(appState: refused, openSettings: { _ in }, close: {}), "popover-error")
+
+    try render(PopoverView(appState: await state(nil), openSettings: { _ in }, close: {}), "popover-cli-missing")
+  }
+
+  @Test func settings() async throws {
+    _ = NSApplication.shared
+    let s = await state(FixtureRunner(usage: usageLevels[1].1))
+    var custom = s.settings
+    custom.cliPathOverride = "/Users/me/dev/claude-multipass/bin/claude-multipass"
+    for (suffix, settings) in [("", s.settings), ("-custom", custom)] {
+      await s.apply(settings)
+      for dark in [false, true] {
+        let controller = SettingsWindowController(appState: s)
+        controller.window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+        for pane in SettingsPane.allCases where suffix.isEmpty || pane == .general {
+          controller.show(pane: pane)
+          try await Task.sleep(nanoseconds: 400_000_000)
+          #expect(!(controller.window.firstResponder is NSText), "the path field took focus on open")
+          let frame = try #require(controller.window.contentView?.superview)
+          try write(frame, "settings-\(pane.title.lowercased().replacingOccurrences(of: " ", with: "-"))\(suffix)-\(dark ? "dark" : "light")")
+        }
+        if !suffix.isEmpty {
+          let tabs = try #require(controller.window.contentViewController as? NSTabViewController)
+          controller.show(pane: .usage)
+          tabs.selectedTabViewItemIndex = SettingsPane.general.rawValue
+          try await Task.sleep(nanoseconds: 400_000_000)
+          #expect(!(controller.window.firstResponder is NSText), "the path field took focus on a tab switch")
+        }
+        controller.window.close()
+      }
+    }
+
+    await s.apply(AppSettings())
+    let controller = SettingsWindowController(appState: s)
+    controller.window.appearance = NSAppearance(named: .aqua)
+    controller.show(pane: .general)
+    try await Task.sleep(nanoseconds: 400_000_000)
+    let before = controller.window.frame.height
+    await s.apply(custom)
+    try await Task.sleep(nanoseconds: 400_000_000)
+    #expect(controller.window.frame.height > before, "the General tab did not grow for the path field")
+    try write(try #require(controller.window.contentView?.superview), "settings-general-grown-light")
+    controller.window.close()
+  }
+}

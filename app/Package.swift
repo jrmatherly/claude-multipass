@@ -8,6 +8,7 @@ let package = Package(
     .target(name: "MultipassCore"),
     .executableTarget(name: "ClaudeMultipass", dependencies: ["MultipassCore"]),
     .testTarget(name: "MultipassCoreTests", dependencies: ["MultipassCore"]),
+    .testTarget(name: "ClaudeMultipassTests", dependencies: ["ClaudeMultipass", "MultipassCore"]),
   ],
   swiftLanguageVersions: [.v5]
 )
