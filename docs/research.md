@@ -103,7 +103,7 @@ Cloned and source-read 2026-10-23, none executed.
 
 ## 7. Future enhancement ideas (not built)
 
-- A lock against concurrent runs; `--dry-run`; account names or emails in `list` (needs decrypting; today only the UUID prefix shows).
+- `--dry-run`; account names or emails in `list` (needs decrypting; today only the UUID prefix shows).
 - Sync Desktop projects (`local-agent-mode-sessions/<account>/<org>/spaces.json`, minus the org-bound `projects` and `migration` keys), the per-org `archived-sessions.idx` and `scheduled-tasks.json`, so copied sessions keep their grouping, archived state and scheduled tasks.
 - Install and configure obra/episodic-memory for recall.
 - Optional claude-swap one-shot commands as shell aliases for the CLI side.
