@@ -48,7 +48,7 @@ The verified Desktop and CLI internals, with evidence labels, are in `.claude/ru
 - Prettier with `prettier-plugin-sh` (`prettier.config.cjs`: `singleQuote`, `semi: false`; Markdown `printWidth: 70`, `proseWrap: never`). ShellCheck at `--severity=warning` with `check-unassigned-uppercase` (`.shellcheckrc`). `.prettierignore` skips `CLAUDE.md`, `.serena/`, `private/`, `.remember/`, `logs/`, `.claude/settings.local.json`, `.superpowers/` and `app/.build/`; don't hand-format them.
 - Prose, in docs, comments and replies: no em-dashes, short declarative sentences, sentence-case headings, straight quotes, facts and paths over adjectives.
 - Commit subjects are short, imperative, sentence case, with no conventional-commit prefix.
-- Docs mirror behaviour: a change to what the script does edits `README.md` or `docs/` in the same commit. The commit-gate hook (`.claude/hooks/commit-gate.sh`) runs `pnpm check` before every `git commit` and reminds about this when `bin/claude-multipass` changed without a README or docs change.
+- Docs mirror behaviour: a change to what the script does edits `README.md` or `docs/` in the same commit. The commit-gate hook (`.claude/hooks/commit-gate.sh`) runs `pnpm check` before every `git commit` (and the `--continue` of merge, cherry-pick, revert, rebase and am) and reminds about this when `bin/claude-multipass` changed without a README or docs change.
 - Every new command, option or refusal gets a case in `test/claude-multipass.sh`.
 
 ## Safety rails
