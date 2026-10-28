@@ -85,10 +85,20 @@ done
 touch_path bin/claude-multipass
 run 'git commit -m "x"'
 [ "$rc" -eq 0 ] && grep -q README <<< "$out" || fail "docs-mirror warning missing"
-# 6. a docs/ file changed alongside silences the warning
+[ "$rc" -eq 0 ] && grep -q CHANGELOG <<< "$out" || fail "changelog reminder missing"
+# 6. a docs/ file changed alongside silences the docs warning, CHANGELOG.md the changelog one
 touch_path docs/x.md
 run 'git commit -m "x"'
-[ "$rc" -eq 0 ] && [ -z "$out" ] || fail "warning printed with docs/ changed"
+[ "$rc" -eq 0 ] && ! grep -q README <<< "$out" && grep -q CHANGELOG <<< "$out" || fail "docs warning not silenced by docs/"
+touch_path CHANGELOG.md
+run 'git commit -m "x"'
+[ "$rc" -eq 0 ] && [ -z "$out" ] || fail "warning printed with docs/ and CHANGELOG.md changed"
+# 6a. an app/Sources/ change alone gets the changelog reminder and not the docs one
+git -C "$proj" add -A && git -C "$proj" commit -qm settle
+touch_path app/Sources/x.swift
+run 'git commit -m "x"'
+[ "$rc" -eq 0 ] && grep -q CHANGELOG <<< "$out" && ! grep -q README <<< "$out" || fail "app/Sources change: expected only the changelog reminder"
+git -C "$proj" add -A && git -C "$proj" commit -qm settle
 # 7. from outside, a leading cd (absolute or relative) or git -C targets the repo
 for c in "cd $proj && git commit -m x" 'cd proj; git commit -m x' "git -C $proj commit -m x"; do
   rm -f "$STATE/check-ran"

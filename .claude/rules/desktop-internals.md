@@ -44,6 +44,10 @@ Verified facts the tool rests on. Do not re-derive them; cite them. Evidence lab
 - `CLAUDE_CONFIG_DIR` gives its own settings, history, login and Keychain entry; `claude --resume <id>` searches only the current config dir, so per-account config dirs split history (O).
 - Rate limits auto-continue since v2.1.234; the Code tab has its own "Auto-continue when limits reset" checkbox. The prompt cache is per account, so the first turn after a switch re-sends the transcript (R).
 
+## Counting tool runs
+
+- A bash fork keeps its parent's argv, so `ps` and `pgrep -f` list every subshell and command substitution as another `claude-multipass ...` row: one run of a script that backgrounds three subshells, each with a `$(...)`, showed 7 rows (M, 2026-10-28). `usage` backgrounds one subshell per profile, so a `ps` count of `usage --json` is not a run count. Count a side effect that happens once per run instead: one `security` call per `usage` run (a watcher matching a bare `security`, since the script runs it from PATH).
+
 ## Open tests
 
 Untested or unverified claims, from the digest. Settle one before building on it.

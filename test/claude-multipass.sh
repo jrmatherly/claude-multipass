@@ -312,7 +312,7 @@ check "sync copies the other way" 50 "$(jq .lastActivityAt "$s/aaaaaaaa-1111/org
 check "sync falls back to mtime" '{}' "$(cat "$s/bbbbbbbb-2222/org-b/local_s5.json")"
 check "sync is idempotent" "aaaaaaaa-1111/org-a: 0 written
 bbbbbbbb-2222/org-b: 0 written" "$(cda sync)"
-check "switch to the signed-in account only syncs" "beta is already signed in" "$(cda switch beta --no-relaunch | head -1)"
+check "switch to the signed-in account only syncs" "beta is already signed in" "$(cda switch beta --no-relaunch | sed -n 1p)"
 rm "$d/Cookies"
 cda switch beta --no-relaunch > /dev/null
 check "same-name switch repairs missing cookies" cookie-B "$(cat "$d/Cookies")"
@@ -994,7 +994,7 @@ check "first run list --json is clean JSON" old "$(jq -r '.profiles[0].name' <<<
 check_true "old backups moved beside it" test -d "$tmp/home/.config/claude-multipass/backups/login-1" -a ! -e "$tmp/home/.config/dotfiles/claude-desktop-accounts"
 check "the moved store is private" 700 "$(stat -f %Lp "$tmp/home/.config/claude-multipass")"
 check "second run does not move again" "  old " "$(env -u CLAUDE_MULTIPASS_DIR XDG_CONFIG_HOME="$tmp/home/.config" "$script" list | head -1 | cut -c1-6)"
-check "an explicit store never migrates" "No saved accounts yet: run claude-multipass save <name> for the signed-in one, add <name> for another" "$(CLAUDE_MULTIPASS_DIR="$tmp/empty2" XDG_CONFIG_HOME="$tmp/home/.config" cda list | head -1)"
+check "an explicit store never migrates" "No saved accounts yet: run claude-multipass save <name> for the signed-in one, add <name> for another" "$(CLAUDE_MULTIPASS_DIR="$tmp/empty2" XDG_CONFIG_HOME="$tmp/home/.config" cda list | sed -n 1p)"
 mkdir -p "$tmp/home2/.config/dotfiles/claude-desktop-accounts/old" "$tmp/home2/.config/dotfiles/claude-desktop-accounts-backups" "$tmp/home2/.config/claude-multipass/backups"
 cp "$tmp/home/.config/claude-multipass/profiles/old/"* "$tmp/home2/.config/dotfiles/claude-desktop-accounts/old/"
 env -u CLAUDE_MULTIPASS_DIR XDG_CONFIG_HOME="$tmp/home2/.config" "$script" list > /dev/null 2> "$tmp/migrate-err2"
