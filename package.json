@@ -9,6 +9,7 @@
   },
   "scripts": {
     "check": "test/check.sh",
+    "shots": "test/shots.sh",
     "format": "prettier --log-level warn --ignore-unknown --write \"**/*.{js,cjs,ts,md,json,sh}\" \"bin/*\" \".github/**/*.yml\""
   },
   "author": "Jason Matherly",

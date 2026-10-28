@@ -4,8 +4,8 @@
 # `--continue` of a merge, cherry-pick, revert, rebase or am, run `pnpm check`
 # in the repo the commit targets and block the call (exit 2, the check's tail
 # on stderr) when it fails. When it passes but bin/claude-multipass changed
-# with no README.md or docs/ change, it tells Claude so through
-# additionalContext. When the commit's worktree carries a different copy of
+# with no README.md or docs/ change, or bin/ or app/Sources/ changed with no
+# CHANGELOG.md change, it tells Claude so through additionalContext. When the commit's worktree carries a different copy of
 # this hook, that copy runs instead, so a branch that edits the hook is gated
 # by its own version.
 # Wired up in .claude/settings.json; self-check: .claude/hooks/test-commit-gate.sh
@@ -147,7 +147,12 @@ fi
 # before the add. -uall lists files inside new directories, and the second
 # expression keeps a rename's new path
 changed=$(git -C "$root" status --porcelain -uall | sed -E 's/^...//; s/.* -> //')
-grep -q '^bin/claude-multipass$' <<< "$changed" || exit 0
-grep -Eq '^(README\.md|docs/)' <<< "$changed" && exit 0
-jq -cn --arg c "Changed: bin/claude-multipass. Neither README.md nor docs/ is changed; the docs-mirror rule expects a doc edit in the same commit." \
-  '{hookSpecificOutput:{hookEventName:"PreToolUse",additionalContext:$c}}'
+notes=()
+if grep -q '^bin/claude-multipass$' <<< "$changed" && ! grep -Eq '^(README\.md|docs/)' <<< "$changed"; then
+  notes+=("Changed: bin/claude-multipass. Neither README.md nor docs/ is changed; the docs-mirror rule expects a doc edit in the same commit.")
+fi
+if grep -Eq '^(bin/|app/Sources/)' <<< "$changed" && ! grep -q '^CHANGELOG\.md$' <<< "$changed"; then
+  notes+=("Changed: bin/ or app/Sources/ with no CHANGELOG.md change; a user-visible change adds its line under ## Unreleased in the same PR.")
+fi
+[ ${#notes[@]} -gt 0 ] || exit 0
+jq -cn --arg c "${notes[*]}" '{hookSpecificOutput:{hookEventName:"PreToolUse",additionalContext:$c}}'

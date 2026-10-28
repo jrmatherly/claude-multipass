@@ -1,6 +1,6 @@
 ---
 name: docs-audit
-description: Audit this repo's Markdown docs and agent instructions against the script, the tests, the Raycast commands, the installed tool and vendor docs they describe, and report mismatches (never edits). Use after changing bin/claude-multipass, the tests or the hooks, or before a docs pass.
+description: Audit this repo's Markdown docs and agent instructions against the script, the tests, the Raycast commands, the installed tool and vendor docs they describe, and report mismatches (never edits). Use before merging a PR that changes bin/claude-multipass, the tests, the hooks, .claude/settings.json or the app (run it on the PR branch, so the fixes ride in that PR), after such a change lands, or before a docs pass.
 argument-hint: '[doc path or directory; default: all docs]'
 context: fork
 agent: docs-auditor
