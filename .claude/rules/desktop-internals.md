@@ -46,7 +46,7 @@ Verified facts the tool rests on. Do not re-derive them; cite them. Evidence lab
 
 ## Counting tool runs
 
-- A bash fork keeps its parent's argv, so `ps` and `pgrep -f` list every subshell and command substitution as another `claude-multipass ...` row: one run of a script that backgrounds three subshells, each with a `$(...)`, showed 7 rows (M, 2026-10-28). `usage` backgrounds one subshell per profile, so a `ps` count of `usage --json` is not a run count. Count a side effect that happens once per run instead: one `security` call per `usage` run (a watcher matching a bare `security`, since the script runs it from PATH).
+- A bash fork keeps its parent's argv, so `ps` and `pgrep -f` list every subshell and command substitution as another `claude-multipass ...` row: one run of a script that backgrounds three subshells, each with a `$(...)`, showed 7 rows (M, 2026-10-28). `usage` backgrounds one subshell per profile, so a `ps` count of `usage --json` is not a run count. Count a side effect that happens once per run instead: one `security` call per `usage` run. A `ps` poll cannot see it either, since a `security` process lives about 10 ms (M, 2026-10-28); a pass-through `security` in `~/.local/bin`, which the app's runner puts ahead of `/usr/bin`, logging the subcommand and `-s` service and exec'ing the real binary, counts exactly. Measured that way on 2026-10-28 with 0.5.1: one Safe Storage read on relaunch and one per Refresh click, nine seconds apart, so the app runs `usage` once per poll and the earlier figure of about 40 was the subshell overcount (M).
 
 ## Open tests
 
