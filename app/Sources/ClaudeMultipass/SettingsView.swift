@@ -139,7 +139,12 @@ struct SettingsView: View {
     Section {
       LabeledContent("Claude Multipass", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "development build")
       LabeledContent("Documentation") {
-        Link("claude-multipass.md", destination: Self.docs)
+        Link(destination: Self.docs) {
+          HStack(spacing: 3) {
+            Text("Open on GitHub")
+            Image(systemName: "arrow.up.right").imageScale(.small)
+          }
+        }
       }
     } footer: {
       Text("Switching is always manual; usage is opt-in and read-only.")
