@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Tokens and the decrypted Desktop token cache reach other commands through a pipe, never a here-string. Under the system bash 3.2 a here-string is a temp file in `/var/tmp`, so `save`, `switch`, `rename` and `usage` wrote secrets to disk for a moment.
+- One `save`, `switch`, `add`, `sync`, `rename` or `remove` runs at a time. A second run exits 1 naming the first run's pid, before it quits Desktop. Two at once, such as a terminal switch waiting on a Keychain prompt and a menu bar switch, let the second relaunch Desktop while the first still wrote `config.json`.
+- The menu bar app drops a usage result that arrives after usage was turned off, and no longer restarts the usage timer then. It showed a usage error, or figures, with usage off.
+- The menu bar app pauses its account and usage polls while a switch or save runs, and reloads the account list once the switch ends, even when a poll was in flight. The popover could show the state from mid-switch for up to 30 s. It also reloads after a failed switch, which may have quit and relaunched Desktop.
+- The app inside the DMG is notarized and stapled on its own, so a copy dragged out of the image opens offline on first launch.
+- A release builds only from a tag on a commit in `main` whose version matches the top CHANGELOG heading, and never replaces a DMG it already published, so the cask's sha256 stays valid.
+
 ## 0.4.0 (2026-10-27)
 
 - After a `switch`, a signed-out terminal `claude` is reported as `Claude Code reports it is signed out`. `claude auth status` exits 1 when signed out, so the tool said only that the check exited 1; it now reads the JSON before the exit code.
