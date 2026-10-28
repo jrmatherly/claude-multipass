@@ -1,7 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 (2026-10-27)
 
+- The menu bar app is redesigned. The strip is one line: a ring filled to the fuller of the 5-hour and weekly limits (orange from 70 %, red from 90 %), the account name and the percentage, or the ring or name alone. The popover leads with the signed-in account's two usage bars, reset times and when usage was last fetched, then a "Switch to" list with each account's weekly figure, in the tool's order with no ranking. Settings has General, Menu Bar, Usage and About tabs, and the tool path field appears only for a custom location. Quit moves to the right-click menu. Saved settings carry over: any usage cell on becomes the ring style, otherwise name only.
 - Tokens and the decrypted Desktop token cache reach other commands through a pipe, never a here-string. Under the system bash 3.2 a here-string is a temp file in `/var/tmp`, so `save`, `switch`, `rename` and `usage` wrote secrets to disk for a moment.
 - One `save`, `switch`, `add`, `sync`, `rename` or `remove` runs at a time. A second run exits 1 naming the first run's pid, before it quits Desktop. Two at once, such as a terminal switch waiting on a Keychain prompt and a menu bar switch, let the second relaunch Desktop while the first still wrote `config.json`.
 - The menu bar app drops a usage result that arrives after usage was turned off, and no longer restarts the usage timer then. It showed a usage error, or figures, with usage off.
