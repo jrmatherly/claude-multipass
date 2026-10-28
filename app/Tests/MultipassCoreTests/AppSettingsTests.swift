@@ -10,24 +10,9 @@ private func decode(_ json: String) throws -> AppSettings {
   let s = AppSettings()
   #expect(s.usageEnabled == false)
   #expect(s.usageIntervalMinutes == 15)
-  #expect(s.enabledModules == [.account])
+  #expect(s.stripStyle == .ringAndName)
   #expect(s.cliPathOverride == nil)
   #expect(AppSettings.snapshotInterval == 30)
-}
-
-@Test func visibleModulesHideUsageWhenOff() {
-  var s = AppSettings()
-  s.enabledModules = Set(Module.allCases)
-  #expect(s.visibleModules == [.account])
-  s.usageEnabled = true
-  #expect(s.visibleModules == Module.allCases)
-  s.enabledModules = [.weeklyBar, .account]
-  #expect(s.visibleModules == [.account, .weeklyBar])
-}
-
-@Test func moduleLabels() {
-  #expect(Module.allCases.map(\.label) == ["@", "5H", "7D", "5H↻", "7D↻"])
-  #expect(Module.allCases.map(\.needsUsage) == [false, true, true, true, true])
 }
 
 @Test func emptyObjectDecodesToDefaults() throws {
@@ -49,8 +34,27 @@ private func decode(_ json: String) throws -> AppSettings {
   #expect(try decode(#"{"usageIntervalMinutes":60}"#).usageIntervalMinutes == 60)
 }
 
-@Test func unknownModuleIsDropped() throws {
-  #expect(try decode(#"{"enabledModules":["account","bogus","weeklyBar"]}"#).enabledModules == [.account, .weeklyBar])
+@Test func stripStyleDecodes() throws {
+  #expect(try decode(#"{"stripStyle":"ringOnly"}"#).stripStyle == .ringOnly)
+  #expect(try decode(#"{"stripStyle":"name"}"#).stripStyle == .name)
+  #expect(try decode(#"{"stripStyle":"bogus"}"#).stripStyle == .ringAndName)
+}
+
+@Test func oldModuleListMapsToAStripStyle() throws {
+  #expect(try decode(#"{"enabledModules":["account"]}"#).stripStyle == .name)
+  #expect(try decode(#"{"enabledModules":[]}"#).stripStyle == .name)
+  #expect(try decode(#"{"enabledModules":["account","bogus"]}"#).stripStyle == .name)
+  #expect(try decode(#"{"enabledModules":["account","weeklyBar"]}"#).stripStyle == .ringAndName)
+  #expect(try decode(#"{"enabledModules":["sessionReset"]}"#).stripStyle == .ringAndName)
+  #expect(try decode(#"{"enabledModules":["account"],"stripStyle":"ringOnly"}"#).stripStyle == .ringOnly)
+}
+
+@Test func encodingDropsTheOldModuleList() throws {
+  var s = try decode(#"{"enabledModules":["account"]}"#)
+  s.usageEnabled = true
+  let text = String(decoding: try JSONEncoder().encode(s), as: UTF8.self)
+  #expect(!text.contains("enabledModules"))
+  #expect(try decode(text) == s)
 }
 
 @Test func roundTripsThroughUserDefaults() throws {
@@ -62,7 +66,7 @@ private func decode(_ json: String) throws -> AppSettings {
   var s = AppSettings()
   s.usageEnabled = true
   s.usageIntervalMinutes = 30
-  s.enabledModules = [.account, .sessionBar]
+  s.stripStyle = .name
   s.cliPathOverride = "/repo/bin/claude-multipass"
   store.save(s)
   #expect(store.load() == s)

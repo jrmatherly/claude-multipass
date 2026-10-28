@@ -13,9 +13,30 @@ public enum Format {
     return min(max(utilization / 100, 0), 1)
   }
 
-  public static func isDanger(_ utilization: Double?) -> Bool {
-    guard let utilization else { return false }
-    return utilization.rounded(.down) >= 90
+  public static func level(_ utilization: Double?) -> UsageLevel {
+    guard let utilization else { return .normal }
+    switch utilization.rounded(.down) {
+    case 90...: return .danger
+    case 70...: return .warning
+    default: return .normal
+    }
+  }
+
+  /// A countdown within a day, else the reset's short weekday, unless that is
+  /// today's weekday a week on, which would read as today. The names are
+  /// fixed English, like the countdown, not the locale's.
+  public static func reset(_ date: Date?, now: Date, calendar: Calendar = .current) -> String {
+    guard let date, date.timeIntervalSince(now) >= 86400 else { return countdown(to: date, now: now) }
+    let weekday = calendar.component(.weekday, from: date)
+    if weekday == calendar.component(.weekday, from: now) { return countdown(to: date, now: now) }
+    return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][weekday - 1]
+  }
+
+  public static func ago(_ date: Date, now: Date) -> String {
+    let minutes = Int(now.timeIntervalSince(date)) / 60
+    if minutes < 1 { return "just now" }
+    if minutes < 60 { return "\(minutes) min ago" }
+    return "\(minutes / 60) h ago"
   }
 
   /// Integer division of seconds, not DateComponentsFormatter, whose output
@@ -36,6 +57,11 @@ public enum Format {
     guard let name else { return signedIn ? "not saved" : "signed out" }
     return name.count > 16 ? String(name.prefix(15)) + "…" : name
   }
+}
+
+/// Warning from 70 %, danger from 90 %, on the floored figure the text shows.
+public enum UsageLevel: Equatable {
+  case normal, warning, danger
 }
 
 /// The CLI's `valid_name` rule.

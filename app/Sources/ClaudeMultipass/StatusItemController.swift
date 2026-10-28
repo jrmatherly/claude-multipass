@@ -45,7 +45,7 @@ final class StatusItemController: NSObject {
     button.action = #selector(clicked(_:))
     button.sendAction(on: [.leftMouseUp, .rightMouseUp])
     self.hosting = hosting
-    popover = PopoverController(appState: appState) { [weak self] in self?.openSettings() }
+    popover = PopoverController(appState: appState) { [weak self] pane in self?.openSettings(pane: pane) }
   }
 
   private func fitLength() {
@@ -71,7 +71,7 @@ final class StatusItemController: NSObject {
     guard let item = statusItem else { return }
     let menu = NSMenu()
     menu.addItem(withTitle: "Refresh", action: #selector(refresh), keyEquivalent: "r").target = self
-    menu.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",").target = self
+    menu.addItem(withTitle: "Settings…", action: #selector(openSettingsFromMenu), keyEquivalent: ",").target = self
     menu.addItem(.separator())
     menu.addItem(withTitle: "Quit Claude Multipass", action: #selector(quit), keyEquivalent: "q").target = self
     // The documented way to pop a menu from a status item that also handles
@@ -85,9 +85,13 @@ final class StatusItemController: NSObject {
     Task { await appState.refreshAll() }
   }
 
-  @objc func openSettings() {
+  @objc private func openSettingsFromMenu() {
+    openSettings(pane: nil)
+  }
+
+  func openSettings(pane: SettingsPane?) {
     if settingsWindow == nil { settingsWindow = SettingsWindowController(appState: appState) }
-    settingsWindow?.show()
+    settingsWindow?.show(pane: pane)
   }
 
   @objc private func quit() {

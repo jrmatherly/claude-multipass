@@ -91,10 +91,10 @@ private let snapshotUnsaved = #"{"version":"0.2.0","signedIn":true,"desktopRunni
 private let usageBoth = #"{"profiles":[{"name":"alpha","fiveHour":{"utilization":10}},{"name":"beta","fiveHour":{"utilization":42.6,"resetsAt":"2026-10-23T19:45:00Z"},"sevenDay":{"utilization":18}}]}"#
 
 @MainActor
-private func makeState(_ runner: FakeRunner?, makeRunner: ((AppSettings) -> CommandRunner?)? = nil) -> AppState {
+private func makeState(_ runner: FakeRunner?, makeRunner: ((AppSettings) -> CommandRunner?)? = nil, now: @escaping () -> Date = Date.init) -> AppState {
   let suite = "net.matherly.claude-multipass.tests.\(UUID().uuidString)"
   let store = SettingsStore(defaults: UserDefaults(suiteName: suite)!)
-  return AppState(makeRunner: makeRunner ?? { _ in runner }, store: store)
+  return AppState(makeRunner: makeRunner ?? { _ in runner }, store: store, now: now)
 }
 
 @MainActor
@@ -352,18 +352,18 @@ private func enabledUsage(_ s: AppState) -> AppSettings {
   #expect(s.isPollingUsage)
 }
 
-@Test @MainActor func applyModuleToggleDoesNotFetchUsage() async {
+@Test @MainActor func applyStripStyleDoesNotFetchUsage() async {
   let (s, r) = await readyState()
   await s.apply(enabledUsage(s))
   r.clearCalls()
   var settings = s.settings
-  settings.enabledModules = [.account, .weeklyBar]
+  settings.stripStyle = .ringOnly
   await s.apply(settings)
   settings.usageIntervalMinutes = 60
   await s.apply(settings)
   #expect(r.calls == [])
   #expect(s.isPollingUsage)
-  #expect(s.settings.enabledModules == [.account, .weeklyBar])
+  #expect(s.settings.stripStyle == .ringOnly)
 }
 
 @Test @MainActor func applyDisablingUsageStopsTimer() async {
@@ -534,4 +534,18 @@ private func enabledUsage(_ s: AppState) -> AppSettings {
   await tick.value
   #expect(s.snapshot?.current == "alpha")
   #expect(r.calls == [["list", "--json"], ["switch", "alpha"], ["list", "--json"]])
+}
+
+@Test @MainActor func usageUpdatedAtFollowsTheLastSuccess() async {
+  let r = readyRunner()
+  let fetched = Date(timeIntervalSince1970: 1_000_000)
+  let s = makeState(r, now: { fetched })
+  await s.relocate()
+  await s.refresh()
+  #expect(s.usageUpdatedAt == nil)
+  await s.apply(enabledUsage(s))
+  #expect(s.usageUpdatedAt == fetched)
+  r.fail("usage", .timedOut)
+  await s.refreshUsage()
+  #expect(s.usageUpdatedAt == nil)
 }

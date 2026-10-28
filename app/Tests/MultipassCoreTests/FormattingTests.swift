@@ -16,12 +16,54 @@ import Testing
   #expect(Format.fill(-5) == 0)
 }
 
-@Test func dangerStartsAtFlooredNinety() {
-  #expect(!Format.isDanger(nil))
-  #expect(!Format.isDanger(89.9))
-  #expect(Format.isDanger(90.0))
-  #expect(Format.isDanger(90.9))
-  #expect(Format.isDanger(130))
+@Test func levelsFloorAtSeventyAndNinety() {
+  #expect(Format.level(nil) == .normal)
+  #expect(Format.level(0) == .normal)
+  #expect(Format.level(69.9) == .normal)
+  #expect(Format.level(70) == .warning)
+  #expect(Format.level(89.9) == .warning)
+  #expect(Format.level(90.0) == .danger)
+  #expect(Format.level(90.9) == .danger)
+  #expect(Format.level(130) == .danger)
+}
+
+@Test func resetIsACountdownWithinADayThenAWeekday() throws {
+  var calendar = Calendar(identifier: .gregorian)
+  calendar.timeZone = try #require(TimeZone(identifier: "UTC"))
+  // 2026-10-27 is a Tuesday.
+  let now = try #require(calendar.date(from: DateComponents(year: 2026, month: 10, day: 27, hour: 12)))
+  func at(_ seconds: TimeInterval) -> String { Format.reset(now.addingTimeInterval(seconds), now: now, calendar: calendar) }
+  #expect(Format.reset(nil, now: now, calendar: calendar) == "–")
+  #expect(at(-60) == "–")
+  #expect(at(2 * 3600 + 14 * 60) == "2h 14m")
+  #expect(at(86399) == "23h 59m")
+  #expect(at(86400) == "Wed")
+  #expect(at(2 * 86400) == "Thu")
+  #expect(at(6 * 86400 + 3600) == "Mon")
+  #expect(at(6 * 86400 + 23 * 3600) == "6d 23h")
+  calendar.timeZone = try #require(TimeZone(identifier: "Pacific/Kiritimati"))
+  #expect(at(2 * 86400) == "Fri")
+}
+
+@Test func agoBuckets() {
+  let now = Date(timeIntervalSince1970: 1_000_000)
+  #expect(Format.ago(now, now: now) == "just now")
+  #expect(Format.ago(now.addingTimeInterval(-59), now: now) == "just now")
+  #expect(Format.ago(now.addingTimeInterval(-60), now: now) == "1 min ago")
+  #expect(Format.ago(now.addingTimeInterval(-59 * 60), now: now) == "59 min ago")
+  #expect(Format.ago(now.addingTimeInterval(-2 * 3600 - 60), now: now) == "2 h ago")
+}
+
+@Test func peakPicksTheFullerWindow() {
+  #expect(UsageEntry(name: "a").peak == nil)
+  let five = UsageEntry(name: "a", fiveHour: UsageWindow(utilization: 38)).peak
+  #expect(five?.window == "5-hour" && five?.utilization == 38)
+  let seven = UsageEntry(name: "a", sevenDay: UsageWindow(utilization: 73)).peak
+  #expect(seven?.window == "weekly" && seven?.utilization == 73)
+  let both = UsageEntry(name: "a", fiveHour: UsageWindow(utilization: 91), sevenDay: UsageWindow(utilization: 73)).peak
+  #expect(both?.window == "5-hour" && both?.utilization == 91)
+  let tie = UsageEntry(name: "a", fiveHour: UsageWindow(utilization: 50), sevenDay: UsageWindow(utilization: 50)).peak
+  #expect(tie?.window == "weekly")
 }
 
 @Test func countdownBuckets() {

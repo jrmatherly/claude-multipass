@@ -1,26 +1,15 @@
 import Foundation
 
-/// One cell of the menu bar strip, in display order.
-public enum Module: String, CaseIterable, Codable {
-  case account, sessionBar, weeklyBar, sessionReset, weeklyReset
-
-  public var label: String {
-    switch self {
-    case .account: return "@"
-    case .sessionBar: return "5H"
-    case .weeklyBar: return "7D"
-    case .sessionReset: return "5H↻"
-    case .weeklyReset: return "7D↻"
-    }
-  }
-
-  public var needsUsage: Bool { self != .account }
+/// What the menu bar strip shows: a ring gauge of the signed-in account's
+/// peak usage beside its name and percentage, the ring alone, or the name alone.
+public enum StripStyle: String, CaseIterable, Codable {
+  case name, ringAndName, ringOnly
 }
 
 public struct AppSettings: Equatable, Codable {
   public var usageEnabled = false
   public var usageIntervalMinutes = 15
-  public var enabledModules: Set<Module> = [.account]
+  public var stripStyle = StripStyle.ringAndName
   public var cliPathOverride: String? = nil
 
   public static let snapshotInterval: TimeInterval = 30
@@ -28,7 +17,7 @@ public struct AppSettings: Equatable, Codable {
 
   public init() {}
 
-  private enum Keys: String, CodingKey { case usageEnabled, usageIntervalMinutes, enabledModules, cliPathOverride }
+  private enum Keys: String, CodingKey { case usageEnabled, usageIntervalMinutes, stripStyle, enabledModules, cliPathOverride }
 
   /// Every key optional, so a partial blob seeded with `defaults write` loads.
   public init(from decoder: Decoder) throws {
@@ -37,8 +26,11 @@ public struct AppSettings: Equatable, Codable {
     if let minutes = try c.decodeIfPresent(Int.self, forKey: .usageIntervalMinutes) {
       usageIntervalMinutes = Self.allowedIntervals.last(where: { $0 <= minutes }) ?? Self.allowedIntervals[0]
     }
-    if let names = try c.decodeIfPresent([String].self, forKey: .enabledModules) {
-      enabledModules = Set(names.compactMap(Module.init(rawValue:)))
+    if let style = try? c.decodeIfPresent(StripStyle.self, forKey: .stripStyle) {
+      stripStyle = style
+    } else if let modules = try? c.decodeIfPresent([String].self, forKey: .enabledModules) {
+      // The module list an earlier build saved: any usage cell meant a usage strip.
+      stripStyle = modules.contains(where: Self.oldUsageModules.contains) ? .ringAndName : .name
     }
     cliPathOverride = try c.decodeIfPresent(String.self, forKey: .cliPathOverride)
   }
@@ -47,14 +39,11 @@ public struct AppSettings: Equatable, Codable {
     var c = encoder.container(keyedBy: Keys.self)
     try c.encode(usageEnabled, forKey: .usageEnabled)
     try c.encode(usageIntervalMinutes, forKey: .usageIntervalMinutes)
-    try c.encode(Module.allCases.filter(enabledModules.contains).map(\.rawValue), forKey: .enabledModules)
+    try c.encode(stripStyle, forKey: .stripStyle)
     try c.encodeIfPresent(cliPathOverride, forKey: .cliPathOverride)
   }
 
-  /// `Module.allCases` order, usage cells only while usage is on.
-  public var visibleModules: [Module] {
-    Module.allCases.filter { enabledModules.contains($0) && (usageEnabled || !$0.needsUsage) }
-  }
+  private static let oldUsageModules: Set<String> = ["sessionBar", "weeklyBar", "sessionReset", "weeklyReset"]
 }
 
 /// One JSON string under the key "settings", so a partial value can be

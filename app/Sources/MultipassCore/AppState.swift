@@ -44,6 +44,8 @@ public final class AppState: ObservableObject {
   @Published public private(set) var phase: Phase = .idle
   @Published public private(set) var isRefreshing = false
   @Published public private(set) var isRefreshingUsage = false
+  /// When the shown usage figures were fetched; nil while there are none.
+  @Published public private(set) var usageUpdatedAt: Date?
   /// A snapshot error, else a usage error; each clears only on its own success.
   public var lastError: String? { snapshotError ?? usageError }
   @Published public private(set) var rowError: RowError?
@@ -75,6 +77,7 @@ public final class AppState: ObservableObject {
   }
 
   public func apply(_ new: AppSettings) async {
+    guard new != settings else { return }
     let old = settings
     settings = new
     store.save(new)
@@ -152,11 +155,13 @@ public final class AppState: ObservableObject {
       guard settings.usageEnabled else { return }
       let report = try decode(UsageReport.self, data)
       usage = Dictionary(report.profiles.map { ($0.name, $0) }, uniquingKeysWith: { _, last in last })
+      usageUpdatedAt = now()
       usageError = nil
     } catch {
       guard settings.usageEnabled else { return }
       // Old figures would read as current; the error says why they are gone.
       usage = [:]
+      usageUpdatedAt = nil
       usageError = describe(error)
     }
   }
