@@ -866,6 +866,22 @@ check "the oldest pruned backup's CLI item is gone" absent "$(kc_get claude-mult
 for i in $(seq 1 12); do
   if [[ -d $b/login-2020010100000$i-1 ]]; then check "kept backup $i keeps its CLI item" old "$(kc_get claude-multipass "login-2020010100000$i-1" | jq -r .claudeAiOauth.accessToken)"; else check "pruned backup $i loses its CLI item" absent "$(kc_get claude-multipass "login-2020010100000$i-1")"; fi
 done
+# profile backups prune to the newest ten by stamp, not by name; a folder
+# without a stamp is left alone
+for i in $(seq 1 12); do
+  mkdir -p "$b/profile-old-20200101-0000$(printf %02d "$i")-1"
+done
+mkdir -p "$b/profile-kept-by-hand"
+cp -R "$p/beta" "$p/aa-two"
+cda remove aa-two > /dev/null
+check "profile backups pruned to ten" 10 "$(find "$b" -mindepth 1 -maxdepth 1 -type d -name 'profile-*' ! -name 'profile-kept-by-hand' | wc -l | tr -d ' ')"
+check "the just-removed profile is kept" 1 "$(find "$b" -mindepth 1 -maxdepth 1 -type d -name 'profile-aa-two-*' | wc -l | tr -d ' ')"
+check_true "the oldest set-aside profile is gone" test ! -e "$b/profile-old-20200101-000001-1"
+check_true "the newest fixture stays" test -d "$b/profile-old-20200101-000012-1"
+check_true "a folder without a stamp is left alone" test -d "$b/profile-kept-by-hand"
+check "login backups untouched by the profile prune" 10 "$(find "$b" -mindepth 1 -maxdepth 1 -type d -name 'login-*' | wc -l | tr -d ' ')"
+check_true "doctor counts both kinds" grep -q "ok: backups: 10 saved logins and 11 set-aside profiles in $b" <<< "$(cda doctor 2>&1)"
+rm -r "$b/profile-kept-by-hand"
 # A store path with a space: the prune must not split it and rm a sibling
 # named after its first word. Run from $tmp so a split's relative half lands there.
 spaced="$tmp/my store"
