@@ -25,6 +25,12 @@ struct PopoverView: View {
           Text("The installed claude-multipass is too old for this app (0.3.0 or newer is needed).")
           Text("brew upgrade claude-multipass").font(.system(.body, design: .monospaced)).textSelection(.enabled)
         }
+      case .failed(let message):
+        VStack(alignment: .leading, spacing: 6) {
+          Text("The claude-multipass command line tool did not report its version.")
+          Text(message).font(.caption).foregroundStyle(.red).textSelection(.enabled)
+          Text("claude-multipass doctor").font(.system(.body, design: .monospaced)).textSelection(.enabled)
+        }
       case .ready:
         header
         usage

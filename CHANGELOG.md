@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- The menu bar app tells a failed version check apart from an old tool. A `claude-multipass --version` that exits non-zero (a missing `jq`), times out or prints no version line showed "too old, brew upgrade"; the popover now shows the error and the Settings General tab reads `failed: <error>`.
+- The menu bar app no longer hangs in the switching phase when a command exits while a grandchild still holds its output pipe; it takes what was read after 2 s.
+- A switch or save from the menu bar app waits for a usage run in flight to finish, so a usage run sitting on a Keychain prompt no longer gets a second prompt beside it.
+
 ## 0.5.1 (2026-10-27)
 
 - The Settings About tab's documentation link reads "Open on GitHub" with an outward arrow instead of the file name `claude-multipass.md`.

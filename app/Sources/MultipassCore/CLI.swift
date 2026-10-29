@@ -91,7 +91,8 @@ public struct CLI: CommandRunner {
     // there starves the pool on a small machine (a 3-core CI runner) and
     // the watchdog below never gets to run. After a timeout a grandchild
     // (usage runs each account in a backgrounded subshell) can keep the
-    // write ends open, so the drains are only awaited on the normal path.
+    // write ends open, so the drains are awaited on the normal path only,
+    // and there with a bound.
     let outData = PipeDrain(stdout.fileHandleForReading)
     let errData = PipeDrain(stderr.fileHandleForReading)
     let limit = Self.promptFreeCommands.contains(args.first ?? "") ? timeout : mutatingTimeout
@@ -114,8 +115,17 @@ public struct CLI: CommandRunner {
       errData.stop()
       throw CLIError.timedOut
     }
+    // On the normal path too a grandchild can hold the write ends open after
+    // the child exited (usage's backgrounded subshells); after 2 s take what
+    // was read rather than wait for an EOF that may never come.
+    let drainLimit = Task {
+      try await Task.sleep(nanoseconds: 2_000_000_000)
+      outData.stop()
+      errData.stop()
+    }
     let out = await outData.value()
     let err = await errData.value()
+    drainLimit.cancel()
     let message = Self.plainText(err)
     switch status {
     case 0: return CommandOutput(stdout: out, stderr: message)

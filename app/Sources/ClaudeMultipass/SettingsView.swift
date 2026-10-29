@@ -177,6 +177,7 @@ struct SettingsView: View {
     case .ready(let version): return "claude-multipass \(version)" + (appState.cliLocation.map { "\n\($0)" } ?? "")
     case .missing: return "not found"
     case .tooOld: return "too old (0.3.0 or newer is needed)"
+    case .failed(let message): return "failed: \(message)"
     }
   }
 

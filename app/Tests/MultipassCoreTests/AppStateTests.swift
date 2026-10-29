@@ -155,13 +155,26 @@ private func enabledUsage(_ s: AppState) -> AppSettings {
   #expect(none.cliLocation == nil)
 }
 
-@Test @MainActor func relocateTooOldWhenVersionFails() async {
+@Test @MainActor func relocateFailedWhenVersionProbeFails() async {
+  // A non-zero exit (a missing jq), a timeout or stray output is not an old
+  // version; "brew upgrade" would not fix it.
   let r = FakeRunner()
-  r.fail("--version", .failed(status: 2, stderr: "claude-multipass\nUsage: ..."))
+  r.fail("--version", .failed(status: 2, stderr: "jq: command not found"))
   let s = makeState(r)
   await s.relocate()
-  #expect(s.cliStatus == .tooOld)
+  #expect(s.cliStatus == .failed("jq: command not found"))
+  r.fail("--version", .timedOut)
+  await s.relocate()
+  #expect(s.cliStatus == .failed("the CLI did not finish in time"))
+  r.answer("--version", "Usage: ...\n")
+  await s.relocate()
+  #expect(s.cliStatus == .failed("unexpected CLI output: Usage: ...\n"))
+}
+
+@Test @MainActor func relocateTooOldWhenVersionIsOld() async {
+  let r = FakeRunner()
   r.answer("--version", "claude-multipass 0.1.0\n")
+  let s = makeState(r)
   await s.relocate()
   #expect(s.cliStatus == .tooOld)
 }
@@ -180,7 +193,7 @@ private func enabledUsage(_ s: AppState) -> AppSettings {
   r.fail("--version", .failed(status: 2, stderr: "usage"))
   let s = makeState(r)
   await s.relocate()
-  #expect(s.cliStatus == .tooOld)
+  #expect(s.cliStatus == .failed("usage"))
   r.answer("--version", "claude-multipass 0.3.0\n")
   r.answer("list", snapshotBeta)
   r.clearCalls()
@@ -531,6 +544,27 @@ private func enabledUsage(_ s: AppState) -> AppSettings {
   gate.open()
   await switching.value
   #expect(r.calls == [["switch", "alpha"], ["list", "--json"]])
+}
+
+@Test @MainActor func switchWaitsOutAUsageRun() async {
+  // usage can sit on a Keychain prompt; a switch started then would open a
+  // second one, so it runs once the usage run has finished.
+  let (s, r) = await readyState()
+  await s.apply(enabledUsage(s))
+  r.clearCalls()
+  let gate = Gate()
+  r.onCall = { args in if args[0] == "usage" { await gate.wait() } }
+  let fetching = Task { await s.refreshUsage() }
+  await until { r.calls.count == 1 }
+  let switching = Task { await s.switchTo("alpha") }
+  await until { s.phase == .switching("alpha") }
+  for _ in 0..<100 { await Task.yield() }
+  #expect(r.calls == [["usage", "--json"]])
+  gate.open()
+  await fetching.value
+  await switching.value
+  #expect(r.calls == [["usage", "--json"], ["switch", "alpha"], ["list", "--json"]])
+  #expect(s.phase == .idle)
 }
 
 @Test @MainActor func refreshInFlightWhenASwitchFinishesRunsAgain() async {

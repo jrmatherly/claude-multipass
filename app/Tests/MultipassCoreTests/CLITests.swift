@@ -16,6 +16,7 @@ private func stubScript() throws -> URL {
       big) head -c 200000 /dev/zero | tr '\\0' x;;
       slow) sleep 5;;
       hang) (trap '' TERM; sleep 6 &); sleep 6;;
+      linger) (sleep 6 &); echo done;;
       orphan) (trap '' TERM; sleep 30) & echo $! > "$2"; wait;;
       save) sleep 2; echo saved;;
       usage) sleep 2; echo usage;;
@@ -95,6 +96,16 @@ private func stubScript() throws -> URL {
   let started = Date()
   await #expect(throws: CLIError.timedOut) { try await cli.run(["hang"]) }
   #expect(Date().timeIntervalSince(started) < 4.5)
+}
+
+@Test func normalExitWithALingeringPipeHolderReturns() async throws {
+  // The child exits at once but a backgrounded grandchild keeps its stdout
+  // open for 6 s; the drain gives up after 2 s with what was read.
+  let cli = CLI(executable: try stubScript())
+  let started = Date()
+  let out = try await cli.runCapturing(["linger"])
+  #expect(String(decoding: out.stdout, as: UTF8.self) == "done\n")
+  #expect(Date().timeIntervalSince(started) < 4)
 }
 
 @Test func timeoutKillsTheWholeProcessGroup() async throws {
