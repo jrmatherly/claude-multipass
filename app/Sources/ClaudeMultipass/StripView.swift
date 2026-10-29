@@ -38,6 +38,7 @@ struct StripView: View {
   }
 
   private var label: String {
+    if case .failed(let message) = appState.cliStatus { return "Claude Multipass: the command line tool failed: \(message)" }
     guard case .ready = appState.cliStatus else { return "Claude Multipass: the command line tool is not ready" }
     guard let peak else { return name }
     return "\(name), \(peak.window) \(Format.percent(peak.utilization))"

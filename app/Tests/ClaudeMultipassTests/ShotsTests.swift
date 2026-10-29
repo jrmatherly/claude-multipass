@@ -14,6 +14,7 @@ private let shotsDir = ProcessInfo.processInfo.environment["UI_SHOTS_DIR"]
 private struct FixtureRunner: CommandRunner {
   var usage: String?
   var usageFails = false
+  var versionFails = false
   var switchHangs = false
   var switchRefusal: String?
   var location: String? { "/opt/homebrew/bin/claude-multipass" }
@@ -21,7 +22,9 @@ private struct FixtureRunner: CommandRunner {
   func runCapturing(_ args: [String]) async throws -> CommandOutput {
     func out(_ text: String) -> CommandOutput { CommandOutput(stdout: Data(text.utf8), stderr: "") }
     switch args[0] {
-    case "--version": return out("claude-multipass 0.4.0\n")
+    case "--version":
+      if versionFails { throw CLIError.failed(status: 127, stderr: "/opt/homebrew/bin/claude-multipass: line 12: jq: command not found") }
+      return out("claude-multipass 0.4.0\n")
     case "list": return out(snapshot)
     case "usage":
       if usageFails { throw CLIError.timedOut }
@@ -132,6 +135,7 @@ private func menuBar(_ view: some View) -> some View {
     try render(PopoverView(appState: refused, openSettings: { _ in }, close: {}), "popover-error")
 
     try render(PopoverView(appState: await state(nil), openSettings: { _ in }, close: {}), "popover-cli-missing")
+    try render(PopoverView(appState: await state(FixtureRunner(versionFails: true)), openSettings: { _ in }, close: {}), "popover-cli-failed")
   }
 
   @Test func settings() async throws {

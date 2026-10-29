@@ -4,8 +4,10 @@ public enum Phase: Equatable {
   case idle, switching(String), saving(String)
 }
 
+/// `failed` carries why the version probe got no version: a timeout, a
+/// non-zero exit (a missing `jq`) or output that is not a version line.
 public enum CLIStatus: Equatable {
-  case unknown, ready(String), missing, tooOld
+  case unknown, ready(String), missing, tooOld, failed(String)
 }
 
 /// The one row-level failure on show: `refused` picks "Switch anyway" over Retry.
@@ -66,6 +68,8 @@ public final class AppState: ObservableObject {
   private var mainTask: Task<Void, Never>?
   private var snapshotTask: Task<Void, Never>?
   private var usageTask: Task<Void, Never>?
+  /// The usage run in flight, so an action can wait for its Keychain prompt to close.
+  private var usageFetch: Task<Void, Never>?
   @Published private var snapshotError: String?
   @Published private var usageError: String?
 
@@ -110,9 +114,16 @@ public final class AppState: ObservableObject {
       cliStatus = .missing
       return
     }
-    var status = CLIStatus.tooOld
-    if let data = try? await runner.run(["--version"]), let version = CLI.parseVersion(data), CLI.isSupported(version) {
-      status = .ready(version)
+    let status: CLIStatus
+    do {
+      let data = try await runner.run(["--version"])
+      if let version = CLI.parseVersion(data) {
+        status = CLI.isSupported(version) ? .ready(version) : .tooOld
+      } else {
+        status = .failed("unexpected CLI output: \(String(decoding: data.prefix(200), as: UTF8.self))")
+      }
+    } catch {
+      status = .failed(describe(error))
     }
     guard generation == probeGeneration else { return }
     cliStatus = status
@@ -149,7 +160,14 @@ public final class AppState: ObservableObject {
   public func refreshUsage() async {
     guard settings.usageEnabled, phase == .idle, case .ready = cliStatus, let runner, !isRefreshingUsage else { return }
     isRefreshingUsage = true
-    defer { isRefreshingUsage = false }
+    let fetch = Task { await fetchUsage(runner) }
+    usageFetch = fetch
+    await fetch.value
+    usageFetch = nil
+    isRefreshingUsage = false
+  }
+
+  private func fetchUsage(_ runner: CommandRunner) async {
     do {
       let data = try await runner.run(["usage", "--json"])
       guard settings.usageEnabled else { return }
@@ -210,6 +228,8 @@ public final class AppState: ObservableObject {
     rowNote = nil
     self.phase = phase
     defer { self.phase = .idle }
+    // A usage run may be waiting on a Keychain prompt; a switch now would open a second one.
+    await usageFetch?.value
     do {
       let output = try await runner.runCapturing(args)
       if !output.stderr.isEmpty { rowNote = RowNote(name: name, message: output.stderr) }
