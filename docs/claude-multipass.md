@@ -44,7 +44,7 @@ Desktop quits, relaunches signed in as that account, and the Code tab lists both
 | `current` | The signed-in saved name, `not saved` or `signed out` (for scripts and Raycast) |
 | `usage [name]` | 5-hour and weekly usage per saved account with reset times. Opt-in, see below. `--json` prints the figures as one object |
 | `pick` | The fzf picker |
-| `doctor` | One `ok:`, `warn:` or `fail:` line per check (config, tools, store and profile modes, each profile's token, backups, Desktop running, the pre-0.1 store, profiles without a CLI login, `CLAUDE_CONFIG_DIR` or `CLAUDE_SECURESTORAGE_CONFIG_DIR`). Exits 1 on any `fail:`. No Keychain, no network |
+| `doctor` | One `ok:`, `warn:` or `fail:` line per check (config, tools, store and profile modes, each profile's token, backups, Desktop running, the pre-0.1 store, profiles without a CLI login, `claude` missing from PATH, `CLAUDE_CONFIG_DIR` or `CLAUDE_SECURESTORAGE_CONFIG_DIR`, and `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`, which override the terminal login). Exits 1 on any `fail:`. No Keychain, no network |
 | `--version` | Print the version |
 
 `--no-relaunch` leaves Desktop quit after `save`, `switch`, `add` or `pick`.

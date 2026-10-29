@@ -64,3 +64,9 @@ pkg_version=$(jq -r .version package.json)
   echo "check: bin/claude-multipass version=$script_version differs from package.json $pkg_version" >&2
   exit 1
 }
+# Both workflows pin the same ShellCheck release
+pins=$(grep -ho 'SHELLCHECK_SHA256: *[0-9a-f]*' .github/workflows/check.yml .github/workflows/release.yml | tr -d ' ' | sort -u | wc -l | tr -d ' ')
+[[ $pins == 1 ]] || {
+  echo "check: check.yml and release.yml pin different ShellCheck releases" >&2
+  exit 1
+}

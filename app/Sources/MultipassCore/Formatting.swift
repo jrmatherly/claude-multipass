@@ -66,5 +66,5 @@ public enum UsageLevel: Equatable {
 
 /// The CLI's `valid_name` rule.
 public func isValidProfileName(_ s: String) -> Bool {
-  s != "." && s != ".." && s.range(of: "^[A-Za-z0-9._-]+$", options: .regularExpression) != nil
+  s.range(of: "^[A-Za-z0-9][A-Za-z0-9._-]*$", options: .regularExpression) != nil
 }
