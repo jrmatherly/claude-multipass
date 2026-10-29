@@ -119,10 +119,14 @@ private func readyRunner() -> FakeRunner {
   return r
 }
 
+final class TestClock {
+  var now = Date(timeIntervalSince1970: 1_000_000)
+}
+
 @MainActor
-private func readyState() async -> (AppState, FakeRunner) {
+private func readyState(clock: TestClock = TestClock()) async -> (AppState, FakeRunner) {
   let r = readyRunner()
-  let s = makeState(r)
+  let s = makeState(r, now: { clock.now })
   await s.relocate()
   await s.refresh()
   r.clearCalls()
@@ -401,22 +405,26 @@ private func enabledUsage(_ s: AppState) -> AppSettings {
 }
 
 @Test @MainActor func refreshAllFetchesUsageWhenEnabled() async {
-  let (s, r) = await readyState()
+  let clock = TestClock()
+  let (s, r) = await readyState(clock: clock)
   await s.refreshAll()
   #expect(r.calls == [["list", "--json"]])
   await s.apply(enabledUsage(s))
   r.clearCalls()
+  clock.now += AppSettings.usageRefreshFloor
   await s.refreshAll()
   #expect(r.calls == [["list", "--json"], ["usage", "--json"]])
 }
 
 @Test @MainActor func currentUsageUsesSignedInKey() async {
-  let (s, r) = await readyState()
+  let clock = TestClock()
+  let (s, r) = await readyState(clock: clock)
   #expect(s.currentUsage == nil)
   await s.apply(enabledUsage(s))
   #expect(s.currentUsage?.name == "beta")
   r.answer("list", snapshotUnsaved)
   r.answer("usage", #"{"profiles":[{"name":"alpha","fiveHour":{"utilization":10}},{"name":"(signed in)","fiveHour":{"utilization":77}}]}"#)
+  clock.now += AppSettings.usageRefreshFloor
   await s.refreshAll()
   #expect(s.currentUsage?.name == "(signed in)")
   #expect(s.currentUsage?.fiveHour?.utilization == 77)
@@ -593,4 +601,33 @@ private func enabledUsage(_ s: AppState) -> AppSettings {
   r.fail("usage", .timedOut)
   await s.refreshUsage()
   #expect(s.usageUpdatedAt == nil)
+}
+
+@Test @MainActor func launchRefreshAllRunsUsageWithNoEarlierAttempt() async {
+  // start() goes through refreshAll; before the CLI is probed, enabling usage
+  // makes no attempt, so the floor has no stamp to measure from.
+  let r = readyRunner()
+  let s = makeState(r)
+  await s.apply(enabledUsage(s))
+  #expect(r.calls == [])
+  await s.relocate()
+  await s.refreshAll()
+  #expect(r.calls.last == ["usage", "--json"])
+}
+
+@Test @MainActor func usageRefreshWithinTheFloorIsSkipped() async {
+  let clock = TestClock()
+  let (s, r) = await readyState(clock: clock)
+  r.fail("usage", .timedOut)
+  await s.apply(enabledUsage(s))
+  r.answer("usage", usageBoth)
+  r.clearCalls()
+  clock.now += 29
+  await s.refreshAll()
+  #expect(r.calls == [["list", "--json"]])
+  #expect(s.usage.isEmpty)
+  clock.now += 1
+  await s.refreshAll()
+  #expect(r.calls == [["list", "--json"], ["list", "--json"], ["usage", "--json"]])
+  #expect(s.usage["beta"] != nil)
 }

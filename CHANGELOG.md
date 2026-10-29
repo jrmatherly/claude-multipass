@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The menu bar app runs `usage --json` for a Refresh click at most once per 30 seconds. Every click ran it, one Keychain read and one usage request per account each time.
+- `remove` and `save --force` keep the newest ten set-aside profiles under `backups/profile-*`, as `backups/login-*` already keeps ten logins; `doctor` counts both. Set-aside profiles were never pruned.
 - After a switch, a Claude Code using an API key, an `apiKeyHelper`, a `CLAUDE_CODE_OAUTH_TOKEN` or a third-party provider is reported as such instead of as "a different org". The org in `claude auth status` is that credential's, not the login the switch wrote.
 - The menu bar app's Launch at login toggle shows on, with a note, while macOS holds the login item for approval under System Settings, General, Login Items. It showed off, and a second toggle registered the item again.
 

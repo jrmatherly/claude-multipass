@@ -78,7 +78,7 @@ Refresh cadence:
 | What | Command | When |
 | --- | --- | --- |
 | Snapshot (accounts, signed-in state, Desktop running) | `list --json` | every 30 s, on popover open, after a switch or save, on Refresh; reads `config.json` and `meta.json`, never the Keychain |
-| Usage figures | `usage --json` | only when usage is on: every 5, 15, 30 or 60 minutes, once when turned on, on Refresh; one Keychain read per run |
+| Usage figures | `usage --json` | only when usage is on: every 5, 15, 30 or 60 minutes, once when turned on, on Refresh at most once per 30 s; one Keychain read per run |
 | Popover reset countdowns and fetch time | none | every 30 s while the popover is open, from cached data |
 
 Neither command runs while a switch or save does, from a timer, a popover open or Refresh: the tool is rewriting `config.json` and the Keychain items then. The snapshot is read once the switch or save finishes, unless the tool refused it before quitting Desktop. A usage fetch still running when usage is turned off is discarded.
@@ -101,7 +101,7 @@ This is the one part of the tool that uses a subscription token outside Anthropi
 | --- | --- |
 | `~/.config/claude-multipass/profiles/<name>/` | A profile: `config.json` (the three login keys), `Cookies`, `Cookies-journal`, `meta.json` (account id, save time), `cli.json` (the CLI's `oauthAccount` block, no secret). Mode 0600. The CLI's tokens for the profile are a login-Keychain item, service `claude-multipass`, account `<name>` |
 | `~/.config/claude-multipass/backups/login-*/` | The login each `switch` or `add` replaced, newest ten |
-| `~/.config/claude-multipass/backups/profile-*/` | Profiles that `remove` or a forced `save` set aside |
+| `~/.config/claude-multipass/backups/profile-*/` | Profiles that `remove` or a forced `save` set aside, newest ten |
 | `~/Library/Application Support/Claude/` | Desktop's data: `config.json`, the cookie files, `claude-code-sessions/<account>/<org>/local_*.json` (the Code tab's list) |
 | `~/.claude.json` and the login Keychain | The CLI's data: `oauthAccount` in the file, the tokens in the Keychain item `Claude Code-credentials` (account: your macOS user name). The tool's own items are service `claude-multipass`, one per profile and one per `login-*` backup folder whose switch wrote the CLI item. A backup's item holds the account part only, as a profile's does. `CLAUDE_CLI_CONFIG` and `CLAUDE_CLI_HOME` point at another file and CLI home (the self-check uses them) |
 

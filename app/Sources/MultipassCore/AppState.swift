@@ -70,6 +70,8 @@ public final class AppState: ObservableObject {
   private var usageTask: Task<Void, Never>?
   /// The usage run in flight, so an action can wait for its Keychain prompt to close.
   private var usageFetch: Task<Void, Never>?
+  /// The last usage attempt, success or failure; `refreshAll` floors on it.
+  private var usageAttemptedAt: Date?
   @Published private var snapshotError: String?
   @Published private var usageError: String?
 
@@ -159,6 +161,7 @@ public final class AppState: ObservableObject {
   /// 10 minutes), so its result is dropped unless usage is still on.
   public func refreshUsage() async {
     guard settings.usageEnabled, phase == .idle, case .ready = cliStatus, let runner, !isRefreshingUsage else { return }
+    usageAttemptedAt = now()
     isRefreshingUsage = true
     let fetch = Task { await fetchUsage(runner) }
     usageFetch = fetch
@@ -184,8 +187,12 @@ public final class AppState: ObservableObject {
     }
   }
 
+  /// The manual path (Refresh in the popover and the menu, and launch). The
+  /// timer and the usage toggle call `refreshUsage` directly, spaced on their
+  /// own, so only a click can land within the floor of the last attempt.
   public func refreshAll() async {
     await refresh()
+    if let last = usageAttemptedAt, now().timeIntervalSince(last) < AppSettings.usageRefreshFloor { return }
     await refreshUsage()
   }
 
