@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `doctor` on a store with no `backups/` folder, such as a fresh install, prints every check and exits 0. It stopped after the store line with exit 1 and no `fail:` line.
+- A Ctrl-C, a SIGTERM or a failed quit while `save`, `switch` or `add` waits for Desktop to quit now relaunches Desktop. The relaunch trap was set only after the quit finished, so Desktop stayed quit.
+- Profile names must start with a letter or digit, in the tool and in the menu bar app's "Save this login as" row. A name such as `.foo` was accepted but never shown by `list`, `current` or the unsaved-login check, which skip dot folders.
+- `doctor` warns when `claude` is not on PATH, since a switch then cannot verify the terminal login, and when `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` is set, since either overrides the terminal login.
 - The menu bar app tells a failed version check apart from an old tool. A `claude-multipass --version` that exits non-zero (a missing `jq`), times out or prints no version line showed "too old, brew upgrade"; the popover now shows the error and the Settings General tab reads `failed: <error>`.
 - The menu bar app no longer hangs in the switching phase when a command exits while a grandchild still holds its output pipe; it takes what was read after 2 s.
 - A switch or save from the menu bar app waits for a usage run in flight to finish, so a usage run sitting on a Keychain prompt no longer gets a second prompt beside it.

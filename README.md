@@ -37,7 +37,7 @@ Claude Code transcripts live in `~/.claude/projects`, shared by every account, s
 | `sync` | Only the session-list merge (Desktop must be quit, or `--force`) |
 | `usage [name]` | 5-hour and weekly usage per saved account. Opt-in: it decrypts the saved token with the app's Keychain key and reads Anthropic's OAuth usage endpoint outside the app, which third-party coverage says Anthropic's terms discourage. Read-only, runs only when asked |
 | `pick` | The fzf picker (also a bare invocation on a terminal) |
-| `doctor` | Check the setup: config, tools, store modes, profile tokens, which profiles hold no CLI login. Exits 1 on any `fail:` line |
+| `doctor` | Check the setup: config, tools, store modes, profile tokens, which profiles hold no CLI login, `claude` missing from PATH, a set `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`. Exits 1 on any `fail:` line |
 
 `--no-relaunch` leaves Desktop quit; `--force` overrides the refusals named in `--help`. Run `save`, `switch` and `add` from Terminal or the menu bar app, not from a terminal inside Desktop (the Code tab): the tool refuses there, since quitting Desktop would end that shell. Quit any running `claude` terminal session before a switch: it is assumed to keep its old token and write it back on its next refresh (`switch` warns when one runs). A profile saved before the CLI login existed switches Desktop only until the account is signed in with `claude auth login` and saved again (the next `switch` away from it captures the login too).
 
@@ -46,6 +46,7 @@ Claude Code transcripts live in `~/.claude/projects`, shared by every account, s
 - Never use Desktop's own **Log out** to change accounts; it may revoke the saved token on the server. Use `add` or `switch`.
 - Sign in with the email code, not Google, so the browser hand-back lands in the right window.
 - Profiles are per Mac: the app's Keychain key encrypts them. Save each account once on every Mac.
+- A third-party gateway that configures Desktop in its own mode (a `Claude-3p` data folder beside `Claude`) is not seen by the tool; a switch with it active can relaunch the gateway's instance. Close it first. Uninstall steps are in `docs/claude-multipass.md`.
 - Whether to run several accounts, and `usage`, is your call under Anthropic's terms. This tool keeps switching manual and never rotates accounts by itself.
 
 ## Raycast
