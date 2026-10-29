@@ -522,16 +522,22 @@ rm -rf "$tmp/claude.json.lock" "$tmp/claude-home/.oauth_refresh.lock" "$tmp/clau
 printf '#!/bin/sh\necho "{\\"loggedIn\\":true,\\"orgId\\":\\"org-other\\"}"\n' > "$tmp/bin/claude"
 err=$(cda switch beta --no-relaunch 2>&1 > /dev/null)
 check_true "an org mismatch warns and names the backup" grep -q "Claude Code reports a different org; the previous login is in $b/login-" <<< "$err"
+# Under an API key, a helper, a setup-token or a third-party provider the CLI
+# reports that credential's org, not the login just written (CLI reference)
+printf '#!/bin/sh\necho "{\\"loggedIn\\":true,\\"authMethod\\":\\"api_key\\",\\"orgId\\":\\"org-other\\"}"\n' > "$tmp/bin/claude"
+err=$(cda switch alpha --no-relaunch 2>&1 > /dev/null)
+check_true "an overriding credential warns which one outranks the login" grep -q "Claude Code is using its api_key credential, which outranks the switched terminal login until that credential is removed" <<< "$err"
+check "and not about the org" 0 "$(grep -c 'different org' <<< "$err")"
 # A signed-out claude prints its JSON and exits 1 (measured with 2.1.311, as the CLI reference says)
 printf '#!/bin/sh\necho "{\\"loggedIn\\":false,\\"authMethod\\":\\"none\\"}"\nexit 1\n' > "$tmp/bin/claude"
-err=$(cda switch alpha --no-relaunch 2>&1 > /dev/null)
+err=$(cda switch beta --no-relaunch 2>&1 > /dev/null)
 check_true "a signed-out claude warns and names the backup" grep -q "Claude Code reports it is signed out; the previous login is in $b/login-" <<< "$err"
 check "and not about the org" 0 "$(grep -c 'different org' <<< "$err")"
 printf '#!/bin/sh\nexit 3\n' > "$tmp/bin/claude"
-err=$(cda switch beta --no-relaunch 2>&1 > /dev/null)
+err=$(cda switch alpha --no-relaunch 2>&1 > /dev/null)
 check_true "a failing claude auth status warns and names the backup" grep -q "claude auth status exited 3; could not verify the CLI login (the previous login is in $b/login-" <<< "$err"
 printf '#!/bin/sh\necho not json\n' > "$tmp/bin/claude"
-err=$(cda switch alpha --no-relaunch 2>&1 > /dev/null)
+err=$(cda switch beta --no-relaunch 2>&1 > /dev/null)
 check_true "a claude auth status without JSON warns and names the backup" grep -q "claude auth status printed no JSON; could not verify the CLI login (the previous login is in $b/login-" <<< "$err"
 rm "$tmp/bin/claude"
 # a PATH without claude (jq's folder, the stub folder and the system folders only)
