@@ -97,6 +97,7 @@ import Testing
   #expect(!isValidProfileName(""))
   #expect(!isValidProfileName("."))
   #expect(!isValidProfileName(".."))
+  #expect(!isValidProfileName(".foo"))
   #expect(!isValidProfileName("a b"))
   #expect(!isValidProfileName("a/b"))
   #expect(!isValidProfileName("é"))

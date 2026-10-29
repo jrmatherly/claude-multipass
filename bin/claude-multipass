@@ -260,10 +260,11 @@ ${bold}Commands${reset}
   doctor               Checks the setup: Desktop's config.json, the tools on
                        PATH, the store and profile modes, each profile's token,
                        the backups count, whether Desktop runs, which profiles
-                       hold no CLI login, whether CLAUDE_CONFIG_DIR or
-                       CLAUDE_SECURESTORAGE_CONFIG_DIR is set. One ok:, warn:
-                       or fail: line per check; exits 1 on any fail:. Reads no
-                       Keychain and no network.
+                       hold no CLI login, whether claude is on PATH, whether
+                       CLAUDE_CONFIG_DIR, CLAUDE_SECURESTORAGE_CONFIG_DIR,
+                       ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN is set.
+                       One ok:, warn: or fail: line per check; exits 1 on any
+                       fail:. Reads no Keychain and no network.
 
 ${bold}Options${reset}
   --no-relaunch        Leave Desktop quit after save, switch, add or pick,
@@ -912,7 +913,7 @@ usage_object() {
 # One line per check, in a fixed order, no Keychain and no network. Exits 1
 # when any fail: line was printed.
 doctor_report() {
-  local status=0 tool mode meta dir name file n legacy
+  local status=0 tool mode meta dir name file logins legacy
   if [[ -f $config ]]; then echo "ok: config: $config"; else
     echo "fail: config: no $config (open Claude Desktop once first)"
     status=1
@@ -955,8 +956,13 @@ doctor_report() {
   done
   [[ -z ${CLAUDE_CONFIG_DIR:-} ]] || echo "warn: CLAUDE_CONFIG_DIR is set; the CLI login is not saved or switched"
   [[ -z ${CLAUDE_SECURESTORAGE_CONFIG_DIR:-} ]] || echo "warn: CLAUDE_SECURESTORAGE_CONFIG_DIR is set; the CLI login is not saved or switched"
-  n=$(ls -1d "$backups"/login-*/ 2> /dev/null | wc -l | tr -d ' ')
-  echo "ok: backups: $n saved logins in $backups"
+  [[ -z ${ANTHROPIC_API_KEY:-} ]] || echo "warn: ANTHROPIC_API_KEY is set; it overrides the terminal login"
+  [[ -z ${CLAUDE_CODE_OAUTH_TOKEN:-} ]] || echo "warn: CLAUDE_CODE_OAUTH_TOKEN is set; it overrides the terminal login"
+  command -v claude > /dev/null || echo "warn: claude: not on PATH; the terminal login is not verified after a switch"
+  # A glob, not ls or find, which fail under pipefail when nothing matches.
+  logins=("$backups"/login-*/)
+  [[ -d ${logins[0]} ]] || logins=()
+  echo "ok: backups: ${#logins[@]} saved logins in $backups"
   if desktop_running; then echo "ok: desktop: running"; else echo "ok: desktop: not running"; fi
   legacy="$config_home/dotfiles/claude-desktop-accounts"
   [[ ! -d $legacy ]] || echo "warn: legacy store: $legacy still exists (it moves on the first run without CLAUDE_MULTIPASS_DIR)"
@@ -1074,8 +1080,8 @@ require_meta() {
 }
 
 valid_name() {
-  [[ $1 =~ ^[A-Za-z0-9._-]+$ && $1 != . && $1 != .. ]] \
-    || fail "Give a name made of letters, digits, . _ - (got: $1)"
+  [[ $1 =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] \
+    || fail "Give a name that starts with a letter or digit and is made of letters, digits, . _ - (got: $1)"
 }
 
 # The profile's CLI item is keyed by name, so it moves too (44: none saved).
@@ -1310,10 +1316,11 @@ main() {
   # error midway still brings it back. Quitting Desktop from a shell it owns
   # would end that shell mid-switch, so refuse instead.
   ! inside_desktop || fail "This shell runs inside Claude Desktop; quitting it would end this session. Run $cmd from Terminal or the menu bar app"
-  desktop_quit
   # relaunch is main's local, so the trap text is chosen now, not at exit.
   # The run lock goes last, so no other run quits Desktop before it relaunches.
+  # The trap goes in before the quit, so a signal or a failed quit relaunches.
   if [[ -n $relaunch ]]; then trap 'cli_unlock; desktop_launch; run_unlock' EXIT; else trap 'cli_unlock; run_unlock' EXIT; fi
+  desktop_quit
   # The CLI's own locks guard its login while a save reads it or a switch
   # writes it. They are taken only when claude.json exists, because
   # cli_restore writes nothing without it.

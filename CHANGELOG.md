@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- `doctor` on a store with no `backups/` folder, such as a fresh install, prints every check and exits 0. It stopped after the store line with exit 1 and no `fail:` line.
+- A Ctrl-C, a SIGTERM or a failed quit while `save`, `switch` or `add` waits for Desktop to quit now relaunches Desktop. The relaunch trap was set only after the quit finished, so Desktop stayed quit.
+- Profile names must start with a letter or digit, in the tool and in the menu bar app's "Save this login as" row. A name such as `.foo` was accepted but never shown by `list`, `current` or the unsaved-login check, which skip dot folders.
+- `doctor` warns when `claude` is not on PATH, since a switch then cannot verify the terminal login, and when `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` is set, since either overrides the terminal login.
+
 ## 0.5.1 (2026-10-27)
 
 - The Settings About tab's documentation link reads "Open on GitHub" with an outward arrow instead of the file name `claude-multipass.md`.
