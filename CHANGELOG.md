@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- The backup prune in `switch`, `add`, `remove` and `save --force` keeps the folder it has just made whatever the clock says. Before, a Mac with its clock set back pruned that folder first, because the prune ordered folders by the timestamp in their names alone.
+
 ## 0.6.0 (2026-10-29)
 
 - The menu bar app runs `usage --json` for a Refresh click at most once per 30 seconds. Every click ran it, one Keychain read and one usage request per account each time.

@@ -706,10 +706,13 @@ backup_login() {
   copy_cookies "$cookies" "$backup_dest"
   echo "Backed up the current login to $backup_dest"
   # A glob, not ls, so a store path with a space never splits; names sort by
-  # time, and it matches at least backup_dest. A pruned folder's CLI backup
+  # time. The folder just made is left out of the candidates rather than
+  # trusted to sort newest: under a clock set back it would go first. The
+  # backup_keep - 1 newest others stay beside it. A pruned folder's CLI backup
   # item goes with it (44: a 0.2.x folder had none).
-  all=("$backups"/login-*/)
-  for ((i = 0; i < ${#all[@]} - backup_keep; i++)); do
+  all=()
+  for old in "$backups"/login-*/; do [[ ${old%/} == "$backup_dest" ]] || all+=("$old"); done
+  for ((i = 0; i < ${#all[@]} - (backup_keep - 1); i++)); do
     old=${all[i]}
     rm -rf "$old"
     keychain_delete "$mp_service" "$(basename "$old")" || warning "could not delete the Keychain item for $old"
@@ -717,15 +720,17 @@ backup_login() {
 }
 
 # profile-<name>-<stamp>-<pid> sorts by name, so the prune sorts on the stamp
-# (the `date +%Y%m%d-%H%M%S` the folder names carry); the newest backup_keep
-# stay and a folder without a stamp is never touched. No Keychain item: the
-# profile's went with the move.
+# (the `date +%Y%m%d-%H%M%S` the folder names carry). The folder just made
+# ($1) stays whatever its stamp, so a clock set back cannot prune it, the
+# backup_keep - 1 newest others stay beside it, and a folder without a stamp
+# is never touched. No Keychain item: the profile's went with the move.
 prune_profile_backups() {
   local dir
   for dir in "$backups"/profile-*/; do
+    [[ ${dir%/} == "$1" ]] && continue
     [[ $dir =~ -([0-9]{8}-[0-9]{6})-[0-9]+/$ ]] || continue
     printf '%s\t%s\n' "${BASH_REMATCH[1]}" "$dir"
-  done | sort -r | tail -n +$((backup_keep + 1)) | while IFS=$'\t' read -r _ dir; do
+  done | sort -r | tail -n +$backup_keep | while IFS=$'\t' read -r _ dir; do
     rm -rf "$dir" || warning "could not remove $dir"
   done
 }
@@ -733,10 +738,12 @@ prune_profile_backups() {
 # A profile set aside keeps its Desktop login in backups/; its CLI item goes,
 # the token being recoverable only through claude auth login.
 profile_set_aside() {
+  local dest
+  dest="$backups/profile-$1-$(date +%Y%m%d-%H%M%S)-$$"
   (umask 077 && mkdir -p "$backups")
-  mv "$store/$1" "$backups/profile-$1-$(date +%Y%m%d-%H%M%S)-$$"
+  mv "$store/$1" "$dest"
   keychain_delete "$mp_service" "$1" || warning "could not delete the CLI login item for $1"
-  prune_profile_backups
+  prune_profile_backups "$dest"
 }
 
 profile_save() {
