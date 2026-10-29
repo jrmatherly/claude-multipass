@@ -78,7 +78,7 @@ Refresh cadence:
 | What | Command | When |
 | --- | --- | --- |
 | Snapshot (accounts, signed-in state, Desktop running) | `list --json` | every 30 s, on popover open, after a switch or save, on Refresh; reads `config.json` and `meta.json`, never the Keychain |
-| Usage figures | `usage --json` | only when usage is on: every 5, 15, 30 or 60 minutes, once when turned on, on Refresh; one Keychain read per run |
+| Usage figures | `usage --json` | only when usage is on: every 5, 15, 30 or 60 minutes, once when turned on, on Refresh at most once per 30 s; one Keychain read per run |
 | Popover reset countdowns and fetch time | none | every 30 s while the popover is open, from cached data |
 
 Neither command runs while a switch or save does, from a timer, a popover open or Refresh: the tool is rewriting `config.json` and the Keychain items then. The snapshot is read once the switch or save finishes, unless the tool refused it before quitting Desktop. A usage fetch still running when usage is turned off is discarded.

@@ -13,6 +13,8 @@ public struct AppSettings: Equatable, Codable {
   public var cliPathOverride: String? = nil
 
   public static let snapshotInterval: TimeInterval = 30
+  /// A Refresh click runs `usage` at once; a burst of clicks costs one run.
+  public static let usageRefreshFloor: TimeInterval = 30
   public static let allowedIntervals = [5, 15, 30, 60]
 
   public init() {}
