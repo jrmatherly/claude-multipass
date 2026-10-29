@@ -529,11 +529,12 @@ cli_backup() {
 # After a restore, claude itself must be signed in and agree on the org; a
 # miss is a warning naming the backup, never a rollback.
 cli_verify() {
-  local out signed org rc=0
+  local out signed method org rc=0
   [[ -n $1 ]] && command -v claude > /dev/null || return 0
   out=$(claude auth status 2> /dev/null) || rc=$?
   # Signed out, it still prints its JSON but exits 1, so the JSON is read first.
-  if ! read -r signed org < <(printf '%s' "$out" | jq -r '"\(.loggedIn) \(.orgId // "")"' 2> /dev/null); then
+  # A status without authMethod (an older CLI) is read as the login itself.
+  if ! read -r signed method org < <(printf '%s' "$out" | jq -r '"\(.loggedIn) \(.authMethod // "claude.ai") \(.orgId // "")"' 2> /dev/null); then
     if ((rc != 0)); then
       warning "claude auth status exited $rc; could not verify the CLI login (the previous login is in $backup_dest)"
     else
@@ -543,6 +544,12 @@ cli_verify() {
   fi
   if [[ $signed != true ]]; then
     warning "Claude Code reports it is signed out; the previous login is in $backup_dest"
+    return 0
+  fi
+  # api_key, api_key_helper, oauth_token or third_party: the org is that
+  # credential's, so the login just written cannot be checked against it.
+  if [[ $method != claude.ai ]]; then
+    warning "Claude Code is using its $method credential, which outranks the switched terminal login until that credential is removed"
     return 0
   fi
   [[ $org == "$1" ]] || warning "Claude Code reports a different org; the previous login is in $backup_dest"

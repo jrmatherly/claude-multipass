@@ -33,8 +33,20 @@ struct SettingsView: View {
   let pane: SettingsPane
   @State private var draft: AppSettings
   @State private var customLocation: Bool
-  @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
+  @State private var launchAtLogin = SettingsView.loginItemOn
   @State private var loginItemError: String?
+  @State private var loginItemNote: String? = SettingsView.approvalNote
+
+  // A login item macOS holds for the user's approval reads as on, with the
+  // note; read as off, it invited a second toggle that registered it again.
+  private static var loginItemOn: Bool {
+    [.enabled, .requiresApproval].contains(SMAppService.mainApp.status)
+  }
+
+  private static var approvalNote: String? {
+    SMAppService.mainApp.status == .requiresApproval
+      ? "Waiting for approval in System Settings, General, Login Items" : nil
+  }
 
   private static let docs = URL(string: "https://github.com/jrmatherly/claude-multipass/blob/main/docs/claude-multipass.md")!
 
@@ -70,6 +82,9 @@ struct SettingsView: View {
         .onChange(of: launchAtLogin) { _, enabled in setLaunchAtLogin(enabled) }
       if let loginItemError {
         Text(loginItemError).font(.caption).foregroundStyle(.red)
+      }
+      if let loginItemNote {
+        Text(loginItemNote).font(.caption).foregroundStyle(.secondary)
       }
     }
     Section {
@@ -183,13 +198,14 @@ struct SettingsView: View {
 
   private func setLaunchAtLogin(_ enabled: Bool) {
     let service = SMAppService.mainApp
-    guard enabled != (service.status == .enabled) else { return }
+    guard enabled != Self.loginItemOn else { return }
     do {
       if enabled { try service.register() } else { try service.unregister() }
       loginItemError = nil
     } catch {
       loginItemError = error.localizedDescription
-      launchAtLogin = service.status == .enabled
+      launchAtLogin = Self.loginItemOn
     }
+    loginItemNote = Self.approvalNote
   }
 }

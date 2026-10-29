@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- After a switch, a Claude Code using an API key, an `apiKeyHelper`, a `CLAUDE_CODE_OAUTH_TOKEN` or a third-party provider is reported as such instead of as "a different org". The org in `claude auth status` is that credential's, not the login the switch wrote.
+- The menu bar app's Launch at login toggle shows on, with a note, while macOS holds the login item for approval under System Settings, General, Login Items. It showed off, and a second toggle registered the item again.
+
 ## 0.5.2 (2026-10-28)
 
 - `doctor` on a store with no `backups/` folder, such as a fresh install, prints every check and exits 0. It stopped after the store line with exit 1 and no `fail:` line.
