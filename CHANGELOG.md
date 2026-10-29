@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.0 (2026-10-29)
 
 - The menu bar app runs `usage --json` for a Refresh click at most once per 30 seconds. Every click ran it, one Keychain read and one usage request per account each time.
 - `remove` and `save --force` keep the newest ten set-aside profiles under `backups/profile-*`, as `backups/login-*` already keeps ten logins; `doctor` counts both. Set-aside profiles were never pruned.
