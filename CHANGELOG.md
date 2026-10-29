@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.1 (2026-10-29)
 
 - The backup prune in `switch`, `add`, `remove` and `save --force` keeps the folder it has just made whatever the clock says. Before, a Mac with its clock set back pruned that folder first, because the prune ordered folders by the timestamp in their names alone.
 
