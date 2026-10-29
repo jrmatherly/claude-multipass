@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.2 (2026-10-28)
 
 - `doctor` on a store with no `backups/` folder, such as a fresh install, prints every check and exits 0. It stopped after the store line with exit 1 and no `fail:` line.
 - A Ctrl-C, a SIGTERM or a failed quit while `save`, `switch` or `add` waits for Desktop to quit now relaunches Desktop. The relaunch trap was set only after the quit finished, so Desktop stayed quit.
