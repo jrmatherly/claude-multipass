@@ -882,6 +882,17 @@ check_true "a folder without a stamp is left alone" test -d "$b/profile-kept-by-
 check "login backups untouched by the profile prune" 10 "$(find "$b" -mindepth 1 -maxdepth 1 -type d -name 'login-*' | wc -l | tr -d ' ')"
 check_true "doctor counts both kinds" grep -q "ok: backups: 10 saved logins and 11 set-aside profiles in $b" <<< "$(cda doctor 2>&1)"
 rm -r "$b/profile-kept-by-hand"
+# A clock set back: the folder just made carries an older stamp than the
+# backups already there, and must survive the prune anyway
+for i in $(seq 1 10); do mkdir -p "$b/login-2099010100000$i-1" "$b/profile-old-209901$(printf %02d "$i")-000000-1"; done
+printf '{"oauth:tokenCache":"x","oauth:tokenCacheV2":"enc-R","lastKnownAccountUuid":"rrrrrrrr-0000"}' > "$d/config.json"
+cda add zeta --no-relaunch --force > /dev/null 2>&1
+check "login backups still pruned to ten under a clock set back" 10 "$(find "$b" -mindepth 1 -maxdepth 1 -type d -name 'login-*' | wc -l | tr -d ' ')"
+check "the login just backed up survives a clock set back" 1 "$(find "$b" -mindepth 1 -maxdepth 1 -type d -name "login-$(date +%Y)*" | wc -l | tr -d ' ')"
+cp -R "$p/beta" "$p/aa-three"
+cda remove aa-three > /dev/null
+check "profile backups still pruned to ten under a clock set back" 10 "$(find "$b" -mindepth 1 -maxdepth 1 -type d -name 'profile-*' | wc -l | tr -d ' ')"
+check "the profile just set aside survives a clock set back" 1 "$(find "$b" -mindepth 1 -maxdepth 1 -type d -name 'profile-aa-three-*' | wc -l | tr -d ' ')"
 # A store path with a space: the prune must not split it and rm a sibling
 # named after its first word. Run from $tmp so a split's relative half lands there.
 spaced="$tmp/my store"
