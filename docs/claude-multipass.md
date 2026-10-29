@@ -47,7 +47,7 @@ Desktop quits, relaunches signed in as that account, and the Code tab lists both
 | `doctor` | One `ok:`, `warn:` or `fail:` line per check (config, tools, store and profile modes, each profile's token, backups, Desktop running, the pre-0.1 store, profiles without a CLI login, `CLAUDE_CONFIG_DIR` or `CLAUDE_SECURESTORAGE_CONFIG_DIR`). Exits 1 on any `fail:`. No Keychain, no network |
 | `--version` | Print the version |
 
-`--no-relaunch` leaves Desktop quit after `save`, `switch` or `add`.
+`--no-relaunch` leaves Desktop quit after `save`, `switch`, `add` or `pick`.
 
 ## What carries over, and what does not
 
@@ -107,6 +107,14 @@ This is the one part of the tool that uses a subscription token outside Anthropi
 
 `CLAUDE_MULTIPASS_DIR` moves the profile and backup folders (`XDG_CONFIG_HOME` moves their default parent); `CLAUDE_DESKTOP_DIR` points at another Desktop data folder. A store left by the tool's earlier life as `claude-desktop-account` in a dotfiles repo (`dotfiles/claude-desktop-accounts` and its `-backups` sibling under `XDG_CONFIG_HOME`, `~/.config` by default) is moved into the new location on the first run that finds it, and the run says so. When a `backups` folder already exists in the new location, the legacy `-backups` folder stays where it was and the run warns.
 
+## Uninstall
+
+1. Turn Launch at login off in the menu bar app's Settings, General, quit the app, then `brew uninstall --cask claude-multipass-app`. Its settings are one preferences domain: `defaults delete net.matherly.claude-multipass`.
+2. `claude-multipass remove <name>` for each saved profile. It deletes the profile's Keychain item and moves the folder to `backups/profile-*`; Desktop's own login and the CLI's own `Claude Code-credentials` item stay as they are.
+3. The `login-*` backups that wrote a CLI login each left a Keychain item of the tool's own. Delete them before the folder goes, or they stay behind with no file that names them: `for d in ~/.config/claude-multipass/backups/login-*/; do security delete-generic-password -s claude-multipass -a "$(basename "$d")" 2> /dev/null; done`. Then `rm -rf ~/.config/claude-multipass` (or the `CLAUDE_MULTIPASS_DIR` you set), and `brew uninstall claude-multipass`.
+
+A `security find-generic-password -s claude-multipass` that prints nothing afterwards means no item of the tool's is left.
+
 ## When something is off
 
 - Start with `claude-multipass doctor`. It prints one line per check and names the profile that needs a re-save.
@@ -117,6 +125,7 @@ This is the one part of the tool that uses a subscription token outside Anthropi
 - `switch` said `switched Desktop only`: the restore of the target's CLI login was skipped and the reason is in the same line (no CLI login saved for that profile, its Keychain item missing, no `~/.claude.json` because the CLI never ran on this Mac, a corrupt `~/.claude.json` or live item, `CLAUDE_CONFIG_DIR` or `CLAUDE_SECURESTORAGE_CONFIG_DIR` set, a Keychain call that failed). `<name>: ... saved the Desktop login only` is the re-save of the profile you are leaving: the CLI was signed in as another account or signed out, so that profile's earlier CLI login was kept; the target's login is still restored, replacing the live one (backed up first). Run `claude auth login` for the account you want, then `save <name>`; from then on the next `switch` away from it captures the login through the re-save.
 - `claude` fails with `invalid_grant` after a switch, possibly hours later when its access token expires: the likely cause is a saved refresh token the CLI rotated past in a session the tool did not see (not yet measured on a real round trip). Run `claude auth login`, then `save <name>`.
 - The previous CLI login is in the backup folder `switch` named: `oauthAccount` in its `cli.json`, the tokens in the Keychain item `claude-multipass` / `login-<timestamp>-<pid>`. A removed profile's CLI token is not recoverable from `backups/profile-*`; its Desktop login is.
+- A second Claude Desktop data folder, `~/Library/Application Support/Claude-3p`, exists when a third-party gateway (an LLM router with a Desktop profile) has configured Desktop in its own mode. The tool reads only the `Claude` folder and quits and relaunches the app by its name, so a switch with that gateway active can relaunch the gateway's instance instead of the account you picked. Close the gateway, or turn its Desktop profile off, before a switch.
 - The Code tab does not list the other account's sessions: quit Desktop and run `sync`, then reopen. Sessions deleted in any account stay deleted.
 
 ## Safety rails

@@ -46,6 +46,7 @@ Claude Code transcripts live in `~/.claude/projects`, shared by every account, s
 - Never use Desktop's own **Log out** to change accounts; it may revoke the saved token on the server. Use `add` or `switch`.
 - Sign in with the email code, not Google, so the browser hand-back lands in the right window.
 - Profiles are per Mac: the app's Keychain key encrypts them. Save each account once on every Mac.
+- A third-party gateway that configures Desktop in its own mode (a `Claude-3p` data folder beside `Claude`) is not seen by the tool; a switch with it active can relaunch the gateway's instance. Close it first. Uninstall steps are in `docs/claude-multipass.md`.
 - Whether to run several accounts, and `usage`, is your call under Anthropic's terms. This tool keeps switching manual and never rotates accounts by itself.
 
 ## Raycast

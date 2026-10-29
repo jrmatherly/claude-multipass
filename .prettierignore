@@ -13,3 +13,4 @@ logs/
 .superpowers/
 app/.build/
 .archify/
+.claude/worktrees/
