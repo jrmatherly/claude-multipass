@@ -12,9 +12,13 @@ struct AccountRow: View {
   var onTap: () -> Void
   var onCancel: () -> Void
   var onSwitch: (Bool) -> Void
+  var onHover: (Bool, CGRect) -> Void = { _, _ in }
   @State private var isHovered = false
+  @State private var frame = CGRect.zero
 
   private var isIdle: Bool { appState.phase == .idle }
+  /// A confirm or a running switch has the row's attention; the panel stays out of it.
+  var offersDetail: Bool { isIdle && !isExpanded }
   private var isSwitching: Bool { appState.phase == .switching(profile.name) }
   private var rowError: RowError? { appState.rowError?.name == profile.name ? appState.rowError : nil }
   private var rowNote: RowNote? { appState.rowNote?.name == profile.name ? appState.rowNote : nil }
@@ -44,9 +48,16 @@ struct AccountRow: View {
       .onHover { inside in
         isHovered = inside
         (inside && isIdle ? NSCursor.pointingHand : NSCursor.arrow).set()
+        onHover(inside && offersDetail, frame)
       }
+      .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(AccountPanelController.space)) } action: { frame = $0 }
       // A row that leaves the list under the pointer (it just became the signed-in one) gets no exit.
-      .onDisappear { if isHovered { NSCursor.arrow.set() } }
+      .onDisappear {
+        if isHovered {
+          NSCursor.arrow.set()
+          onHover(false, frame)
+        }
+      }
       detail
     }
     .disabled(!isIdle)
@@ -91,7 +102,12 @@ struct AccountRow: View {
   var modelBarColor: Color {
     UsageLevel.modelColor(modelFigure, accountIsFull: entry?.accountIsFull ?? false, normal: .accentColor)
   }
-  var usageLabel: String { entry?.error ?? entry?.limitsSummary ?? "No usage figures yet" }
+  /// The panel is hover-only, so VoiceOver gets the resets here.
+  var usageLabel: String {
+    if let error = entry?.error { return error }
+    guard let entry, let summary = entry.limitsSummary else { return "No usage figures yet" }
+    return ([summary] + entry.resetLabels(now: Date())).joined(separator: ", ")
+  }
 
   /// The bars keep the signed-in account's order: every model first, then one model.
   private var usage: some View {
@@ -105,7 +121,6 @@ struct AccountRow: View {
       }
       .frame(width: 40)
     }
-    .help(usageLabel)
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(usageLabel)
   }

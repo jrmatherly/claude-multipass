@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Hovering a "Switch to" row shows a small panel beside the popover with that account's plan, weekly reset, 5-hour countdown and bars, or its fetch error. The row's tooltip is gone, since a tooltip never showed in this popover while the app was inactive. The figures come from the last fetch, so hovering starts no fetch.
+
 ## 0.8.0 (2026-10-31)
 
 - The popover header shows the day and time the weekly limit resets beside the plan name, and an Ultra account with no 5-hour limit no longer has a row saying so, since the header already names the plan. Only the 5-hour bar still names its reset.
