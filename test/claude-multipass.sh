@@ -1018,6 +1018,58 @@ check "and is not retried until the day is out" "$calls" "$(grep -c 'oauth/profi
 rm -f "$tmp/profile-code" "$plans/uuuuuuuu-1"
 printf '{"organization":{"plan_display_name":"Ultra\\u001b[31m"}}' > "$tmp/profile.json"
 check "a plan label outside the name pattern is dropped" null "$(cda usage usagey --json | jq -r '.profiles[0].plan')"
+rm -f "$plans/uuuuuuuu-1"
+# each half of the Ultra rule on its own keeps the 5-hour window
+printf '{"organization":{"plan_display_name":"Ultra"}}' > "$tmp/profile.json"
+printf '{"five_hour":{"utilization":0.0,"resets_at":"2026-10-23T19:45:00Z"},"seven_day":{"utilization":1.0}}' > "$tmp/usage.json"
+out=$(cda usage usagey --json)
+check "Ultra at 0% with a reset keeps its 5-hour window" 0.0 "$(jq -r '.profiles[0].fiveHour.utilization' <<< "$out")"
+check "and is not marked ultra" null "$(jq -r '.profiles[0].ultra' <<< "$out")"
+printf '{"five_hour":{"utilization":5.0,"resets_at":null},"seven_day":{"utilization":1.0}}' > "$tmp/usage.json"
+out=$(cda usage usagey --json)
+check "Ultra at 5% with no reset keeps its 5-hour window" 5.0 "$(jq -r '.profiles[0].fiveHour.utilization' <<< "$out")"
+check "every profile call sends the bearer header on stdin" "$(grep -c 'oauth/profile' "$tmp/curl-args")" "$(sed -n '/oauth\/profile/{n;p;}' "$tmp/curl-args" | grep -c -x 'header = "Authorization: Bearer tok-u"')"
+# a 200 with no usable label keeps the cached one
+touch -t 202001010000 "$plans/uuuuuuuu-1"
+printf '{"organization":{"plan_display_name":null}}' > "$tmp/profile.json"
+check "a 200 with no usable label keeps the cached label" Ultra "$(cda usage usagey --json | jq -r '.profiles[0].plan')"
+# a failed first read caches nothing usable for an hour, then retries
+rm -f "$plans/uuuuuuuu-1"
+printf 500 > "$tmp/profile-code"
+check "a failed first read gives no plan" null "$(cda usage usagey --json | jq -r '.profiles[0].plan')"
+calls=$(grep -c 'oauth/profile' "$tmp/curl-args")
+cda usage usagey > /dev/null
+check "and is not retried within the hour" "$calls" "$(grep -c 'oauth/profile' "$tmp/curl-args")"
+rm -f "$tmp/profile-code"
+printf '{"organization":{"plan_display_name":"Ultra"}}' > "$tmp/profile.json"
+touch -t "$(date -v-2H +%Y%m%d%H%M)" "$plans/uuuuuuuu-1"
+check "an empty label over an hour old is read again" Ultra "$(cda usage usagey --json | jq -r '.profiles[0].plan')"
+# a plans folder that cannot be written means no profile call at all
+rm -rf "$plans" && mkdir -m 500 "$plans"
+calls=$(grep -c 'oauth/profile' "$tmp/curl-args")
+check "an unwritable plans folder still reports usage" 1.0 "$(cda usage usagey --json | jq -r '.profiles[0].sevenDay.utilization')"
+check "and makes no profile call" "$calls" "$(grep -c 'oauth/profile' "$tmp/curl-args")"
+chmod 700 "$plans"
+# odd limits[] shapes and reset times never cost the account
+printf '{"five_hour":{"utilization":5.0,"resets_at":"bogus"},"seven_day":{"utilization":9.0},"limits":[{"kind":"weekly_scoped","percent":5,"resets_at":1730000000,"scope":{"model":{"display_name":"Fable"}}},{"kind":"weekly_scoped","percent":7,"resets_at":"2026-11-01T00:00:00+05:00","scope":{"model":null,"surface":{"display_name":" Cowork "}}},{"kind":"weekly_scoped","percent":8,"scope":{"model":{"display_name":"   "}}}]}' > "$tmp/usage.json"
+out=$(cda usage usagey --json)
+check "unparsable reset times are dropped, the account kept" '[{"name":"Fable","utilization":5},{"name":"Cowork","utilization":7}]' "$(jq -c '.profiles[0].scoped' <<< "$out")"
+check "and the 5-hour window keeps its figure" 5.0 "$(jq -r '.profiles[0].fiveHour.utilization' <<< "$out")"
+check "the text line skips a bad reset time" "usagey           5h 5%  7d 9%  Fable 5%  Cowork 7%" "$(cda usage usagey)"
+printf '[1]' > "$tmp/usage.json"
+check "a body that is not an object is an unreadable response" "unreadable response" "$(cda usage usagey --json | jq -r '.profiles[0].error')"
+# the account id names the cache file, so one that is not an id writes nothing
+mkdir -p "$p/escapey"
+esc_plain='{"acct:../escape|c:o:a:user:profile":{"token":"tok-e","expiresAt":FUTURE}}'
+enc=$(encrypt "${esc_plain//FUTURE/$future}")
+jq -n --arg v "$enc" '{"oauth:tokenCacheV2":$v}' > "$p/escapey/config.json"
+printf '{"account":"../escape","savedAt":"2026-01-01T00:00:00Z"}' > "$p/escapey/meta.json"
+cp "$tmp/usage-full.json" "$tmp/usage.json"
+out=$(cda usage escapey --json)
+check "an account that is not an id still reports usage" 18.0 "$(jq -r '.profiles[0].sevenDay.utilization' <<< "$out")"
+check "with no plan" null "$(jq -r '.profiles[0].plan' <<< "$out")"
+check_true "and writes nothing outside the plans folder" test ! -e "$CLAUDE_MULTIPASS_DIR/escape"
+rm -rf "$p/escapey"
 rm -rf "$plans" "$tmp/profile.json"
 cp "$tmp/usage-full.json" "$tmp/usage.json"
 cp "$p/usagey/meta.json" "$tmp/usagey-meta"

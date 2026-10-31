@@ -35,7 +35,7 @@ Claude Code transcripts live in `~/.claude/projects`, shared by every account, s
 | `list`, `show <name>`, `current` | What is saved and which account is signed in. `list --json` prints one object for scripts and the menu bar app |
 | `save`, `add`, `switch`, `remove`, `rename` | Manage saved logins; `save`, `add` and `switch` quit and relaunch Desktop |
 | `sync` | Only the session-list merge (Desktop must be quit, or `--force`) |
-| `usage [name]` | Plan, 5-hour (or `Ultra`), weekly and per-model weekly (Fable) usage per saved account. Opt-in: it decrypts the saved token with the app's Keychain key and reads Anthropic's OAuth usage endpoint outside the app, plus the profile endpoint for the plan name once a day per account, which third-party coverage says Anthropic's terms discourage. Read-only, runs only when asked |
+| `usage [name]` | 5-hour (or `Ultra`), weekly and per-model weekly (Fable) usage per saved account. Opt-in: it decrypts the saved token with the app's Keychain key and reads Anthropic's OAuth usage endpoint outside the app, plus the profile endpoint for the plan name once a day per account, which third-party coverage says Anthropic's terms discourage. Read-only, runs only when asked |
 | `pick` | The fzf picker (also a bare invocation on a terminal) |
 | `doctor` | Check the setup: config, tools, store modes, profile tokens, which profiles hold no CLI login, `claude` missing from PATH, a set `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`. Exits 1 on any `fail:` line |
 
@@ -69,7 +69,7 @@ brew install --cask jrmatherly/tap/claude-multipass-app
 
 The cask depends on the `claude-multipass` formula and the app needs 0.3.0 or newer; it says so in the popover when the tool is missing or older. The first launch of a downloaded build needs the network once, for Gatekeeper to check the notarization ticket. The first switch asks once whether Claude Multipass may control Claude (the Automation prompt): allow it, or every switch waits 8 s for Desktop to be force-quit instead of asked to quit. A switch that moves a CLI login may also raise a Keychain prompt for `security` once; click Always Allow.
 
-Usage (the ring's fill and percentage in the strip, the plan name and the 5-hour, weekly and Fable bars with their resets in the popover; a verified Ultra account shows Ultra in place of the 5-hour bar) is off by default. Turning it on in Settings has the same caution as the `usage` command: the app runs `claude-multipass usage --json` on a timer, at least 5 minutes apart, which decrypts the saved tokens through this Mac's Keychain (one prompt the first time; click Always Allow) and reads Anthropic's usage endpoint outside the app. Turn it off and the polling stops.
+Usage (the ring's fill and percentage in the strip, the plan name and the 5-hour, weekly and Fable bars with their resets in the popover; an Ultra account with an idle 5-hour window shows Ultra in place of the 5-hour bar) is off by default. Turning it on in Settings has the same caution as the `usage` command: the app runs `claude-multipass usage --json` on a timer, at least 5 minutes apart, which decrypts the saved tokens through this Mac's Keychain (one prompt the first time; click Always Allow) and reads Anthropic's usage endpoint outside the app. Turn it off and the polling stops.
 
 ## Development
 

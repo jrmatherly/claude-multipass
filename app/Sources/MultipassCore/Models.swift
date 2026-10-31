@@ -79,7 +79,8 @@ public struct UsageEntry: Decodable, Equatable, Identifiable {
   public var name: String
   /// The server's plan label ("Ultra", "Max"), shown verbatim.
   public var plan: String?
-  /// A verified Ultra account: no 5-hour limit, so no `fiveHour`.
+  /// An Ultra account whose 5-hour window is idle with no reset, which is how
+  /// a verified one (no 5-hour limit) reports; the tool then sends no `fiveHour`.
   public var ultra: Bool?
   public var fiveHour: UsageWindow?
   public var sevenDay: UsageWindow?
@@ -109,7 +110,8 @@ extension UsageEntry {
   /// weekly over 5-hour, since it takes longer to clear, and a model's own
   /// weekly limit over the all-models one, since it stops that model first.
   public var peak: (window: String, utilization: Double)? {
-    let windows = [("5-hour", fiveHour), ("weekly", sevenDay)] + (scoped ?? []).map { ("\($0.name) weekly", $0.window) }
+    // An Ultra entry shows no 5-hour meter, so the ring must not count one either.
+    let windows = [("5-hour", isUltra ? nil : fiveHour), ("weekly", sevenDay)] + (scoped ?? []).map { ("\($0.name) weekly", $0.window) }
     var best: (window: String, utilization: Double)?
     for case let (label, window?) in windows where window.utilization >= (best?.utilization ?? -.infinity) {
       best = (label, window.utilization)
@@ -118,18 +120,28 @@ extension UsageEntry {
   }
 }
 
-/// One model's weekly limit, named by the server (`Fable`).
-public struct ScopedWindow: Decodable, Equatable, Identifiable {
+/// One model's weekly limit, named by the server (`Fable`). Names may repeat,
+/// so lists of these are keyed by position.
+public struct ScopedWindow: Decodable, Equatable {
   public var name: String
   public var utilization: Double
   public var resetsAt: Date?
-  public var id: String { name }
   public var window: UsageWindow { UsageWindow(utilization: utilization, resetsAt: resetsAt) }
 
   public init(name: String, utilization: Double, resetsAt: Date? = nil) {
     self.name = name
     self.utilization = utilization
     self.resetsAt = resetsAt
+  }
+
+  private enum CodingKeys: String, CodingKey { case name, utilization, resetsAt }
+
+  /// A reset time that will not parse drops only that reset, never the whole report.
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    name = try c.decode(String.self, forKey: .name)
+    utilization = try c.decode(Double.self, forKey: .utilization)
+    resetsAt = try? c.decodeIfPresent(Date.self, forKey: .resetsAt)
   }
 }
 

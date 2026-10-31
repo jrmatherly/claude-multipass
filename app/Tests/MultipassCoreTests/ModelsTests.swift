@@ -54,6 +54,12 @@ import Testing
   #expect(r.profiles[1].plan == nil && !r.profiles[1].isUltra && r.profiles[1].scoped == nil)
 }
 
+@Test func anUnparsableScopedResetDropsOnlyThatReset() throws {
+  let json = #"{"profiles":[{"name":"a","sevenDay":{"utilization":1},"scoped":[{"name":"Fable","utilization":5,"resetsAt":"2026-11-01T00:00:00+05:00"},{"name":"Fable","utilization":7}]}]}"#
+  let r = try MultipassJSON.decoder.decode(UsageReport.self, from: Data(json.utf8))
+  #expect(r.profiles[0].scoped == [ScopedWindow(name: "Fable", utilization: 5), ScopedWindow(name: "Fable", utilization: 7)])
+}
+
 @Test func decodesEmptyReport() throws {
   let r = try MultipassJSON.decoder.decode(UsageReport.self, from: Data(#"{"profiles":[]}"#.utf8))
   #expect(r.profiles == [])

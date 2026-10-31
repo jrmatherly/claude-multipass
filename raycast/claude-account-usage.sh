@@ -1,7 +1,8 @@
 #!/bin/bash
 #
 # Raycast inline command: the signed-in saved account with its 5-hour (or
-# Ultra), weekly and per-model weekly usage. Opt-in: it reads the saved token through the Keychain, see
+# Ultra), weekly and per-model weekly usage. Opt-in: it reads the saved
+# token through the Keychain, see
 # `claude-multipass --help`, Cautions. The first run shows a macOS
 # Keychain dialog for "Claude Safe Storage"; click Always Allow once, or the
 # dialog returns on every refresh. Add it in Raycast only if you want that.

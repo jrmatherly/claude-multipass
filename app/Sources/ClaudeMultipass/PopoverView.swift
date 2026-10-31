@@ -96,7 +96,7 @@ struct PopoverView: View {
           }
           let scoped = entry?.scoped ?? []
           UsageMeter(title: scoped.isEmpty ? "Weekly" : "Weekly · all models", window: entry?.sevenDay, now: context.date)
-          ForEach(scoped) { limit in
+          ForEach(Array(scoped.enumerated()), id: \.offset) { _, limit in
             UsageMeter(title: "Weekly · \(limit.name)", window: limit.window, now: context.date)
           }
           if let error = entry?.error {
@@ -175,7 +175,7 @@ struct UsageMeter: View {
   }
 }
 
-/// Stands in for the 5-hour meter on a verified Ultra account, which has no 5-hour limit.
+/// Stands in for the 5-hour meter on an Ultra account whose 5-hour window is idle with no reset.
 struct UltraIndicator: View {
   var body: some View {
     HStack(alignment: .firstTextBaseline) {

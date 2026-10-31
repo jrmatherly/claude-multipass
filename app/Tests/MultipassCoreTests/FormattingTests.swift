@@ -54,7 +54,7 @@ import Testing
   #expect(Format.ago(now.addingTimeInterval(-2 * 3600 - 60), now: now) == "2 h ago")
 }
 
-@Test func peakPicksTheFullerWindow() {
+@Test func peakPicksTheFullestWindow() {
   #expect(UsageEntry(name: "a").peak == nil)
   let five = UsageEntry(name: "a", fiveHour: UsageWindow(utilization: 38)).peak
   #expect(five?.window == "5-hour" && five?.utilization == 38)
@@ -72,6 +72,8 @@ import Testing
   #expect(scopedTie?.window == "Fable weekly")
   let ultra = UsageEntry(name: "a", ultra: true, sevenDay: UsageWindow(utilization: 69)).peak
   #expect(ultra?.window == "weekly")
+  let ultraWithFive = UsageEntry(name: "a", ultra: true, fiveHour: UsageWindow(utilization: 90), sevenDay: UsageWindow(utilization: 10)).peak
+  #expect(ultraWithFive?.window == "weekly")
 }
 
 @Test func countdownBuckets() {
