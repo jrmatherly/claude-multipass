@@ -90,7 +90,7 @@ struct AccountDetail: View {
 @MainActor
 final class AccountPanelController {
   /// The hosting view's own space: `.global` starts at the popover window, which holds the arrow margins.
-  static let space = "popover"
+  nonisolated static let space = "popover"
   weak var host: NSView?
   private let appState: AppState
   private let showDelay: TimeInterval
