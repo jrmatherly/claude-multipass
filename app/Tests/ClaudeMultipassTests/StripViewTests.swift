@@ -63,9 +63,9 @@ import Testing
     }
   }
 
-  private func row(_ usage: String) async throws -> AccountRow {
+  private func row(_ usage: String, for account: String = "matherly-gmail") async throws -> AccountRow {
     let s = await state(FixtureRunner(usage: usage))
-    let profile = try #require(s.snapshot?.profiles.first { $0.name == name })
+    let profile = try #require(s.snapshot?.profiles.first { $0.name == account })
     return AccountRow(appState: s, profile: profile, isExpanded: false, onTap: {}, onCancel: {}, onSwitch: { _ in })
   }
 
@@ -75,6 +75,24 @@ import Testing
     #expect(row.modelFigure == 100)
     #expect(row.modelBarColor == .red)
     #expect(row.usageLabel == "weekly 59%, Fable weekly 100%")
+  }
+
+  @Test func aSwitchRowReadsItsOwnAccount() async throws {
+    let usage = #"{"profiles":[{"name":"matherly-gmail","sevenDay":{"utilization":12}},{"name":"work","fiveHour":{"utilization":10},"sevenDay":{"utilization":59},"scoped":[{"name":"Fable","utilization":75}]}]}"#
+    let row = try await row(usage, for: "work")
+    #expect(row.accountFigure == 59)
+    #expect(row.modelFigure == 75)
+    #expect(row.modelBarColor == .orange)
+    #expect(row.usageLabel == "weekly 59%, Fable weekly 75%")
+  }
+
+  @Test func aSwitchRowModelBarUsesTheAccentBelowTheWarning() async throws {
+    #expect(try await row(mixedJSON(five: 17, seven: 59, fable: 40)).modelBarColor == .accentColor)
+  }
+
+  @Test func aUsageBarFillsWithItsColorOrItsLevel() {
+    #expect(UsageBar(utilization: 100, height: 4).fillColor == .red)
+    #expect(UsageBar(utilization: 100, height: 4, color: .gray).fillColor == .gray)
   }
 
   @Test func aSwitchRowShowsAFullFiveHourLimit() async throws {
@@ -96,8 +114,7 @@ import Testing
   }
 
   @Test func aSwitchRowLabelPrefersTheFetchError() async throws {
-    let row = try await row(#"{"profiles":[{"name":"matherly-gmail","error":"HTTP 429"}]}"#)
-    #expect(row.accountFigure == nil)
+    let row = try await row(#"{"profiles":[{"name":"matherly-gmail","sevenDay":{"utilization":59},"error":"HTTP 429"}]}"#)
     #expect(row.usageLabel == "HTTP 429")
   }
 
@@ -112,6 +129,8 @@ import Testing
     let week = #""sevenDay":{"utilization":59,"resetsAt":"\#(reset)"}"#
     #expect(await popover(#""plan":"Ultra",\#(week)"#).planLine == "Ultra · resets \(expected)")
     #expect(await popover(week).planLine == "resets \(expected)")
+    let five = ISO8601DateFormatter().string(from: Date().addingTimeInterval(3600))
+    #expect(await popover(#""fiveHour":{"utilization":17,"resetsAt":"\#(five)"},\#(week)"#).planLine == "resets \(expected)")
     #expect(await popover(#""plan":"Ultra","sevenDay":{"utilization":59}"#).planLine == "Ultra")
     #expect(await popover(#""sevenDay":{"utilization":59}"#).planLine == nil)
   }
@@ -133,5 +152,19 @@ import Testing
     #expect(UsageMeter(title: "5-hour", window: UsageWindow(utilization: 17), now: now, showsReset: true).detail == "17%")
     #expect(UsageMeter(title: "Weekly", window: window, now: now).detail == "17%")
     #expect(UsageMeter(title: "Weekly", window: nil, now: now).detail == "–")
+  }
+
+  @Test func thePopoverListsMetersInOrderAndOnlyFiveHourNamesAReset() async {
+    let s = await state(FixtureRunner(usage: fableFull))
+    let popover = PopoverView(appState: s, openSettings: { _ in }, close: {})
+    let fable = [ScopedWindow(name: "Fable", utilization: 100)]
+    let now = Date()
+    let max = popover.meters(for: UsageEntry(name: "a", scoped: fable), now: now)
+    #expect(max.map(\.title) == ["5-hour", "Weekly · all models", "Weekly · Fable"])
+    #expect(max.map(\.showsReset) == [true, false, false])
+    let ultra = popover.meters(for: UsageEntry(name: "a", ultra: true, scoped: fable), now: now)
+    #expect(ultra.map(\.title) == ["Weekly · all models", "Weekly · Fable"])
+    let plain = popover.meters(for: UsageEntry(name: "a"), now: now)
+    #expect(plain.map(\.title) == ["5-hour", "Weekly"])
   }
 }

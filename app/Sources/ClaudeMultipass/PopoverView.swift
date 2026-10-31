@@ -92,18 +92,24 @@ struct PopoverView: View {
     }
   }
 
+  /// A verified Ultra account has no 5-hour limit to show.
+  func meters(for entry: UsageEntry?, now: Date) -> [UsageMeter] {
+    let scoped = entry?.scoped ?? []
+    var meters: [UsageMeter] = []
+    if entry?.isUltra != true {
+      meters.append(UsageMeter(title: "5-hour", window: entry?.fiveHour, now: now, showsReset: true))
+    }
+    meters.append(UsageMeter(title: scoped.isEmpty ? "Weekly" : "Weekly · all models", window: entry?.sevenDay, now: now))
+    return meters + scoped.map { UsageMeter(title: "Weekly · \($0.name)", window: $0.window, now: now) }
+  }
+
   @ViewBuilder private var usage: some View {
     if appState.settings.usageEnabled {
       let entry = appState.currentUsage
       TimelineView(.periodic(from: .now, by: 30)) { context in
         VStack(alignment: .leading, spacing: 10) {
-          if entry?.isUltra != true {
-            UsageMeter(title: "5-hour", window: entry?.fiveHour, now: context.date, showsReset: true)
-          }
-          let scoped = entry?.scoped ?? []
-          UsageMeter(title: scoped.isEmpty ? "Weekly" : "Weekly · all models", window: entry?.sevenDay, now: context.date)
-          ForEach(Array(scoped.enumerated()), id: \.offset) { _, limit in
-            UsageMeter(title: "Weekly · \(limit.name)", window: limit.window, now: context.date)
+          ForEach(Array(meters(for: entry, now: context.date).enumerated()), id: \.offset) { _, meter in
+            meter
           }
           if let error = entry?.error {
             Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled)
@@ -158,7 +164,7 @@ struct PopoverView: View {
 
 /// One usage window of the signed-in account: its name and figure over a bar.
 /// Only the 5-hour window names a reset; the header has the weekly one, which
-/// the per-model limits share (measured in `.claude/rules/desktop-internals.md`).
+/// the Fable limit shares (measured in `.claude/rules/desktop-internals.md`).
 struct UsageMeter: View {
   let title: String
   let window: UsageWindow?
@@ -189,13 +195,15 @@ struct UsageBar: View {
   let height: CGFloat
   var color: Color?
 
+  var fillColor: Color { color ?? Format.level(utilization).color(normal: .accentColor) }
+
   var body: some View {
     Capsule()
       .fill(Color.primary.opacity(0.1))
       .overlay(alignment: .leading) {
         GeometryReader { geometry in
           Capsule()
-            .fill(color ?? Format.level(utilization).color(normal: .accentColor))
+            .fill(fillColor)
             .frame(width: geometry.size.width * Format.fill(utilization))
         }
       }

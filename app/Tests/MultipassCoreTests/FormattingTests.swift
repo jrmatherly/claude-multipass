@@ -41,6 +41,11 @@ import Testing
   #expect(at(2 * 86400 + 1800) == "Thu 12:30")
   // A week on shares today's weekday, so it must not read as today.
   #expect(at(7 * 86400) == "7d 0h")
+  #expect(at(6 * 86400 + 23 * 3600) == "6d 23h")
+  #expect(Format.resetTime(now.addingTimeInterval(3600), now: now, calendar: calendar, locale: Locale(identifier: "en_US")) == "Tue 1:00\u{202F}PM")
+  // The weekday and the clock both follow the calendar's time zone.
+  calendar.timeZone = try #require(TimeZone(identifier: "Pacific/Kiritimati"))
+  #expect(Format.resetTime(now.addingTimeInterval(2 * 86400), now: now, calendar: calendar, locale: locale) == "Fri 2:00")
 }
 
 @Test func agoBuckets() {

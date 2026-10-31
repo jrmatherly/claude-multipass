@@ -24,7 +24,7 @@ public enum Format {
 
   /// The short weekday, fixed English like the countdown, and the time in the
   /// user's 12 or 24 hour clock. Today's weekday a week on would read as today,
-  /// so it stays a countdown.
+  /// so that one is a countdown instead.
   public static func resetTime(_ date: Date?, now: Date, calendar: Calendar = .current, locale: Locale = .current) -> String? {
     guard let date, date > now else { return nil }
     let day = calendar.component(.weekday, from: date)
