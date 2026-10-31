@@ -79,7 +79,7 @@ public struct UsageEntry: Decodable, Equatable, Identifiable {
   public var name: String
   /// The server's plan label (`Ultra`), shown verbatim.
   public var plan: String?
-  /// An Ultra account whose 5-hour window is idle with no reset, which is how
+  /// An Ultra account whose 5-hour window is missing or idle with no reset, which is how
   /// a verified one (no 5-hour limit) reports; the tool then sends no `fiveHour`.
   public var ultra: Bool?
   public var fiveHour: UsageWindow?

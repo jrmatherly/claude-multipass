@@ -255,8 +255,8 @@ ${bold}Commands${reset}
                        per-model weekly (Fable) usage as a percentage, with
                        the time each window resets; a window it cannot read
                        shows "?". An Ultra account whose 5-hour window is
-                       idle with no reset (a verified Ultra has no 5-hour
-                       limit) shows "Ultra" in its place. The plan comes from
+                       missing or idle with no reset (a verified Ultra has no
+                       5-hour limit) shows "Ultra" in its place. The plan comes from
                        the OAuth profile, read at most once a day per
                        account, or an hour after a failed request while no
                        name is cached. Give a name to see one account.
@@ -898,7 +898,7 @@ access_token() {
 # Shared by both formatters, so one odd field never sinks the report.
 # win_ok: a window object with a finite numeric utilization; the JSON leaves
 # any other window out and the text shows it as "?". reset: a window's reset
-# time as UTC "...Z", converting an offset of up to 14 hours, or null when it
+# time as UTC "...Z", converting an offset up to 14:59, or null when it
 # is missing or will not parse (capture yields nothing on a mismatch, hence
 # the array; the last fromdate drops a result jq cannot format, such as a
 # five-digit year). scoped: each weekly_scoped limit, one per model or
@@ -934,17 +934,21 @@ usage_jq="$usage_defs"'
 
 # The server's plan label for an account ("Ultra"), from the OAuth profile,
 # cached a day per account in $root/plans. It changes only with the
-# subscription, and a call per usage run would double the API calls. An
-# answer stands for a day, label or none: a 200 carrying a profile, or a
-# refusal (a 4xx other than 429). A failed request (no connection, a 429, a
-# 5xx, or a 200 that is not a profile) keeps a cached label another day, up
-# to a week after it was read. With none, it leaves an empty one dated 23
-# hours back, so the next try is an hour later instead of on every run.
-# With no writable plans folder there is no cache, so no call is made.
+# subscription, and a call per usage run would double the API calls. A 200
+# carrying a profile is the answer for a day, label or none. A refusal (a 4xx
+# other than 408 and 429) waits a day too, but never erases a label: the
+# usage call just accepted the same token, so it is likelier a hiccup than a
+# lasting no. Any other result is a failed request, such as no connection, a
+# 408, a 429, a 5xx or a 200 that is not a profile. A refusal or a failed
+# request keeps a cached label another day, while that label was read under 6
+# days ago, so it lasts a week at most. With no label to keep, a refusal
+# leaves an empty one for a day and a failed request one dated 23 hours back,
+# so the next try is an hour later instead of on every run. The cache file is
+# made before the call, so a plans folder that cannot hold it means no call.
 # /usr/bin for touch and stat: the GNU ones a PATH may put first take other
 # flags.
 plan_label() {
-  local token=$1 account=$2 cache body code label='' answered='' tmp now re='^[A-Za-z0-9][A-Za-z0-9 .+-]{0,39}$'
+  local token=$1 account=$2 cache body code label='' result=failed tmp now born re='^[A-Za-z0-9][A-Za-z0-9 .+-]{0,39}$'
   [[ $account =~ ^[0-9A-Za-z-]+$ ]] || return 0
   cache="$root/plans/$account"
   now=$(date +%s)
@@ -952,34 +956,35 @@ plan_label() {
     cat "$cache" 2> /dev/null
     return 0
   fi
-  (umask 077 && mkdir -p "$root/plans") 2> /dev/null && [[ -w $root/plans ]] || return 0
+  # mktemp, not $$: the report's per-account subshells share their parent's $$.
+  (umask 077 && mkdir -p "$root/plans") 2> /dev/null \
+    && tmp=$(mktemp "$root/plans/.plan.XXXXXX" 2> /dev/null) || return 0
   if body=$(printf 'header = "Authorization: Bearer %s"\n' "$token" \
     | curl -sS --max-time 10 -K - -w '\n%{http_code}' \
       -H "Content-Type: application/json" https://api.anthropic.com/api/oauth/profile 2> /dev/null); then
     code=${body##*$'\n'}
     body=${body%$'\n'*}
     if [[ $code == 200 ]] && printf '%s' "$body" | jq -e '.organization | type == "object"' > /dev/null 2>&1; then
-      answered=1
+      result=profile
       label=$(printf '%s' "$body" | jq -r '.organization.plan_display_name // empty | strings' 2> /dev/null) || label=''
       [[ $label =~ $re ]] || label=''
-    elif [[ $code == 4[0-9][0-9] && $code != 429 ]]; then
-      answered=1
+    elif [[ $code == 4[0-9][0-9] && $code != 408 && $code != 429 ]]; then
+      result=refused
     fi
   fi
-  if [[ -z $answered && -s $cache ]] && ((now - $(/usr/bin/stat -f %B "$cache") < 604800)); then
+  # A file system with no birth time reports 0; keep the label then, as before the cap.
+  born=$(/usr/bin/stat -f %B "$cache" 2> /dev/null) || born=0
+  ((born > 0)) || born=$now
+  if [[ $result != profile && -s $cache ]] && ((now - born < 518400)); then
+    rm -f "$tmp"
     /usr/bin/touch "$cache" 2> /dev/null
     cat "$cache" 2> /dev/null
     return 0
   fi
-  [[ -n $answered ]] || label=''
-  # mktemp, not $$: the report's per-account subshells share their parent's $$.
-  if tmp=$(mktemp "$root/plans/.plan.XXXXXX" 2> /dev/null); then
-    {
-      printf '%s' "$label" > "$tmp" \
-        && { [[ -n $answered ]] || /usr/bin/touch -A -230000 "$tmp"; } \
-        && mv -f "$tmp" "$cache"
-    } 2> /dev/null || rm -f "$tmp"
-  fi
+  # An empty file still rations the next call when this write fails (a full disk).
+  printf '%s' "$label" > "$tmp" 2> /dev/null
+  [[ $result != failed ]] || /usr/bin/touch -A -230000 "$tmp" 2> /dev/null
+  mv -f "$tmp" "$cache" 2> /dev/null || rm -f "$tmp"
   printf '%s' "$label"
 }
 
@@ -1016,7 +1021,8 @@ usage_fetch() {
     return 0
   }
   plan=$(plan_label "$token" "$account")
-  printf '%s' "$body" | jq -c --arg plan "$plan" 'if $plan == "" then . else . + {_plan: $plan} end'
+  # Always set: a _plan the server might send must never reach the formatters.
+  printf '%s' "$body" | jq -c --arg plan "$plan" '. + {_plan: $plan}'
 }
 
 # The 5h (or Ultra), 7d and per-model weekly figures for one config.json as
@@ -1043,7 +1049,7 @@ usage_object() {
       def win: {utilization} + (reset as $r | if $r then {resetsAt: $r} else {} end);
       def named(key): if win_ok then {(key): win} else {} end;
       {name: $name}
-      + (if ._plan then {plan: ._plan} else {} end)
+      + (if ._plan != "" then {plan: ._plan} else {} end)
       + (if ultra then {ultra: true} else (.five_hour | named("fiveHour")) end)
       + (.seven_day | named("sevenDay"))
       + (scoped | if length > 0 then {scoped: map({name} + win)} else {} end)' ;;
@@ -1106,7 +1112,7 @@ doctor_report() {
   [[ -d ${set_aside[0]} ]] || set_aside=()
   echo "ok: backups: ${#logins[@]} saved logins and ${#set_aside[@]} set-aside profiles in $backups"
   # usage makes no profile call without a writable plans folder, so no plan names show.
-  [[ ! -d $root/plans || -w $root/plans ]] || echo "warn: plans: $root/plans is not writable; usage shows no plan names (chmod 700 \"$root/plans\")"
+  [[ ! -d $root/plans || -w $root/plans ]] || echo "warn: plans: $root/plans is not writable; usage stops refreshing plan names (chmod 700 \"$root/plans\")"
   if desktop_running; then echo "ok: desktop: running"; else echo "ok: desktop: not running"; fi
   legacy="$config_home/dotfiles/claude-desktop-accounts"
   [[ ! -d $legacy ]] || echo "warn: legacy store: $legacy still exists (it moves on the first run without CLAUDE_MULTIPASS_DIR)"

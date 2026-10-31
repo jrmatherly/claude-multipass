@@ -175,7 +175,7 @@ struct UsageMeter: View {
   }
 }
 
-/// Stands in for the 5-hour meter on an Ultra account whose 5-hour window is idle with no reset.
+/// Stands in for the 5-hour meter on an Ultra account whose 5-hour window is missing or idle with no reset.
 struct UltraIndicator: View {
   var body: some View {
     HStack(alignment: .firstTextBaseline) {

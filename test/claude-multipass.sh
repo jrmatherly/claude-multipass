@@ -1015,18 +1015,36 @@ check "a failed profile read keeps the last label" Max "$(cda usage usagey --jso
 calls=$(grep -c 'oauth/profile' "$tmp/curl-args")
 cda usage usagey > /dev/null
 check "and is not retried until the day is out" "$calls" "$(grep -c 'oauth/profile' "$tmp/curl-args")"
+# the week cap counts from when the label was read (birth time), not from the
+# last touch: a backdated mtime moves the birth time back, a later touch does not
+printf 500 > "$tmp/profile-code"
 touch -t 202001010000 "$plans/uuuuuuuu-1"
+touch -t "$(date -v-25H +%Y%m%d%H%M)" "$plans/uuuuuuuu-1"
 check "a label read over a week ago is not kept through a failed read" null "$(cda usage usagey --json | jq -r '.profiles[0].plan')"
-printf 429 > "$tmp/profile-code"
-printf Max > "$plans/uuuuuuuu-1" && touch -A -250000 "$plans/uuuuuuuu-1"
-check "a 429 is a failed read that keeps the label" Max "$(cda usage usagey --json | jq -r '.profiles[0].plan')"
-printf 403 > "$tmp/profile-code"
-touch -A -250000 "$plans/uuuuuuuu-1"
-check "a refusal is an answer with no label" null "$(cda usage usagey --json | jq -r '.profiles[0].plan')"
-calls=$(grep -c 'oauth/profile' "$tmp/curl-args")
-touch -A -020000 "$plans/uuuuuuuu-1"
-cda usage usagey > /dev/null
-check "and stands for the day, not an hour" "$calls" "$(grep -c 'oauth/profile' "$tmp/curl-args")"
+printf Max > "$plans/uuuuuuuu-1" && touch -t "$(date -v-6d -v-1H +%Y%m%d%H%M)" "$plans/uuuuuuuu-1"
+check "nor one read over six days ago, so it never shows past a week" null "$(cda usage usagey --json | jq -r '.profiles[0].plan')"
+for code in 429 408; do
+  printf "$code" > "$tmp/profile-code"
+  printf Max > "$plans/uuuuuuuu-1" && touch -A -250000 "$plans/uuuuuuuu-1"
+  check "a $code is a failed read that keeps the label" Max "$(cda usage usagey --json | jq -r '.profiles[0].plan')"
+  rm -f "$plans/uuuuuuuu-1"
+  cda usage usagey > /dev/null
+  calls=$(grep -c 'oauth/profile' "$tmp/curl-args")
+  touch -A -010100 "$plans/uuuuuuuu-1"
+  cda usage usagey > /dev/null
+  check "a $code with nothing cached is retried after an hour" "$((calls + 1))" "$(grep -c 'oauth/profile' "$tmp/curl-args")"
+done
+for code in 401 403; do
+  printf "$code" > "$tmp/profile-code"
+  printf Max > "$plans/uuuuuuuu-1" && touch -A -250000 "$plans/uuuuuuuu-1"
+  check "a $code refusal keeps a cached label" Max "$(cda usage usagey --json | jq -r '.profiles[0].plan')"
+  rm -f "$plans/uuuuuuuu-1"
+  check "a $code refusal with nothing cached gives no plan" null "$(cda usage usagey --json | jq -r '.profiles[0].plan')"
+  calls=$(grep -c 'oauth/profile' "$tmp/curl-args")
+  touch -A -020000 "$plans/uuuuuuuu-1"
+  cda usage usagey > /dev/null
+  check "and stands for the day, not an hour: $code" "$calls" "$(grep -c 'oauth/profile' "$tmp/curl-args")"
+done
 printf 200 > "$tmp/profile-code"
 printf Max > "$plans/uuuuuuuu-1" && touch -A -250000 "$plans/uuuuuuuu-1"
 for odd in '<html>proxy</html>' '{"error":"x"}' '{"organization":"x"}'; do
@@ -1096,6 +1114,13 @@ out=$(cda usage usagey --json)
 check "no out-of-range number reaches the JSON" 0 "$(grep -c -i 'e+4' <<< "$out")"
 check "an out-of-range limit is dropped, a bad offset loses only its reset" '[{"name":"Fable","utilization":4}]' "$(jq -c '.profiles[0].scoped' <<< "$out")"
 check "a reset past year 9999 is dropped, the text line kept" "usagey           5h ?  7d 3%  Fable 4%" "$(cda usage usagey)"
+printf '{"seven_day":{"utilization":"20","resets_at":"2026-11-01T00:00:00Z"},"limits":[{"kind":"weekly_scoped","percent":1,"resets_at":"2026-11-01T00:00:00+14:00","scope":{"model":{"display_name":"A"}}},{"kind":"weekly_scoped","percent":2,"resets_at":"2026-11-01T00:00:00+15:00","scope":{"model":{"display_name":"B"}}},{"kind":"weekly_scoped","percent":3,"resets_at":"2026-11-01T00:00:00+05:60","scope":{"model":{"display_name":"C"}}}]}' > "$tmp/usage.json"
+out=$(cda usage usagey --json)
+check "a +14:00 offset converts, +15:00 and a 60-minute offset are dropped" '[{"name":"A","utilization":1,"resetsAt":"2026-10-31T10:00:00Z"},{"name":"B","utilization":2},{"name":"C","utilization":3}]' "$(jq -c '.profiles[0].scoped' <<< "$out")"
+check "an unreadable window shows no reset" "usagey           Ultra  7d ?  A 1% (resets $(date -r 1793440800 '+%a %H:%M'))  B 2%  C 3%" "$(cda usage usagey)"
+printf '{"_plan":5,"seven_day":{"utilization":3.0}}' > "$tmp/usage.json"
+out=$(cda usage usagey --json)
+check "a _plan in the server's body never reaches the output" Ultra "$(jq -r '.profiles[0].plan' <<< "$out")"
 printf '[1]' > "$tmp/usage.json"
 check "a body that is not an object is an unreadable response" "unreadable response" "$(cda usage usagey --json | jq -r '.profiles[0].error')"
 # the account id names the cache file, so one that is not an id writes nothing
@@ -1146,6 +1171,7 @@ chmod +x "$tmp/has-claude/claude"
 check "doctor is quiet about claude when it is on PATH" 0 "$(PATH="$tmp/has-claude:$noclaude" cda doctor | grep -c '^warn: claude:')"
 check "doctor on a fresh store exits 0" 0 "$(CLAUDE_MULTIPASS_DIR="$tmp/fresh-store" exit_code cda doctor)"
 check_true "doctor on a fresh store counts no backups" grep -q '^ok: backups: 0 saved logins' <<< "$(CLAUDE_MULTIPASS_DIR="$tmp/fresh-store" cda doctor)"
+check_true "the fresh store has no plans folder" test ! -d "$tmp/fresh-store/plans"
 check "doctor is quiet when there is no plans folder yet" 0 "$(CLAUDE_MULTIPASS_DIR="$tmp/fresh-store" cda doctor | grep -c '^warn: plans:')"
 mkdir -p "$tmp/legacy-home/dotfiles/claude-desktop-accounts"
 check_true "doctor warns about a leftover dotfiles-era store" grep -q "^warn: legacy store: $tmp/legacy-home/dotfiles/claude-desktop-accounts still exists" <<< "$(XDG_CONFIG_HOME="$tmp/legacy-home" cda doctor)"
