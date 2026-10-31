@@ -66,7 +66,12 @@ struct PopoverView: View {
     let snapshot = appState.snapshot
     let name = snapshot?.current
     return VStack(alignment: .leading, spacing: 2) {
-      Text(Format.displayName(name, signedIn: snapshot?.signedIn ?? false)).font(.headline)
+      HStack(alignment: .firstTextBaseline, spacing: 6) {
+        Text(Format.displayName(name, signedIn: snapshot?.signedIn ?? false)).font(.headline)
+        if appState.settings.usageEnabled, let plan = appState.currentUsage?.plan {
+          Text(plan).font(.caption).foregroundStyle(.secondary)
+        }
+      }
       Text((snapshot?.desktopRunning == true ? "Desktop running" : "Desktop not running") + (current?.cliSaved == true ? " · terminal login too" : ""))
         .font(.caption).foregroundStyle(.secondary)
       // A switch's warning or failure stays visible once its target is the signed-in account.
@@ -84,8 +89,16 @@ struct PopoverView: View {
       let entry = appState.currentUsage
       TimelineView(.periodic(from: .now, by: 30)) { context in
         VStack(alignment: .leading, spacing: 10) {
-          UsageMeter(title: "5-hour", window: entry?.fiveHour, now: context.date)
-          UsageMeter(title: "Weekly", window: entry?.sevenDay, now: context.date)
+          if entry?.isUltra == true {
+            UltraIndicator()
+          } else {
+            UsageMeter(title: "5-hour", window: entry?.fiveHour, now: context.date)
+          }
+          let scoped = entry?.scoped ?? []
+          UsageMeter(title: scoped.isEmpty ? "Weekly" : "Weekly · all models", window: entry?.sevenDay, now: context.date)
+          ForEach(Array(scoped.enumerated()), id: \.offset) { _, limit in
+            UsageMeter(title: "Weekly · \(limit.name)", window: limit.window, now: context.date)
+          }
           if let error = entry?.error {
             Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled)
           } else if let updated = appState.usageUpdatedAt {
@@ -157,6 +170,18 @@ struct UsageMeter: View {
         Text(detail).font(.subheadline).monospacedDigit().foregroundStyle(.secondary)
       }
       UsageBar(utilization: window?.utilization, height: 6)
+    }
+    .accessibilityElement(children: .combine)
+  }
+}
+
+/// Stands in for the 5-hour meter on an Ultra account whose 5-hour window is missing or idle with no reset.
+struct UltraIndicator: View {
+  var body: some View {
+    HStack(alignment: .firstTextBaseline) {
+      Text("Ultra").font(.subheadline.weight(.medium))
+      Spacer()
+      Text("no 5-hour limit").font(.subheadline).foregroundStyle(.secondary)
     }
     .accessibilityElement(children: .combine)
   }

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- `usage` and the menu bar app show the per-model weekly limit (Fable on Max and Ultra) beside the 5-hour and weekly ones, and the ring fills to the fullest of them. A reached Fable limit showed as nothing, because the endpoint reports it only in its `limits` list. An odd window or reset time no longer costs the account. A non-object window or a non-string reset time dropped it from `usage --json`. A non-numeric utilization or a reset time with an offset failed the menu bar app's whole usage read. The text output shows an unreadable window as `?`.
+- `usage` reads each account's plan name from the OAuth profile endpoint at most once a day, or an hour after a failed request while no name is cached. An Ultra account whose 5-hour window is missing or idle with no reset shows `Ultra` in place of the 5-hour figure. That is how a verified Ultra account, which has no 5-hour limit, reports. The popover shows the plan beside the account name and a row reading Ultra, no 5-hour limit in place of the 5-hour bar.
+
 ## 0.6.1 (2026-10-29)
 
 - The backup prune in `switch`, `add`, `remove` and `save --force` keeps the folder it has just made whatever the clock says. Before, a Mac with its clock set back pruned that folder first, because the prune ordered folders by the timestamp in their names alone.

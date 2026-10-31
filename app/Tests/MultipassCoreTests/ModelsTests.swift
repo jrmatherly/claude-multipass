@@ -43,6 +43,23 @@ import Testing
   #expect(r.profiles[1].fiveHour == nil)
 }
 
+@Test func decodesPlanUltraAndScopedLimits() throws {
+  let json = #"{"profiles":[{"name":"ultra","plan":"Ultra","ultra":true,"sevenDay":{"utilization":69},"scoped":[{"name":"Fable","utilization":96,"resetsAt":"2026-10-31T12:00:00Z"}]},{"name":"old","fiveHour":{"utilization":4}}]}"#
+  let r = try MultipassJSON.decoder.decode(UsageReport.self, from: Data(json.utf8))
+  #expect(r.profiles[0].plan == "Ultra")
+  #expect(r.profiles[0].isUltra)
+  #expect(r.profiles[0].fiveHour == nil)
+  #expect(r.profiles[0].scoped == [ScopedWindow(name: "Fable", utilization: 96, resetsAt: Date(timeIntervalSince1970: 1_793_448_000))])
+  // An older tool sends none of the new keys.
+  #expect(r.profiles[1].plan == nil && !r.profiles[1].isUltra && r.profiles[1].scoped == nil)
+}
+
+@Test func anUnparsableScopedResetDropsOnlyThatReset() throws {
+  let json = #"{"profiles":[{"name":"a","sevenDay":{"utilization":1},"scoped":[{"name":"Fable","utilization":5,"resetsAt":"2026-11-01T00:00:00+05:00"},{"name":"Fable","utilization":7}]}]}"#
+  let r = try MultipassJSON.decoder.decode(UsageReport.self, from: Data(json.utf8))
+  #expect(r.profiles[0].scoped == [ScopedWindow(name: "Fable", utilization: 5), ScopedWindow(name: "Fable", utilization: 7)])
+}
+
 @Test func decodesEmptyReport() throws {
   let r = try MultipassJSON.decoder.decode(UsageReport.self, from: Data(#"{"profiles":[]}"#.utf8))
   #expect(r.profiles == [])
