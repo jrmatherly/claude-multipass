@@ -125,7 +125,7 @@ struct SettingsView: View {
       }
     } footer: {
       Text(draft.usageEnabled
-        ? "The ring fills to the fullest usage window, 5-hour, weekly or per-model weekly. It turns orange from 70 % and red from 90 %."
+        ? "The outer ring fills to the fuller of the 5-hour and weekly limits. An inner ring shows the fullest per-model limit and turns gray once the outer ring is full. Orange from 70 %, red from 90 %."
         : "Usage is off, so the ring stays an empty outline.")
         .font(.caption).foregroundStyle(.secondary)
     }

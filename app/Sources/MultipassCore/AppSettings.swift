@@ -1,7 +1,7 @@
 import Foundation
 
 /// What the menu bar strip shows: a ring gauge of the signed-in account's
-/// peak usage beside its name and percentage, the ring alone, or the name alone.
+/// usage beside its name and percentage, the ring alone, or the name alone.
 public enum StripStyle: String, CaseIterable, Codable {
   case name, ringAndName, ringOnly
 }

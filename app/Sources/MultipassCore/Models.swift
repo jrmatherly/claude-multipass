@@ -106,17 +106,32 @@ public struct UsageEntry: Decodable, Equatable, Identifiable {
 extension UsageEntry {
   public var isUltra: Bool { ultra == true }
 
-  /// The fullest window, named for display. On a tie the later one wins:
-  /// weekly over 5-hour, since it takes longer to clear, and a model's own
-  /// weekly limit over the all-models one, since it stops that model first.
-  public var peak: (window: String, utilization: Double)? {
-    // An Ultra entry shows no 5-hour meter, so the ring must not count one either.
-    let windows = [("5-hour", isUltra ? nil : fiveHour), ("weekly", sevenDay)] + (scoped ?? []).map { ("\($0.name) weekly", $0.window) }
+  /// The fuller of the limits that cover every model. On a tie weekly wins,
+  /// since it takes longer to clear.
+  public var accountPeak: (window: String, utilization: Double)? {
+    // An Ultra entry shows no 5-hour meter, so the account figure must not count one either.
+    let windows = [("5-hour", isUltra ? nil : fiveHour), ("weekly", sevenDay)]
     var best: (window: String, utilization: Double)?
     for case let (label, window?) in windows where window.utilization >= (best?.utilization ?? -.infinity) {
       best = (label, window.utilization)
     }
     return best
+  }
+
+  /// The fullest of the limits scoped to one model or surface.
+  public var modelPeak: Double? { scoped?.map(\.utilization).max() }
+
+  public var accountIsFull: Bool {
+    guard let accountPeak else { return false }
+    return accountPeak.utilization.rounded(.down) >= 100
+  }
+
+  /// Figures only: the tool does not read usage credits, so it cannot say a
+  /// full limit has stopped anything.
+  public var limitsSummary: String? {
+    let account = accountPeak.map { ["\($0.window) \(Format.percent($0.utilization))"] } ?? []
+    let parts = account + (scoped ?? []).map { "\($0.name) weekly \(Format.percent($0.utilization))" }
+    return parts.isEmpty ? nil : parts.joined(separator: ", ")
   }
 }
 

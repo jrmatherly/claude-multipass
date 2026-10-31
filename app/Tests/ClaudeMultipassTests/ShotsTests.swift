@@ -11,7 +11,7 @@ import Testing
 /// `UI_SHOTS_DIR=/tmp/shots swift test --package-path app --filter Shots`.
 private let shotsDir = ProcessInfo.processInfo.environment["UI_SHOTS_DIR"]
 
-private struct FixtureRunner: CommandRunner {
+struct FixtureRunner: CommandRunner {
   var usage: String?
   var usageFails = false
   var versionFails = false
@@ -57,6 +57,10 @@ private func planJSON(verified: Bool) -> String {
   return #"{"profiles":[{"name":"matherly-gmail","plan":"Ultra",\#(session),"sevenDay":{"utilization":59,"resetsAt":"\#(weekReset)"},"scoped":[{"name":"Fable","utilization":\#(fable),"resetsAt":"\#(weekReset)"}]},{"name":"work","plan":"Max","fiveHour":{"utilization":4},"sevenDay":{"utilization":12}}]}"#
 }
 
+func mixedJSON(five: Double, seven: Double, fable: Double) -> String {
+  #"{"profiles":[{"name":"matherly-gmail","fiveHour":{"utilization":\#(five)},"sevenDay":{"utilization":\#(seven)},"scoped":[{"name":"Fable","utilization":\#(fable)}]}]}"#
+}
+
 private let usageLevels: [(String, String?)] = [
   ("normal", usageJSON(five: 38, seven: 52)),
   ("warning", usageJSON(five: 38, seven: 73.4)),
@@ -64,6 +68,11 @@ private let usageLevels: [(String, String?)] = [
   ("off", nil),
   ("ultra", planJSON(verified: true)),
   ("fable", planJSON(verified: false)),
+  ("account-full", mixedJSON(five: 100, seven: 59, fable: 40)),
+  ("fable-full", mixedJSON(five: 17, seven: 73, fable: 100)),
+  ("both-full", mixedJSON(five: 100, seven: 59, fable: 100)),
+  ("fable-warning", mixedJSON(five: 17, seven: 59, fable: 75)),
+  ("model-only", #"{"profiles":[{"name":"matherly-gmail","scoped":[{"name":"Fable","utilization":40}]}]}"#),
 ]
 
 /// One suite per test target, emptied before each AppState is made, so a run
@@ -79,7 +88,7 @@ private func scratchDefaults() -> UserDefaults {
 }
 
 @MainActor
-private func state(_ runner: FixtureRunner?, style: StripStyle = .ringAndName) async -> AppState {
+func state(_ runner: FixtureRunner?, style: StripStyle = .ringAndName) async -> AppState {
   let store = SettingsStore(defaults: scratchDefaults())
   let s = AppState(makeRunner: { _ in runner }, store: store)
   await s.relocate()

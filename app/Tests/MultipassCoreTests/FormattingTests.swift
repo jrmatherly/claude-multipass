@@ -54,26 +54,58 @@ import Testing
   #expect(Format.ago(now.addingTimeInterval(-2 * 3600 - 60), now: now) == "2 h ago")
 }
 
-@Test func peakPicksTheFullestWindow() {
-  #expect(UsageEntry(name: "a").peak == nil)
-  let five = UsageEntry(name: "a", fiveHour: UsageWindow(utilization: 38)).peak
+@Test func accountPeakPicksTheFullerAccountWindow() {
+  #expect(UsageEntry(name: "a").accountPeak == nil)
+  let five = UsageEntry(name: "a", fiveHour: UsageWindow(utilization: 38)).accountPeak
   #expect(five?.window == "5-hour" && five?.utilization == 38)
-  let seven = UsageEntry(name: "a", sevenDay: UsageWindow(utilization: 73)).peak
+  let seven = UsageEntry(name: "a", sevenDay: UsageWindow(utilization: 73)).accountPeak
   #expect(seven?.window == "weekly" && seven?.utilization == 73)
-  let both = UsageEntry(name: "a", fiveHour: UsageWindow(utilization: 91), sevenDay: UsageWindow(utilization: 73)).peak
+  let both = UsageEntry(name: "a", fiveHour: UsageWindow(utilization: 91), sevenDay: UsageWindow(utilization: 73)).accountPeak
   #expect(both?.window == "5-hour" && both?.utilization == 91)
-  let tie = UsageEntry(name: "a", fiveHour: UsageWindow(utilization: 50), sevenDay: UsageWindow(utilization: 50)).peak
+  let tie = UsageEntry(name: "a", fiveHour: UsageWindow(utilization: 50), sevenDay: UsageWindow(utilization: 50)).accountPeak
   #expect(tie?.window == "weekly")
-  let fable = UsageEntry(
+}
+
+@Test func accountPeakIgnoresScopedLimits() {
+  let entry = UsageEntry(
     name: "a", fiveHour: UsageWindow(utilization: 17), sevenDay: UsageWindow(utilization: 59),
-    scoped: [ScopedWindow(name: "Fable", utilization: 100)]).peak
-  #expect(fable?.window == "Fable weekly" && fable?.utilization == 100)
-  let scopedTie = UsageEntry(name: "a", sevenDay: UsageWindow(utilization: 60), scoped: [ScopedWindow(name: "Fable", utilization: 60)]).peak
-  #expect(scopedTie?.window == "Fable weekly")
-  let ultra = UsageEntry(name: "a", ultra: true, sevenDay: UsageWindow(utilization: 69)).peak
-  #expect(ultra?.window == "weekly")
-  let ultraWithFive = UsageEntry(name: "a", ultra: true, fiveHour: UsageWindow(utilization: 90), sevenDay: UsageWindow(utilization: 10)).peak
-  #expect(ultraWithFive?.window == "weekly")
+    scoped: [ScopedWindow(name: "Fable", utilization: 100)])
+  #expect(entry.accountPeak?.window == "weekly" && entry.accountPeak?.utilization == 59)
+  #expect(UsageEntry(name: "a", scoped: [ScopedWindow(name: "Fable", utilization: 100)]).accountPeak == nil)
+}
+
+@Test func accountPeakIgnoresAnUltraFiveHourFigure() {
+  let weekly = UsageEntry(name: "a", ultra: true, fiveHour: UsageWindow(utilization: 90), sevenDay: UsageWindow(utilization: 10)).accountPeak
+  #expect(weekly?.window == "weekly" && weekly?.utilization == 10)
+  #expect(UsageEntry(name: "a", ultra: true, fiveHour: UsageWindow(utilization: 90)).accountPeak == nil)
+}
+
+@Test func modelPeakPicksTheFullestScopedLimit() {
+  #expect(UsageEntry(name: "a", sevenDay: UsageWindow(utilization: 59)).modelPeak == nil)
+  #expect(UsageEntry(name: "a", scoped: []).modelPeak == nil)
+  let entry = UsageEntry(
+    name: "a", sevenDay: UsageWindow(utilization: 99),
+    scoped: [ScopedWindow(name: "Fable", utilization: 40), ScopedWindow(name: "Opus", utilization: 73), ScopedWindow(name: "Sonnet", utilization: 12)])
+  #expect(entry.modelPeak == 73)
+}
+
+@Test func accountIsFullFloorsTheAccountFigure() {
+  #expect(!UsageEntry(name: "a").accountIsFull)
+  #expect(!UsageEntry(name: "a", sevenDay: UsageWindow(utilization: 99.9)).accountIsFull)
+  #expect(UsageEntry(name: "a", sevenDay: UsageWindow(utilization: 100)).accountIsFull)
+  #expect(UsageEntry(name: "a", fiveHour: UsageWindow(utilization: 100), sevenDay: UsageWindow(utilization: 59)).accountIsFull)
+  #expect(!UsageEntry(name: "a", ultra: true, fiveHour: UsageWindow(utilization: 100), sevenDay: UsageWindow(utilization: 59)).accountIsFull)
+  #expect(!UsageEntry(name: "a", sevenDay: UsageWindow(utilization: 59), scoped: [ScopedWindow(name: "Fable", utilization: 100)]).accountIsFull)
+}
+
+@Test func limitsSummaryListsTheAccountThenEveryScopedLimit() {
+  #expect(UsageEntry(name: "a").limitsSummary == nil)
+  #expect(UsageEntry(name: "a", sevenDay: UsageWindow(utilization: 73.4)).limitsSummary == "weekly 73%")
+  let all = UsageEntry(
+    name: "a", fiveHour: UsageWindow(utilization: 17), sevenDay: UsageWindow(utilization: 59),
+    scoped: [ScopedWindow(name: "Opus", utilization: 12), ScopedWindow(name: "Fable", utilization: 100)])
+  #expect(all.limitsSummary == "weekly 59%, Opus weekly 12%, Fable weekly 100%")
+  #expect(UsageEntry(name: "a", scoped: [ScopedWindow(name: "Fable", utilization: 40)]).limitsSummary == "Fable weekly 40%")
 }
 
 @Test func countdownBuckets() {
