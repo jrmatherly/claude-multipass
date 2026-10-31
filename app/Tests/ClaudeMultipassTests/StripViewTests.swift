@@ -100,4 +100,29 @@ import Testing
     #expect(row.accountFigure == nil)
     #expect(row.usageLabel == "HTTP 429")
   }
+
+  @Test func theHeaderJoinsThePlanAndTheWeeklyReset() async throws {
+    let at = Date().addingTimeInterval(2 * 86400)
+    let reset = ISO8601DateFormatter().string(from: at)
+    let expected = try #require(Format.resetTime(at, now: Date()))
+    func popover(_ fields: String) async -> PopoverView {
+      let usage = #"{"profiles":[{"name":"matherly-gmail",\#(fields)}]}"#
+      return PopoverView(appState: await state(FixtureRunner(usage: usage)), openSettings: { _ in }, close: {})
+    }
+    let week = #""sevenDay":{"utilization":59,"resetsAt":"\#(reset)"}"#
+    #expect(await popover(#""plan":"Ultra",\#(week)"#).planLine == "Ultra · resets \(expected)")
+    #expect(await popover(week).planLine == "resets \(expected)")
+    #expect(await popover(#""plan":"Ultra","sevenDay":{"utilization":59}"#).planLine == "Ultra")
+    #expect(await popover(#""sevenDay":{"utilization":59}"#).planLine == nil)
+  }
+
+  @Test func theHeaderHidesThePlanLineWithUsageOff() async {
+    let s = await state(FixtureRunner(usage: #"{"profiles":[{"name":"matherly-gmail","plan":"Ultra"}]}"#))
+    let popover = PopoverView(appState: s, openSettings: { _ in }, close: {})
+    #expect(popover.planLine == "Ultra")
+    var off = s.settings
+    off.usageEnabled = false
+    await s.apply(off)
+    #expect(popover.planLine == nil)
+  }
 }

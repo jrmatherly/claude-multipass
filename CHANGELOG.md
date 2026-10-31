@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- The popover header shows the day and time the weekly limit resets beside the plan name, and an Ultra account with no 5-hour limit no longer has a row saying so, since the header already names the plan.
 - "Switch to" rows show the fuller of the 5-hour and weekly limits, where they showed only the weekly one, and a second bar for the fullest per-model limit, so an account with a full Fable or 5-hour limit no longer looks healthy.
 - The menu bar ring has two layers: the outer ring and the strip percentage show the fuller of the 5-hour and weekly limits, and an inner ring shows the fullest per-model limit. A full Fable limit drew a full red ring reading `100%`, as if the account were out, while other models still worked. When a per-model limit is the fullest, the percentage now shows the account figure, where 0.7.0 showed the per-model one.
 

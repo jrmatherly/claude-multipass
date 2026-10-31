@@ -62,14 +62,22 @@ struct PopoverView: View {
     appState.snapshot?.profiles.first { $0.name == appState.snapshot?.current }
   }
 
+  /// The plan name and the weekly reset, whichever exist.
+  var planLine: String? {
+    guard appState.settings.usageEnabled, let entry = appState.currentUsage else { return nil }
+    let reset = Format.resetTime(entry.sevenDay?.resetsAt, now: Date()).map { "resets \($0)" }
+    let parts = [entry.plan, reset].compactMap { $0 }
+    return parts.isEmpty ? nil : parts.joined(separator: " · ")
+  }
+
   private var header: some View {
     let snapshot = appState.snapshot
     let name = snapshot?.current
     return VStack(alignment: .leading, spacing: 2) {
       HStack(alignment: .firstTextBaseline, spacing: 6) {
         Text(Format.displayName(name, signedIn: snapshot?.signedIn ?? false)).font(.headline)
-        if appState.settings.usageEnabled, let plan = appState.currentUsage?.plan {
-          Text(plan).font(.caption).foregroundStyle(.secondary)
+        if let planLine {
+          Text(planLine).font(.caption).foregroundStyle(.secondary).lineLimit(1)
         }
       }
       Text((snapshot?.desktopRunning == true ? "Desktop running" : "Desktop not running") + (current?.cliSaved == true ? " · terminal login too" : ""))
@@ -89,9 +97,7 @@ struct PopoverView: View {
       let entry = appState.currentUsage
       TimelineView(.periodic(from: .now, by: 30)) { context in
         VStack(alignment: .leading, spacing: 10) {
-          if entry?.isUltra == true {
-            UltraIndicator()
-          } else {
+          if entry?.isUltra != true {
             UsageMeter(title: "5-hour", window: entry?.fiveHour, now: context.date)
           }
           let scoped = entry?.scoped ?? []
@@ -170,18 +176,6 @@ struct UsageMeter: View {
         Text(detail).font(.subheadline).monospacedDigit().foregroundStyle(.secondary)
       }
       UsageBar(utilization: window?.utilization, height: 6)
-    }
-    .accessibilityElement(children: .combine)
-  }
-}
-
-/// Stands in for the 5-hour meter on an Ultra account whose 5-hour window is missing or idle with no reset.
-struct UltraIndicator: View {
-  var body: some View {
-    HStack(alignment: .firstTextBaseline) {
-      Text("Ultra").font(.subheadline.weight(.medium))
-      Spacer()
-      Text("no 5-hour limit").font(.subheadline).foregroundStyle(.secondary)
     }
     .accessibilityElement(children: .combine)
   }

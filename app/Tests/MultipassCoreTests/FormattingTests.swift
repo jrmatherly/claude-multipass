@@ -27,6 +27,22 @@ import Testing
   #expect(Format.level(130) == .danger)
 }
 
+@Test func resetTimeIsTheWeekdayAndClockTime() throws {
+  var calendar = Calendar(identifier: .gregorian)
+  calendar.timeZone = try #require(TimeZone(identifier: "UTC"))
+  let locale = Locale(identifier: "en_GB")
+  // 2026-10-27 is a Tuesday.
+  let now = try #require(calendar.date(from: DateComponents(year: 2026, month: 10, day: 27, hour: 12)))
+  func at(_ seconds: TimeInterval) -> String? { Format.resetTime(now.addingTimeInterval(seconds), now: now, calendar: calendar, locale: locale) }
+  #expect(Format.resetTime(nil, now: now, calendar: calendar, locale: locale) == nil)
+  #expect(at(-60) == nil)
+  #expect(at(0) == nil)
+  #expect(at(3600) == "Tue 13:00")
+  #expect(at(2 * 86400 + 1800) == "Thu 12:30")
+  // A week on shares today's weekday, so it must not read as today.
+  #expect(at(7 * 86400) == "7d 0h")
+}
+
 @Test func resetIsACountdownWithinADayThenAWeekday() throws {
   var calendar = Calendar(identifier: .gregorian)
   calendar.timeZone = try #require(TimeZone(identifier: "UTC"))
