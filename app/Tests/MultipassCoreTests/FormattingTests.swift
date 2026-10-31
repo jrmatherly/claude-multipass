@@ -83,13 +83,10 @@ import Testing
 @Test func modelPeakPicksTheFullestScopedLimit() {
   #expect(UsageEntry(name: "a", sevenDay: UsageWindow(utilization: 59)).modelPeak == nil)
   #expect(UsageEntry(name: "a", scoped: []).modelPeak == nil)
-  let fullest = UsageEntry(
+  let entry = UsageEntry(
     name: "a", sevenDay: UsageWindow(utilization: 99),
-    scoped: [ScopedWindow(name: "Fable", utilization: 40), ScopedWindow(name: "Opus", utilization: 73), ScopedWindow(name: "Sonnet", utilization: 12)]
-  ).modelPeak
-  #expect(fullest?.window == "Opus weekly" && fullest?.utilization == 73)
-  let tie = UsageEntry(name: "a", scoped: [ScopedWindow(name: "Fable", utilization: 60), ScopedWindow(name: "Opus", utilization: 60)]).modelPeak
-  #expect(tie?.window == "Fable weekly")
+    scoped: [ScopedWindow(name: "Fable", utilization: 40), ScopedWindow(name: "Opus", utilization: 73), ScopedWindow(name: "Sonnet", utilization: 12)])
+  #expect(entry.modelPeak == 73)
 }
 
 @Test func accountIsFullFloorsTheAccountFigure() {

@@ -109,7 +109,7 @@ extension UsageEntry {
   /// The fuller of the limits that cover every model. On a tie weekly wins,
   /// since it takes longer to clear.
   public var accountPeak: (window: String, utilization: Double)? {
-    // An Ultra entry shows no 5-hour meter, so the ring must not count one either.
+    // An Ultra entry shows no 5-hour meter, so the account figure must not count one either.
     let windows = [("5-hour", isUltra ? nil : fiveHour), ("weekly", sevenDay)]
     var best: (window: String, utilization: Double)?
     for case let (label, window?) in windows where window.utilization >= (best?.utilization ?? -.infinity) {
@@ -118,15 +118,8 @@ extension UsageEntry {
     return best
   }
 
-  /// The fullest of the limits that cover one model only. On a tie the first
-  /// in server order wins.
-  public var modelPeak: (window: String, utilization: Double)? {
-    var best: (window: String, utilization: Double)?
-    for limit in scoped ?? [] where limit.utilization > (best?.utilization ?? -.infinity) {
-      best = (limit.label, limit.utilization)
-    }
-    return best
-  }
+  /// The fullest of the limits scoped to one model or surface.
+  public var modelPeak: Double? { scoped?.map(\.utilization).max() }
 
   public var accountIsFull: Bool {
     guard let accountPeak else { return false }
@@ -137,7 +130,7 @@ extension UsageEntry {
   /// full limit has stopped anything.
   public var limitsSummary: String? {
     let account = accountPeak.map { ["\($0.window) \(Format.percent($0.utilization))"] } ?? []
-    let parts = account + (scoped ?? []).map { "\($0.label) \(Format.percent($0.utilization))" }
+    let parts = account + (scoped ?? []).map { "\($0.name) weekly \(Format.percent($0.utilization))" }
     return parts.isEmpty ? nil : parts.joined(separator: ", ")
   }
 }
@@ -149,7 +142,6 @@ public struct ScopedWindow: Decodable, Equatable {
   public var utilization: Double
   public var resetsAt: Date?
   public var window: UsageWindow { UsageWindow(utilization: utilization, resetsAt: resetsAt) }
-  public var label: String { "\(name) weekly" }
 
   public init(name: String, utilization: Double, resetsAt: Date? = nil) {
     self.name = name

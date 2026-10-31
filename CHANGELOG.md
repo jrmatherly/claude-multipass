@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- The menu bar ring has two layers: the outer ring and the strip percentage show the fuller of the 5-hour and weekly limits, and an inner ring shows the fullest per-model limit. A full Fable limit drew a full red ring reading `100%`, as if the account were out, while other models still worked. The percentage now shows the account figure where 0.7.0 showed the Fable figure.
+- The menu bar ring has two layers: the outer ring and the strip percentage show the fuller of the 5-hour and weekly limits, and an inner ring shows the fullest per-model limit. A full Fable limit drew a full red ring reading `100%`, as if the account were out, while other models still worked. When a per-model limit is the fullest, the percentage now shows the account figure, where 0.7.0 showed the per-model one.
 
 ## 0.7.0 (2026-10-31)
 

@@ -61,7 +61,7 @@ Then in Raycast, **Settings, Script Commands, Add Script Directory**, press Cmd+
 
 ## Menu bar app
 
-**Claude Multipass** is a menu bar app over the same tool. The strip shows a two-ring gauge and the signed-in saved account (`not saved` or `signed out` otherwise). A left click opens a popover with the signed-in account first, then the other saved accounts under "Switch to"; clicking one expands an inline confirm, and Switch runs `claude-multipass switch` (Desktop quits and relaunches). A right click gives Refresh, Settings and Quit. Install:
+**Claude Multipass** is a menu bar app over the same tool. The strip shows a ring gauge, with an inner ring for a per-model limit, and the signed-in saved account (`not saved` or `signed out` otherwise). A left click opens a popover with the signed-in account first, then the other saved accounts under "Switch to"; clicking one expands an inline confirm, and Switch runs `claude-multipass switch` (Desktop quits and relaunches). A right click gives Refresh, Settings and Quit. Install:
 
 ```sh
 brew install --cask jrmatherly/tap/claude-multipass-app

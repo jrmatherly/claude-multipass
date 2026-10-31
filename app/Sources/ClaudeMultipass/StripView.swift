@@ -17,14 +17,12 @@ struct StripView: View {
     HStack(spacing: 5) {
       if case .ready = appState.cliStatus {
         if style != .name {
-          RingGauge(
-            account: usage?.accountPeak?.utilization, model: usage?.modelPeak?.utilization,
-            accountIsFull: usage?.accountIsFull ?? false)
+          gauge
         }
         if style != .ringOnly {
           Text(name)
-          if style == .ringAndName, let peak = usage?.accountPeak {
-            Text(Format.percent(peak.utilization)).monospacedDigit()
+          if let percentText {
+            Text(percentText).monospacedDigit()
           }
         }
       } else {
@@ -39,7 +37,16 @@ struct StripView: View {
     .help(label)
   }
 
-  private var label: String {
+  var gauge: RingGauge {
+    RingGauge(account: usage?.accountPeak?.utilization, model: usage?.modelPeak, accountIsFull: usage?.accountIsFull ?? false)
+  }
+
+  var percentText: String? {
+    guard style == .ringAndName else { return nil }
+    return usage?.accountPeak.map { Format.percent($0.utilization) }
+  }
+
+  var label: String {
     if case .failed(let message) = appState.cliStatus { return "Claude Multipass: the command line tool failed: \(message)" }
     guard case .ready = appState.cliStatus else { return "Claude Multipass: the command line tool is not ready" }
     guard let summary = usage?.limitsSummary else { return name }
@@ -52,13 +59,17 @@ struct RingGauge: View {
   let model: Double?
   let accountIsFull: Bool
 
+  /// The full account limit now covers this model too, and a bright arc would suggest it has room.
+  var modelColor: Color {
+    accountIsFull ? Color.primary.opacity(0.6) : Format.level(model).color(normal: .primary)
+  }
+
   var body: some View {
     ZStack {
       Ring(utilization: account, color: Format.level(account).color(normal: .primary))
         .frame(width: 16, height: 16)
       if let model {
-        // The full account limit now covers this model too, and a bright arc would suggest it has room.
-        Ring(utilization: model, color: accountIsFull ? Color.primary.opacity(0.6) : Format.level(model).color(normal: .primary))
+        Ring(utilization: model, color: modelColor)
           .frame(width: 9, height: 9)
       }
     }
