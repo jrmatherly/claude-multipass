@@ -154,17 +154,15 @@ import Testing
     #expect(UsageMeter(title: "Weekly", window: nil, now: now).detail == "–")
   }
 
-  @Test func thePopoverListsMetersInOrderAndOnlyFiveHourNamesAReset() async {
-    let s = await state(FixtureRunner(usage: fableFull))
-    let popover = PopoverView(appState: s, openSettings: { _ in }, close: {})
+  @Test func thePopoverListsMetersInOrderAndOnlyFiveHourNamesAReset() {
     let fable = [ScopedWindow(name: "Fable", utilization: 100)]
     let now = Date()
-    let max = popover.meters(for: UsageEntry(name: "a", scoped: fable), now: now)
+    let max = UsageMeter.meters(for: UsageEntry(name: "a", scoped: fable), now: now)
     #expect(max.map(\.title) == ["5-hour", "Weekly · all models", "Weekly · Fable"])
     #expect(max.map(\.showsReset) == [true, false, false])
-    let ultra = popover.meters(for: UsageEntry(name: "a", ultra: true, scoped: fable), now: now)
+    let ultra = UsageMeter.meters(for: UsageEntry(name: "a", ultra: true, scoped: fable), now: now)
     #expect(ultra.map(\.title) == ["Weekly · all models", "Weekly · Fable"])
-    let plain = popover.meters(for: UsageEntry(name: "a"), now: now)
+    let plain = UsageMeter.meters(for: UsageEntry(name: "a"), now: now)
     #expect(plain.map(\.title) == ["5-hour", "Weekly"])
   }
 }

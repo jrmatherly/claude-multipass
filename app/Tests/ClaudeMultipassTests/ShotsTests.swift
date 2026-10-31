@@ -6,7 +6,7 @@ import Testing
 
 @testable import ClaudeMultipass
 
-/// Renders the strip, the popover and each settings tab to PNGs in light and
+/// Renders the strip, the popover, the account panel and each settings tab to PNGs in light and
 /// dark, from fixture state. Runs only with UI_SHOTS_DIR set:
 /// `UI_SHOTS_DIR=/tmp/shots swift test --package-path app --filter Shots`.
 private let shotsDir = ProcessInfo.processInfo.environment["UI_SHOTS_DIR"]
@@ -158,6 +158,22 @@ private func menuBar(_ view: some View) -> some View {
 
     try render(PopoverView(appState: await state(nil), openSettings: { _ in }, close: {}), "popover-cli-missing")
     try render(PopoverView(appState: await state(FixtureRunner(versionFails: true)), openSettings: { _ in }, close: {}), "popover-cli-failed")
+  }
+
+  @Test func accountDetail() throws {
+    let now = Date()
+    let five = UsageWindow(utilization: 77, resetsAt: now.addingTimeInterval(2 * 3600 + 24 * 60))
+    let week = UsageWindow(utilization: 40, resetsAt: now.addingTimeInterval(3 * 86400 + 3600))
+    let fable = { ScopedWindow(name: "Fable", utilization: $0, resetsAt: week.resetsAt) }
+    let cases = [
+      ("max", UsageEntry(name: "work", plan: "Max", fiveHour: five, sevenDay: week)),
+      ("ultra", UsageEntry(name: "matherly", plan: "Ultra", ultra: true, sevenDay: week, scoped: [fable(4)])),
+      ("fable-full", UsageEntry(name: "matherly-gmail", plan: "Max", fiveHour: five, sevenDay: week, scoped: [fable(100)])),
+      ("error", UsageEntry(name: "max-plan", plan: "Max", error: "HTTP 429")),
+    ]
+    for (label, entry) in cases {
+      try render(AccountDetail(name: entry.name, entry: entry, now: now), "account-detail-\(label)")
+    }
   }
 
   @Test func settings() async throws {

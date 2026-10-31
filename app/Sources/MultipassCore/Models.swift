@@ -133,6 +133,22 @@ extension UsageEntry {
     let parts = account + (scoped ?? []).map { "\($0.name) weekly \(Format.percent($0.utilization))" }
     return parts.isEmpty ? nil : parts.joined(separator: ", ")
   }
+
+  /// The resets in words, for a reader who cannot see the bars.
+  public func resetLabels(now: Date) -> [String] {
+    let session = isUltra ? nil : fiveHour?.resetsAt
+    return [
+      session.flatMap { $0 > now ? "5-hour resets \(Format.countdown(to: $0, now: now))" : nil },
+      Format.resetTime(sevenDay?.resetsAt, now: now).map { "weekly resets \($0)" },
+    ].compactMap { $0 }
+  }
+
+  /// The plan name and the weekly reset, whichever exist.
+  public func planLine(now: Date) -> String? {
+    let reset = Format.resetTime(sevenDay?.resetsAt, now: now).map { "resets \($0)" }
+    let parts = [plan, reset].compactMap { $0 }
+    return parts.isEmpty ? nil : parts.joined(separator: " · ")
+  }
 }
 
 /// One model's or surface's weekly limit, named by the server (`Fable`). Names may repeat,

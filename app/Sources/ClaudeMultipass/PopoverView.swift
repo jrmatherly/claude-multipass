@@ -7,6 +7,7 @@ struct PopoverView: View {
   @ObservedObject var appState: AppState
   var openSettings: (SettingsPane?) -> Void
   var close: () -> Void
+  var panel: AccountPanelController?
   @State private var expanded: String?
 
   var body: some View {
@@ -54,20 +55,20 @@ struct PopoverView: View {
     }
     .padding(14)
     .frame(width: 320)
+    .coordinateSpace(.named(AccountPanelController.space))
     // A confirm left open must not come back, armed for Return, after the accounts change.
     .onChange(of: appState.snapshot?.current) { expanded = nil }
+    // Return can start a switch or a save with the pointer resting on another row, which sends no hover event.
+    .onChange(of: appState.phase) { panel?.dismiss() }
+    .onChange(of: appState.usage) { panel?.refresh() }
   }
 
   private var current: Profile? {
     appState.snapshot?.profiles.first { $0.name == appState.snapshot?.current }
   }
 
-  /// The plan name and the weekly reset, whichever exist.
   var planLine: String? {
-    guard appState.settings.usageEnabled, let entry = appState.currentUsage else { return nil }
-    let reset = Format.resetTime(entry.sevenDay?.resetsAt, now: Date()).map { "resets \($0)" }
-    let parts = [entry.plan, reset].compactMap { $0 }
-    return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    appState.settings.usageEnabled ? appState.currentUsage?.planLine(now: Date()) : nil
   }
 
   private var header: some View {
@@ -92,23 +93,12 @@ struct PopoverView: View {
     }
   }
 
-  /// A verified Ultra account has no 5-hour limit to show.
-  func meters(for entry: UsageEntry?, now: Date) -> [UsageMeter] {
-    let scoped = entry?.scoped ?? []
-    var meters: [UsageMeter] = []
-    if entry?.isUltra != true {
-      meters.append(UsageMeter(title: "5-hour", window: entry?.fiveHour, now: now, showsReset: true))
-    }
-    meters.append(UsageMeter(title: scoped.isEmpty ? "Weekly" : "Weekly · all models", window: entry?.sevenDay, now: now))
-    return meters + scoped.map { UsageMeter(title: "Weekly · \($0.name)", window: $0.window, now: now) }
-  }
-
   @ViewBuilder private var usage: some View {
     if appState.settings.usageEnabled {
       let entry = appState.currentUsage
       TimelineView(.periodic(from: .now, by: 30)) { context in
         VStack(alignment: .leading, spacing: 10) {
-          ForEach(Array(meters(for: entry, now: context.date).enumerated()), id: \.offset) { _, meter in
+          ForEach(Array(UsageMeter.meters(for: entry, now: context.date).enumerated()), id: \.offset) { _, meter in
             meter
           }
           if let error = entry?.error {
@@ -145,6 +135,7 @@ struct PopoverView: View {
             appState: appState, profile: profile,
             isExpanded: expanded == profile.name,
             onTap: {
+              panel?.dismiss()
               appState.dismissRowError()
               expanded = expanded == profile.name ? nil : profile.name
             },
@@ -155,7 +146,8 @@ struct PopoverView: View {
             onSwitch: { force in
               expanded = nil
               Task { await appState.switchTo(profile.name, force: force) }
-            })
+            },
+            onHover: { panel?.rowHover(name: profile.name, inside: $0, frame: $1) })
         }
       }
     }
@@ -170,6 +162,17 @@ struct UsageMeter: View {
   let window: UsageWindow?
   let now: Date
   var showsReset = false
+
+  /// A verified Ultra account has no 5-hour limit to show.
+  static func meters(for entry: UsageEntry?, now: Date) -> [UsageMeter] {
+    let scoped = entry?.scoped ?? []
+    var meters: [UsageMeter] = []
+    if entry?.isUltra != true {
+      meters.append(UsageMeter(title: "5-hour", window: entry?.fiveHour, now: now, showsReset: true))
+    }
+    meters.append(UsageMeter(title: scoped.isEmpty ? "Weekly" : "Weekly · all models", window: entry?.sevenDay, now: now))
+    return meters + scoped.map { UsageMeter(title: "Weekly · \($0.name)", window: $0.window, now: now) }
+  }
 
   var detail: String {
     guard let window else { return "–" }
