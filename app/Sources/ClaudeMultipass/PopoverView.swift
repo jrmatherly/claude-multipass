@@ -62,14 +62,22 @@ struct PopoverView: View {
     appState.snapshot?.profiles.first { $0.name == appState.snapshot?.current }
   }
 
+  /// The plan name and the weekly reset, whichever exist.
+  var planLine: String? {
+    guard appState.settings.usageEnabled, let entry = appState.currentUsage else { return nil }
+    let reset = Format.resetTime(entry.sevenDay?.resetsAt, now: Date()).map { "resets \($0)" }
+    let parts = [entry.plan, reset].compactMap { $0 }
+    return parts.isEmpty ? nil : parts.joined(separator: " · ")
+  }
+
   private var header: some View {
     let snapshot = appState.snapshot
     let name = snapshot?.current
     return VStack(alignment: .leading, spacing: 2) {
       HStack(alignment: .firstTextBaseline, spacing: 6) {
         Text(Format.displayName(name, signedIn: snapshot?.signedIn ?? false)).font(.headline)
-        if appState.settings.usageEnabled, let plan = appState.currentUsage?.plan {
-          Text(plan).font(.caption).foregroundStyle(.secondary)
+        if let planLine {
+          Text(planLine).font(.caption).foregroundStyle(.secondary).lineLimit(1)
         }
       }
       Text((snapshot?.desktopRunning == true ? "Desktop running" : "Desktop not running") + (current?.cliSaved == true ? " · terminal login too" : ""))
@@ -84,20 +92,24 @@ struct PopoverView: View {
     }
   }
 
+  /// A verified Ultra account has no 5-hour limit to show.
+  func meters(for entry: UsageEntry?, now: Date) -> [UsageMeter] {
+    let scoped = entry?.scoped ?? []
+    var meters: [UsageMeter] = []
+    if entry?.isUltra != true {
+      meters.append(UsageMeter(title: "5-hour", window: entry?.fiveHour, now: now, showsReset: true))
+    }
+    meters.append(UsageMeter(title: scoped.isEmpty ? "Weekly" : "Weekly · all models", window: entry?.sevenDay, now: now))
+    return meters + scoped.map { UsageMeter(title: "Weekly · \($0.name)", window: $0.window, now: now) }
+  }
+
   @ViewBuilder private var usage: some View {
     if appState.settings.usageEnabled {
       let entry = appState.currentUsage
       TimelineView(.periodic(from: .now, by: 30)) { context in
         VStack(alignment: .leading, spacing: 10) {
-          if entry?.isUltra == true {
-            UltraIndicator()
-          } else {
-            UsageMeter(title: "5-hour", window: entry?.fiveHour, now: context.date)
-          }
-          let scoped = entry?.scoped ?? []
-          UsageMeter(title: scoped.isEmpty ? "Weekly" : "Weekly · all models", window: entry?.sevenDay, now: context.date)
-          ForEach(Array(scoped.enumerated()), id: \.offset) { _, limit in
-            UsageMeter(title: "Weekly · \(limit.name)", window: limit.window, now: context.date)
+          ForEach(Array(meters(for: entry, now: context.date).enumerated()), id: \.offset) { _, meter in
+            meter
           }
           if let error = entry?.error {
             Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled)
@@ -150,16 +162,19 @@ struct PopoverView: View {
   }
 }
 
-/// One usage window of the signed-in account: its name, figure and reset over a bar.
+/// One usage window of the signed-in account: its name and figure over a bar.
+/// Only the 5-hour window names a reset; the header has the weekly one, which
+/// the Fable limit shares (measured in `.claude/rules/desktop-internals.md`).
 struct UsageMeter: View {
   let title: String
   let window: UsageWindow?
   let now: Date
+  var showsReset = false
 
-  private var detail: String {
+  var detail: String {
     guard let window else { return "–" }
-    let reset = Format.reset(window.resetsAt, now: now)
-    return reset == "–" ? Format.percent(window.utilization) : "\(Format.percent(window.utilization)) · resets \(reset)"
+    let reset = Format.countdown(to: window.resetsAt, now: now)
+    return showsReset && reset != "–" ? "\(Format.percent(window.utilization)) · resets \(reset)" : Format.percent(window.utilization)
   }
 
   var body: some View {
@@ -175,21 +190,12 @@ struct UsageMeter: View {
   }
 }
 
-/// Stands in for the 5-hour meter on an Ultra account whose 5-hour window is missing or idle with no reset.
-struct UltraIndicator: View {
-  var body: some View {
-    HStack(alignment: .firstTextBaseline) {
-      Text("Ultra").font(.subheadline.weight(.medium))
-      Spacer()
-      Text("no 5-hour limit").font(.subheadline).foregroundStyle(.secondary)
-    }
-    .accessibilityElement(children: .combine)
-  }
-}
-
 struct UsageBar: View {
   let utilization: Double?
   let height: CGFloat
+  var color: Color?
+
+  var fillColor: Color { color ?? Format.level(utilization).color(normal: .accentColor) }
 
   var body: some View {
     Capsule()
@@ -197,7 +203,7 @@ struct UsageBar: View {
       .overlay(alignment: .leading) {
         GeometryReader { geometry in
           Capsule()
-            .fill(Format.level(utilization).color(normal: .accentColor))
+            .fill(fillColor)
             .frame(width: geometry.size.width * Format.fill(utilization))
         }
       }

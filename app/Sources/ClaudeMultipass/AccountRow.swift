@@ -32,7 +32,7 @@ struct AccountRow: View {
           if isSwitching {
             ProgressView().controlSize(.small)
           } else if appState.settings.usageEnabled {
-            weekly
+            usage
           }
         }
         .padding(.vertical, 5)
@@ -85,12 +85,28 @@ struct AccountRow: View {
     }
   }
 
-  private var weekly: some View {
-    let entry = appState.usage[profile.name]
-    return HStack(spacing: 6) {
-      Text(Format.percent(entry?.sevenDay?.utilization)).font(.caption).monospacedDigit().foregroundStyle(.secondary)
-      UsageBar(utilization: entry?.sevenDay?.utilization, height: 4).frame(width: 40)
+  private var entry: UsageEntry? { appState.usage[profile.name] }
+  var accountFigure: Double? { entry?.accountPeak?.utilization }
+  var modelFigure: Double? { entry?.modelPeak }
+  var modelBarColor: Color {
+    UsageLevel.modelColor(modelFigure, accountIsFull: entry?.accountIsFull ?? false, normal: .accentColor)
+  }
+  var usageLabel: String { entry?.error ?? entry?.limitsSummary ?? "No usage figures yet" }
+
+  /// The bars keep the signed-in account's order: every model first, then one model.
+  private var usage: some View {
+    HStack(spacing: 6) {
+      Text(Format.percent(accountFigure)).font(.caption).monospacedDigit().foregroundStyle(.secondary)
+      VStack(spacing: 3) {
+        UsageBar(utilization: accountFigure, height: 4)
+        if let modelFigure {
+          UsageBar(utilization: modelFigure, height: 4, color: modelBarColor)
+        }
+      }
+      .frame(width: 40)
     }
-    .help(entry?.error ?? "Weekly usage")
+    .help(usageLabel)
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(usageLabel)
   }
 }

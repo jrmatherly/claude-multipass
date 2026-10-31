@@ -27,22 +27,25 @@ import Testing
   #expect(Format.level(130) == .danger)
 }
 
-@Test func resetIsACountdownWithinADayThenAWeekday() throws {
+@Test func resetTimeIsTheWeekdayAndClockTime() throws {
   var calendar = Calendar(identifier: .gregorian)
   calendar.timeZone = try #require(TimeZone(identifier: "UTC"))
+  let locale = Locale(identifier: "en_GB")
   // 2026-10-27 is a Tuesday.
   let now = try #require(calendar.date(from: DateComponents(year: 2026, month: 10, day: 27, hour: 12)))
-  func at(_ seconds: TimeInterval) -> String { Format.reset(now.addingTimeInterval(seconds), now: now, calendar: calendar) }
-  #expect(Format.reset(nil, now: now, calendar: calendar) == "–")
-  #expect(at(-60) == "–")
-  #expect(at(2 * 3600 + 14 * 60) == "2h 14m")
-  #expect(at(86399) == "23h 59m")
-  #expect(at(86400) == "Wed")
-  #expect(at(2 * 86400) == "Thu")
-  #expect(at(6 * 86400 + 3600) == "Mon")
+  func at(_ seconds: TimeInterval) -> String? { Format.resetTime(now.addingTimeInterval(seconds), now: now, calendar: calendar, locale: locale) }
+  #expect(Format.resetTime(nil, now: now, calendar: calendar, locale: locale) == nil)
+  #expect(at(-60) == nil)
+  #expect(at(0) == nil)
+  #expect(at(3600) == "Tue 13:00")
+  #expect(at(2 * 86400 + 1800) == "Thu 12:30")
+  // A week on shares today's weekday, so it must not read as today.
+  #expect(at(7 * 86400) == "7d 0h")
   #expect(at(6 * 86400 + 23 * 3600) == "6d 23h")
+  #expect(Format.resetTime(now.addingTimeInterval(3600), now: now, calendar: calendar, locale: Locale(identifier: "en_US")) == "Tue 1:00\u{202F}PM")
+  // The weekday and the clock both follow the calendar's time zone.
   calendar.timeZone = try #require(TimeZone(identifier: "Pacific/Kiritimati"))
-  #expect(at(2 * 86400) == "Fri")
+  #expect(Format.resetTime(now.addingTimeInterval(2 * 86400), now: now, calendar: calendar, locale: locale) == "Fri 2:00")
 }
 
 @Test func agoBuckets() {

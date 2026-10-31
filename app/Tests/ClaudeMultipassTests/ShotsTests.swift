@@ -72,6 +72,7 @@ private let usageLevels: [(String, String?)] = [
   ("fable-full", mixedJSON(five: 17, seven: 73, fable: 100)),
   ("both-full", mixedJSON(five: 100, seven: 59, fable: 100)),
   ("fable-warning", mixedJSON(five: 17, seven: 59, fable: 75)),
+  ("rows", #"{"profiles":[{"name":"matherly-gmail","plan":"Ultra","ultra":true,"sevenDay":{"utilization":59},"scoped":[{"name":"Fable","utilization":48}]},{"name":"work","fiveHour":{"utilization":10},"sevenDay":{"utilization":59},"scoped":[{"name":"Fable","utilization":100}]},{"name":"max-plan","fiveHour":{"utilization":100},"sevenDay":{"utilization":81},"scoped":[{"name":"Fable","utilization":40}]}]}"#),
   ("model-only", #"{"profiles":[{"name":"matherly-gmail","scoped":[{"name":"Fable","utilization":40}]}]}"#),
 ]
 

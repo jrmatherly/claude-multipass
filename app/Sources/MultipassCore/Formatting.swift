@@ -22,14 +22,15 @@ public enum Format {
     }
   }
 
-  /// A countdown within a day, else the reset's short weekday, unless that is
-  /// today's weekday a week on, which would read as today. The names are
-  /// fixed English, like the countdown, not the locale's.
-  public static func reset(_ date: Date?, now: Date, calendar: Calendar = .current) -> String {
-    guard let date, date.timeIntervalSince(now) >= 86400 else { return countdown(to: date, now: now) }
-    let weekday = calendar.component(.weekday, from: date)
-    if weekday == calendar.component(.weekday, from: now) { return countdown(to: date, now: now) }
-    return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][weekday - 1]
+  /// The short weekday, fixed English like the countdown, and the time in the
+  /// user's 12 or 24 hour clock. Today's weekday a week on would read as today,
+  /// so that one is a countdown instead.
+  public static func resetTime(_ date: Date?, now: Date, calendar: Calendar = .current, locale: Locale = .current) -> String? {
+    guard let date, date > now else { return nil }
+    let day = calendar.component(.weekday, from: date)
+    if date.timeIntervalSince(now) >= 86400, day == calendar.component(.weekday, from: now) { return countdown(to: date, now: now) }
+    let clock = Date.FormatStyle(date: .omitted, time: .shortened, locale: locale, calendar: calendar, timeZone: calendar.timeZone)
+    return "\(["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][day - 1]) \(date.formatted(clock))"
   }
 
   public static func ago(_ date: Date, now: Date) -> String {
