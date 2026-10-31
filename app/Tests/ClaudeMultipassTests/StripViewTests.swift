@@ -125,4 +125,13 @@ import Testing
     await s.apply(off)
     #expect(popover.planLine == nil)
   }
+
+  @Test func onlyTheFiveHourMeterNamesAReset() {
+    let now = Date(timeIntervalSince1970: 1_000_000)
+    let window = UsageWindow(utilization: 17, resetsAt: now.addingTimeInterval(3 * 3600))
+    #expect(UsageMeter(title: "5-hour", window: window, now: now, showsReset: true).detail == "17% · resets 3h 0m")
+    #expect(UsageMeter(title: "5-hour", window: UsageWindow(utilization: 17), now: now, showsReset: true).detail == "17%")
+    #expect(UsageMeter(title: "Weekly", window: window, now: now).detail == "17%")
+    #expect(UsageMeter(title: "Weekly", window: nil, now: now).detail == "–")
+  }
 }

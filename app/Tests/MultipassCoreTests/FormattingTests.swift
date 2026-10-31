@@ -43,24 +43,6 @@ import Testing
   #expect(at(7 * 86400) == "7d 0h")
 }
 
-@Test func resetIsACountdownWithinADayThenAWeekday() throws {
-  var calendar = Calendar(identifier: .gregorian)
-  calendar.timeZone = try #require(TimeZone(identifier: "UTC"))
-  // 2026-10-27 is a Tuesday.
-  let now = try #require(calendar.date(from: DateComponents(year: 2026, month: 10, day: 27, hour: 12)))
-  func at(_ seconds: TimeInterval) -> String { Format.reset(now.addingTimeInterval(seconds), now: now, calendar: calendar) }
-  #expect(Format.reset(nil, now: now, calendar: calendar) == "–")
-  #expect(at(-60) == "–")
-  #expect(at(2 * 3600 + 14 * 60) == "2h 14m")
-  #expect(at(86399) == "23h 59m")
-  #expect(at(86400) == "Wed")
-  #expect(at(2 * 86400) == "Thu")
-  #expect(at(6 * 86400 + 3600) == "Mon")
-  #expect(at(6 * 86400 + 23 * 3600) == "6d 23h")
-  calendar.timeZone = try #require(TimeZone(identifier: "Pacific/Kiritimati"))
-  #expect(at(2 * 86400) == "Fri")
-}
-
 @Test func agoBuckets() {
   let now = Date(timeIntervalSince1970: 1_000_000)
   #expect(Format.ago(now, now: now) == "just now")

@@ -98,7 +98,7 @@ struct PopoverView: View {
       TimelineView(.periodic(from: .now, by: 30)) { context in
         VStack(alignment: .leading, spacing: 10) {
           if entry?.isUltra != true {
-            UsageMeter(title: "5-hour", window: entry?.fiveHour, now: context.date)
+            UsageMeter(title: "5-hour", window: entry?.fiveHour, now: context.date, showsReset: true)
           }
           let scoped = entry?.scoped ?? []
           UsageMeter(title: scoped.isEmpty ? "Weekly" : "Weekly · all models", window: entry?.sevenDay, now: context.date)
@@ -156,16 +156,19 @@ struct PopoverView: View {
   }
 }
 
-/// One usage window of the signed-in account: its name, figure and reset over a bar.
+/// One usage window of the signed-in account: its name and figure over a bar.
+/// Only the 5-hour window names a reset; the header has the weekly one, which
+/// the per-model limits share (measured in `.claude/rules/desktop-internals.md`).
 struct UsageMeter: View {
   let title: String
   let window: UsageWindow?
   let now: Date
+  var showsReset = false
 
-  private var detail: String {
+  var detail: String {
     guard let window else { return "–" }
-    let reset = Format.reset(window.resetsAt, now: now)
-    return reset == "–" ? Format.percent(window.utilization) : "\(Format.percent(window.utilization)) · resets \(reset)"
+    let reset = Format.countdown(to: window.resetsAt, now: now)
+    return showsReset && reset != "–" ? "\(Format.percent(window.utilization)) · resets \(reset)" : Format.percent(window.utilization)
   }
 
   var body: some View {

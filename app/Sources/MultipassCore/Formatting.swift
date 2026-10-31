@@ -22,28 +22,15 @@ public enum Format {
     }
   }
 
-  /// A countdown within a day, else the reset's short weekday, unless that is
-  /// today's weekday a week on.
-  public static func reset(_ date: Date?, now: Date, calendar: Calendar = .current) -> String {
-    guard let date, date.timeIntervalSince(now) >= 86400 else { return countdown(to: date, now: now) }
-    return weekday(date, now: now, calendar: calendar) ?? countdown(to: date, now: now)
-  }
-
-  /// The short weekday and the time in the user's 12 or 24 hour clock, else a
-  /// countdown for today's weekday a week on.
+  /// The short weekday, fixed English like the countdown, and the time in the
+  /// user's 12 or 24 hour clock. Today's weekday a week on would read as today,
+  /// so it stays a countdown.
   public static func resetTime(_ date: Date?, now: Date, calendar: Calendar = .current, locale: Locale = .current) -> String? {
     guard let date, date > now else { return nil }
-    guard let day = weekday(date, now: now, calendar: calendar) else { return countdown(to: date, now: now) }
-    let clock = Date.FormatStyle(date: .omitted, time: .shortened, locale: locale, calendar: calendar, timeZone: calendar.timeZone)
-    return "\(day) \(date.formatted(clock))"
-  }
-
-  /// The name is fixed English, like the countdown, not the locale's. Nil for
-  /// today's weekday a day or more away, which would read as today.
-  private static func weekday(_ date: Date, now: Date, calendar: Calendar) -> String? {
     let day = calendar.component(.weekday, from: date)
-    if date.timeIntervalSince(now) >= 86400, day == calendar.component(.weekday, from: now) { return nil }
-    return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][day - 1]
+    if date.timeIntervalSince(now) >= 86400, day == calendar.component(.weekday, from: now) { return countdown(to: date, now: now) }
+    let clock = Date.FormatStyle(date: .omitted, time: .shortened, locale: locale, calendar: calendar, timeZone: calendar.timeZone)
+    return "\(["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][day - 1]) \(date.formatted(clock))"
   }
 
   public static func ago(_ date: Date, now: Date) -> String {
