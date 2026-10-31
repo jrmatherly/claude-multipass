@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.8.0 (2026-10-31)
 
 - The popover header shows the day and time the weekly limit resets beside the plan name, and an Ultra account with no 5-hour limit no longer has a row saying so, since the header already names the plan. Only the 5-hour bar still names its reset.
 - "Switch to" rows show the fuller of the 5-hour and weekly limits, where they showed only the weekly one, and a second bar for the fullest per-model limit, so an account with a full Fable or 5-hour limit no longer looks healthy.
