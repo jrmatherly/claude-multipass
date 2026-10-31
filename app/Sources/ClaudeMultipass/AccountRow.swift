@@ -17,7 +17,7 @@ struct AccountRow: View {
   @State private var frame = CGRect.zero
 
   private var isIdle: Bool { appState.phase == .idle }
-  /// A confirm or a running switch has the row's attention; the panel stays out of it.
+  /// A confirm, or a running switch or save, has the row's attention; the panel stays out of it.
   var offersDetail: Bool { isIdle && !isExpanded }
   private var isSwitching: Bool { appState.phase == .switching(profile.name) }
   private var rowError: RowError? { appState.rowError?.name == profile.name ? appState.rowError : nil }

@@ -35,6 +35,15 @@ import Testing
     #expect(log.changes == ["work"])
   }
 
+  @Test func sweepingRowsDuringTheDelayShowsOnlyTheLast() async throws {
+    let (hover, log) = hover(show: 0.02)
+    hover.entered("work")
+    hover.entered("max-plan")
+    hover.left("work")
+    try await Task.sleep(nanoseconds: 80_000_000)
+    #expect(log.changes == ["max-plan"])
+  }
+
   @Test func movingToAnotherRowWhileShownSwitchesAtOnce() async {
     let (hover, _) = hover(show: 0)
     await shown("work", hover)
@@ -123,6 +132,13 @@ import Testing
     #expect(AccountPanelController.origin(size: size, popover: near, row: row, screen: screen).x == 428)
   }
 
+  @Test func theFlipUsesTheEdgeOfADisplayThatIsNotAtZero() {
+    let second = CGRect(x: 1440, y: 0, width: 1000, height: 800)
+    let near = CGRect(x: 1500, y: 300, width: 320, height: 500)
+    let row = CGRect(x: 1514, y: 500, width: 292, height: 40)
+    #expect(AccountPanelController.origin(size: size, popover: near, row: row, screen: second).x == 1828)
+  }
+
   @Test func thePanelStaysInsideTheScreen() {
     let low = CGRect(x: 514, y: 60, width: 292, height: 40)
     #expect(AccountPanelController.origin(size: size, popover: popover, row: low, screen: screen).y == 25)
@@ -161,6 +177,12 @@ import Testing
     #expect(try await label(#"\#(five),\#(week),"error":"HTTP 429""#) == "HTTP 429")
   }
 
+  @Test func anExpiredFiveHourResetIsNotRead() {
+    let now = Date()
+    let entry = UsageEntry(name: "a", fiveHour: UsageWindow(utilization: 17, resetsAt: now.addingTimeInterval(-60)))
+    #expect(entry.resetLabels(now: now).isEmpty)
+  }
+
   private let usage = #"{"profiles":[{"name":"work","plan":"Max","sevenDay":{"utilization":59}}]}"#
 
   @Test func thePanelOnlyHasFiguresWithUsageOnAndAnEntry() async {
@@ -176,12 +198,80 @@ import Testing
     #expect(controller.detailEntry(for: "work") == nil)
   }
 
-  @Test func noPanelIsMadeWithoutFigures() async {
-    let controller = AccountPanelController(appState: await state(FixtureRunner(usage: usage)), showDelay: 0)
-    controller.rowHover(name: "max-plan", inside: true, frame: .zero)
+  /// Far off every screen, so the gate flashes nothing.
+  private func offScreenHost() -> (NSView, NSWindow) {
+    let frame = CGRect(x: -20000, y: 200, width: 320, height: 500)
+    let window = NSWindow(contentRect: frame, styleMask: .borderless, backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    let host = NSView(frame: CGRect(origin: .zero, size: frame.size))
+    window.contentView = host
+    return (host, window)
+  }
+
+  @Test func thePanelShowsLevelWithItsRowAndHidesWithoutFigures() async throws {
+    let s = await state(FixtureRunner(usage: usage))
+    await s.refreshUsage()
+    let controller = AccountPanelController(appState: s, showDelay: 0)
+    let (host, window) = offScreenHost()
+    window.orderFrontRegardless()
+    defer { window.orderOut(nil) }
+    controller.host = host
+    let row = CGRect(x: 14, y: 100, width: 292, height: 40)
+
+    controller.rowHover(name: "work", inside: true, frame: row)
+    await settle { controller.panel?.isVisible == true }
+    let panel = try #require(controller.panel)
+    #expect(panel.isVisible)
+    #expect(panel.ignoresMouseEvents)
+    #expect(!panel.canBecomeKey)
+    #expect(panel.parent == nil, "performClose does nothing on a popover whose window has a child")
+    #expect(panel.frame.maxY == window.frame.maxY - row.minY)
+
+    controller.rowHover(name: "max-plan", inside: true, frame: row)
+    #expect(!panel.isVisible, "a row with no figures must not keep the last row's")
+    controller.rowHover(name: "work", inside: true, frame: row)
+    #expect(panel.isVisible)
+    #expect(controller.panel === panel)
+
+    controller.dismiss()
+    #expect(!panel.isVisible)
+  }
+
+  @Test func noPanelOpensBesideAClosedPopover() async {
+    let s = await state(FixtureRunner(usage: usage))
+    await s.refreshUsage()
+    let controller = AccountPanelController(appState: s, showDelay: 0)
+    let (host, _) = offScreenHost()
+    controller.host = host
+    controller.rowHover(name: "work", inside: true, frame: .zero)
     await settle { controller.hover.shown != nil }
-    #expect(controller.hover.shown == "max-plan")
+    #expect(controller.hover.shown == "work")
     #expect(controller.panel == nil)
+  }
+
+  @Test func aRefreshFollowsTheFigures() async throws {
+    let s = await state(FixtureRunner(usage: usage))
+    await s.refreshUsage()
+    let controller = AccountPanelController(appState: s, showDelay: 0)
+    let (host, window) = offScreenHost()
+    window.orderFrontRegardless()
+    defer { window.orderOut(nil) }
+    controller.host = host
+    controller.rowHover(name: "work", inside: true, frame: .zero)
+    await settle { controller.panel?.isVisible == true }
+    let panel = try #require(controller.panel)
+
+    var off = s.settings
+    off.usageEnabled = false
+    await s.apply(off)
+    controller.refresh()
+    #expect(!panel.isVisible, "figures that went away must leave the panel")
+
+    off.usageEnabled = true
+    await s.apply(off)
+    controller.refresh()
+    #expect(panel.isVisible, "figures that arrive must reach a row still hovered")
+    controller.dismiss()
   }
 
   @Test func aRowOffersItsDetailOnlyWhenIdleWithNoConfirm() async throws {
@@ -193,7 +283,7 @@ import Testing
     #expect(row(expanded: false).offersDetail)
     #expect(!row(expanded: true).offersDetail)
     let running = Task { await s.switchTo("work") }
-    while s.phase == .idle { await Task.yield() }
+    await settle { s.phase != .idle }
     #expect(!row(expanded: false).offersDetail)
     running.cancel()
   }

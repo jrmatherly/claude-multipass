@@ -58,6 +58,9 @@ struct PopoverView: View {
     .coordinateSpace(.named(AccountPanelController.space))
     // A confirm left open must not come back, armed for Return, after the accounts change.
     .onChange(of: appState.snapshot?.current) { expanded = nil }
+    // Return can start a switch or a save with the pointer resting on another row, which sends no hover event.
+    .onChange(of: appState.phase) { panel?.dismiss() }
+    .onChange(of: appState.usage) { panel?.refresh() }
   }
 
   private var current: Profile? {

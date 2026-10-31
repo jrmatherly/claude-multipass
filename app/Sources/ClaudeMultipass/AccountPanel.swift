@@ -2,8 +2,8 @@ import AppKit
 import MultipassCore
 import SwiftUI
 
-/// Which row's panel shows. The first row waits out a delay; moving between
-/// rows does not. SwiftUI may deliver the next row's enter before this row's
+/// Which row the panel is for. The first row waits out a delay; moving to another
+/// row while one is shown does not. The row may have no figures to show. SwiftUI may deliver the next row's enter before this row's
 /// exit, so an exit counts only for the row the pointer last entered.
 @MainActor
 final class AccountHover {
@@ -54,7 +54,7 @@ final class AccountHover {
   }
 }
 
-/// One account's figures, as the signed-in account shows them in the popover.
+/// One account's plan line and bars, from the same parts as the popover's. An error replaces the bars.
 struct AccountDetail: View {
   let name: String
   let entry: UsageEntry
@@ -83,8 +83,8 @@ struct AccountDetail: View {
   }
 }
 
-/// The read-only panel beside the popover. It reads only `appState.usage`, never
-/// the network, the Keychain or the CLI. It never takes key or the mouse, so the
+/// The read-only panel beside the popover. It reads only `appState`, never the
+/// network, the Keychain or the CLI. It never takes key or the mouse, so the
 /// transient popover stays open. Not a child window: `performClose` does nothing
 /// on a popover whose window has a child (measured).
 @MainActor
@@ -112,6 +112,11 @@ final class AccountPanelController {
     hover.dismiss()
   }
 
+  /// A fetch that adds, changes or clears the figures while the panel's row stays the same.
+  func refresh() {
+    update(hover.shown)
+  }
+
   /// Turning usage off leaves the last report in AppState, so this gate hides it.
   func detailEntry(for name: String) -> UsageEntry? {
     appState.settings.usageEnabled ? appState.usage[name] : nil
@@ -122,7 +127,7 @@ final class AccountPanelController {
       hide()
       return
     }
-    // shortcut: the figures and countdown are fixed while one row stays shown, upgrade to a TimelineView if a long hover reads stale.
+    // shortcut: the countdown is fixed until the next fetch or row change, upgrade to a TimelineView if a long hover reads stale.
     let hosting = NSHostingView(rootView: AccountDetail(name: name, entry: entry, now: Date()))
     hosting.appearance = window.effectiveAppearance
     let size = hosting.fittingSize
@@ -148,7 +153,7 @@ final class AccountPanelController {
     panel.ignoresMouseEvents = true
     panel.level = .popUpMenu
     panel.hidesOnDeactivate = false
-    // A child window would follow the popover's Space; this one has to be told to.
+    // The popover opens on whichever Space is active, full-screen ones too.
     panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
     self.panel = panel
     return panel
