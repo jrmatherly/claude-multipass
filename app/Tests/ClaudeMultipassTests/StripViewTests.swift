@@ -62,4 +62,42 @@ import Testing
       #expect(NSHostingView(rootView: StripView(appState: s)).fittingSize.height <= 22)
     }
   }
+
+  private func row(_ usage: String) async throws -> AccountRow {
+    let s = await state(FixtureRunner(usage: usage))
+    let profile = try #require(s.snapshot?.profiles.first { $0.name == name })
+    return AccountRow(appState: s, profile: profile, isExpanded: false, onTap: {}, onCancel: {}, onSwitch: { _ in })
+  }
+
+  @Test func aSwitchRowShowsTheAccountThenTheModelFigure() async throws {
+    let row = try await row(fableFull)
+    #expect(row.accountFigure == 59)
+    #expect(row.modelFigure == 100)
+    #expect(row.modelBarColor == .red)
+    #expect(row.usageLabel == "weekly 59%, Fable weekly 100%")
+  }
+
+  @Test func aSwitchRowShowsAFullFiveHourLimit() async throws {
+    let row = try await row(mixedJSON(five: 100, seven: 59, fable: 40))
+    #expect(row.accountFigure == 100)
+    #expect(row.modelBarColor == Color.primary.opacity(0.6))
+  }
+
+  @Test func aSwitchRowWithoutAModelLimitHasOneFigure() async throws {
+    let row = try await row(#"{"profiles":[{"name":"matherly-gmail","sevenDay":{"utilization":52}}]}"#)
+    #expect(row.accountFigure == 52)
+    #expect(row.modelFigure == nil)
+  }
+
+  @Test func aSwitchRowWithNoEntrySaysSo() async throws {
+    let row = try await row(#"{"profiles":[]}"#)
+    #expect(row.accountFigure == nil)
+    #expect(row.usageLabel == "No usage figures yet")
+  }
+
+  @Test func aSwitchRowLabelPrefersTheFetchError() async throws {
+    let row = try await row(#"{"profiles":[{"name":"matherly-gmail","error":"HTTP 429"}]}"#)
+    #expect(row.accountFigure == nil)
+    #expect(row.usageLabel == "HTTP 429")
+  }
 }

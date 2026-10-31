@@ -59,10 +59,7 @@ struct RingGauge: View {
   let model: Double?
   let accountIsFull: Bool
 
-  /// The full account limit now covers this model too, and a bright arc would suggest it has room.
-  var modelColor: Color {
-    accountIsFull ? Color.primary.opacity(0.6) : Format.level(model).color(normal: .primary)
-  }
+  var modelColor: Color { UsageLevel.modelColor(model, accountIsFull: accountIsFull, normal: .primary) }
 
   var body: some View {
     ZStack {
@@ -93,6 +90,11 @@ private struct Ring: View {
 }
 
 extension UsageLevel {
+  /// The full account limit now covers this model too, and a bright mark would suggest it has room.
+  static func modelColor(_ model: Double?, accountIsFull: Bool, normal: Color) -> Color {
+    accountIsFull ? Color.primary.opacity(0.6) : Format.level(model).color(normal: normal)
+  }
+
   /// `normal` differs by place: monochrome in the menu bar, the accent in the popover.
   func color(normal: Color) -> Color {
     switch self {

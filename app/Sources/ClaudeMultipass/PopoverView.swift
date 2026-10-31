@@ -190,6 +190,7 @@ struct UltraIndicator: View {
 struct UsageBar: View {
   let utilization: Double?
   let height: CGFloat
+  var color: Color?
 
   var body: some View {
     Capsule()
@@ -197,7 +198,7 @@ struct UsageBar: View {
       .overlay(alignment: .leading) {
         GeometryReader { geometry in
           Capsule()
-            .fill(Format.level(utilization).color(normal: .accentColor))
+            .fill(color ?? Format.level(utilization).color(normal: .accentColor))
             .frame(width: geometry.size.width * Format.fill(utilization))
         }
       }
