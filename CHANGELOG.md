@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- The menu bar ring has two layers: the outer ring and the strip percentage show the fuller of the 5-hour and weekly limits, and an inner ring shows the fullest per-model limit. A full Fable limit drew a full red ring reading `100%`, as if the account were out, while other models still worked. The percentage now shows the account figure where 0.7.0 showed the Fable figure.
+
 ## 0.7.0 (2026-10-31)
 
 - `usage` and the menu bar app show the per-model weekly limit (Fable on Max and Ultra) beside the 5-hour and weekly ones, and the ring fills to the fullest of them. A reached Fable limit showed as nothing, because the endpoint reports it only in its `limits` list. An odd window or reset time no longer costs the account. A non-object window or a non-string reset time dropped it from `usage --json`. A non-numeric utilization or a reset time with an offset failed the menu bar app's whole usage read. The text output shows an unreadable window as `?`.

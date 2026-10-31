@@ -57,6 +57,10 @@ private func planJSON(verified: Bool) -> String {
   return #"{"profiles":[{"name":"matherly-gmail","plan":"Ultra",\#(session),"sevenDay":{"utilization":59,"resetsAt":"\#(weekReset)"},"scoped":[{"name":"Fable","utilization":\#(fable),"resetsAt":"\#(weekReset)"}]},{"name":"work","plan":"Max","fiveHour":{"utilization":4},"sevenDay":{"utilization":12}}]}"#
 }
 
+private func mixedJSON(five: Double, seven: Double, fable: Double) -> String {
+  #"{"profiles":[{"name":"matherly-gmail","fiveHour":{"utilization":\#(five)},"sevenDay":{"utilization":\#(seven)},"scoped":[{"name":"Fable","utilization":\#(fable)}]}]}"#
+}
+
 private let usageLevels: [(String, String?)] = [
   ("normal", usageJSON(five: 38, seven: 52)),
   ("warning", usageJSON(five: 38, seven: 73.4)),
@@ -64,6 +68,9 @@ private let usageLevels: [(String, String?)] = [
   ("off", nil),
   ("ultra", planJSON(verified: true)),
   ("fable", planJSON(verified: false)),
+  ("account-full", mixedJSON(five: 100, seven: 59, fable: 40)),
+  ("fable-full", mixedJSON(five: 17, seven: 73, fable: 100)),
+  ("model-only", #"{"profiles":[{"name":"matherly-gmail","scoped":[{"name":"Fable","utilization":40}]}]}"#),
 ]
 
 /// One suite per test target, emptied before each AppState is made, so a run
@@ -126,6 +133,7 @@ private func menuBar(_ view: some View) -> some View {
       for (level, usage) in usageLevels {
         let s = await state(FixtureRunner(usage: usage), style: style)
         try render(menuBar(StripView(appState: s)), "strip-\(style.rawValue)-\(level)")
+        #expect(NSHostingView(rootView: StripView(appState: s)).fittingSize.height <= 22, "the strip outgrew a status item button")
       }
     }
     try render(menuBar(StripView(appState: await state(nil))), "strip-cli-missing")
