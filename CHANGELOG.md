@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.0 (2026-10-31)
 
 - With usage on, hovering a "Switch to" row with a fetched report shows a small panel beside the popover with that account's plan and weekly reset, then its 5-hour countdown and bars or its fetch error. The row's tooltip is gone, since a tooltip never showed in this popover while the app was inactive. The figures come from the last fetch, so hovering starts no fetch.
 
