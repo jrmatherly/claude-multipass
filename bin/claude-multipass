@@ -34,7 +34,7 @@
 #
 # `claude-multipass rename {{old}} {{new}}`
 #
-# - Show each saved account's 5-hour and weekly usage (reads the saved tokens, see --help):
+# - Show each saved account's plan and its 5-hour, weekly and per-model weekly usage (reads the saved tokens, see --help):
 #
 # `claude-multipass usage`
 #
@@ -250,12 +250,16 @@ ${bold}Commands${reset}
                        and deleting its CLI login item (the Desktop login is
                        recoverable from the backup, the CLI token is not).
                        Desktop's current login is untouched.
-  usage [name]         Prints each saved account's 5-hour and weekly usage as a
-                       percentage, with the time each window resets. Give a
-                       name to see one account. Opt-in; see Cautions. With
-                       --json, {"profiles":[{name, fiveHour, sevenDay} or
-                       {name, error}]}; each window has utilization and
-                       resetsAt (UTC, Z).
+  usage [name]         Prints each saved account's 5-hour, weekly and
+                       per-model weekly (Fable) usage as a percentage, with
+                       the time each window resets; a verified Ultra account,
+                       which has no 5-hour limit, shows "Ultra" in its place.
+                       The plan comes from the OAuth profile, read at most
+                       once a day per account. Give a name to see one
+                       account. Opt-in; see Cautions. With --json,
+                       {"profiles":[{name, plan?, fiveHour or ultra:true,
+                       sevenDay, scoped:[{name, ...}]?} or {name, error}]};
+                       each window has utilization and resetsAt (UTC, Z).
   current              Prints the name of the saved account Desktop is signed
                        in as, "not saved" if the current login has no name, or
                        "signed out". For scripts and the Raycast commands.
@@ -297,7 +301,9 @@ ${bold}Cautions${reset}
   - Profiles are per Mac: the app encrypts them with this Mac's Keychain key.
     Save each account once on every Mac you use.
   - usage decrypts the saved tokens with this Mac's Keychain key and reads
-    Anthropic's OAuth usage endpoint with them, outside the app. Third-party
+    Anthropic's OAuth usage endpoint with them, outside the app, plus the
+    OAuth profile endpoint for the plan name at most once a day per account
+    (cached in the store's plans folder). Third-party
     coverage says Anthropic's terms discourage that pattern. It is read-only
     and only runs when you ask for it, or when you turn usage on in the menu
     bar app (polled at least 5 minutes apart). Whether to use it is your
@@ -880,14 +886,61 @@ access_token() {
        | select(.value.expiresAt > $now)] | max_by(.value.expiresAt) | .value.token // empty'
 }
 
-usage_jq='
-  def pct: (.utilization // 0 | floor | tostring) + "%";
-  def at: if .resets_at then " (resets " + (.resets_at | try (sub("(\\.[0-9]+)?(\\+00:00|Z)$"; "Z") | fromdate | strflocaltime("%a %H:%M")) catch .) + ")" else "" end;
-  "5h " + (.five_hour | pct) + (.five_hour | at) + "  7d " + (.seven_day | pct) + (.seven_day | at)'
+# Shared by both formatters. scoped: the weekly limits of one model (Fable),
+# which live only in limits[]; at 100% the named windows still show no lock.
+# ultra: the server labels the plan Ultra and the session window is idle with
+# no reset, which is how a verified Ultra account (no 5-hour limit) reports;
+# an Ultra account still under its temporary limit keeps a real window.
+usage_defs='
+  def stamp: sub("(\\.[0-9]+)?(\\+00:00|Z)$"; "Z");
+  def scoped: [(.limits | if type == "array" then .[] else empty end)
+    | select(type == "object" and .kind == "weekly_scoped" and (.percent | type) == "number")
+    | {name: (((try .scope.model.display_name catch null) // (try .scope.surface.display_name catch null)) | if type == "string" then gsub("^\\s+|\\s+$"; "") else "" end),
+       utilization: .percent, resets_at}
+    | select(.name != "")];
+  def ultra: ._plan == "Ultra" and ((.five_hour // {}) | (.utilization // 0) == 0 and .resets_at == null);'
 
-# The raw usage body for one config.json, or "error: <reason>".
+usage_jq="$usage_defs"'
+  def pct: (.utilization // 0 | floor | tostring) + "%";
+  def at: if .resets_at then " (resets " + (.resets_at | try (stamp | fromdate | strflocaltime("%a %H:%M")) catch .) + ")" else "" end;
+  (if ultra then "Ultra" else "5h " + (.five_hour | pct) + (.five_hour | at) end)
+  + "  7d " + (.seven_day | pct) + (.seven_day | at)
+  + (scoped | map("  " + .name + " " + pct + at) | join(""))'
+
+# The server's plan label for an account ("Ultra", "Max"), from the OAuth
+# profile, cached a day per account in $root/plans: it changes only with the
+# subscription, and a call per usage run would double the endpoint traffic.
+# A failed read keeps the last label and is not retried until the day is out.
+plan_label() {
+  local token=$1 account=$2 cache body label='' tmp re='^[A-Za-z0-9][A-Za-z0-9 .+-]{0,39}$'
+  [[ $account =~ ^[0-9A-Za-z-]+$ ]] || return 0
+  cache="$root/plans/$account"
+  if [[ -f $cache ]] && (($(date +%s) - $(stat -f %m "$cache") < 86400)); then
+    cat "$cache"
+    return 0
+  fi
+  if body=$(printf 'header = "Authorization: Bearer %s"\n' "$token" \
+    | curl -sS --max-time 10 -K - -w '\n%{http_code}' \
+      -H "Content-Type: application/json" https://api.anthropic.com/api/oauth/profile 2> /dev/null) \
+    && [[ ${body##*$'\n'} == 200 ]]; then
+    label=$(printf '%s' "${body%$'\n'*}" | jq -r '.organization.plan_display_name // empty | strings' 2> /dev/null) || label=''
+    [[ $label =~ $re ]] || label=''
+  elif [[ -f $cache ]]; then
+    touch "$cache"
+    cat "$cache"
+    return 0
+  fi
+  # mktemp, not $$: the report's per-account subshells share their parent's $$.
+  (umask 077 && mkdir -p "$root/plans") 2> /dev/null \
+    && tmp=$(mktemp "$root/plans/.plan.XXXXXX") \
+    && printf '%s' "$label" > "$tmp" && mv -f "$tmp" "$cache" || true
+  printf '%s' "$label"
+}
+
+# The usage body for one config.json with the plan label as _plan, or
+# "error: <reason>".
 usage_fetch() {
-  local key=$1 cfg=$2 account=$3 token code body msg=''
+  local key=$1 cfg=$2 account=$3 token code body plan msg=''
   token=$(access_token "$key" "$cfg" "$account")
   if [[ -z $token ]]; then
     msg='token expired, sign in and re-save'
@@ -916,10 +969,12 @@ usage_fetch() {
     echo "error: unreadable response"
     return 0
   }
-  printf '%s\n' "$body"
+  plan=$(plan_label "$token" "$account")
+  printf '%s' "$body" | jq -c --arg plan "$plan" 'if $plan == "" then . else . + {_plan: $plan} end'
 }
 
-# The 5h and 7d figures for one config.json as text, or a short reason.
+# The 5h (or Ultra), 7d and per-model weekly figures for one config.json as
+# text, or a short reason.
 usage_line() {
   local body
   body=$(usage_fetch "$@")
@@ -929,18 +984,23 @@ usage_line() {
   esac
 }
 
-# The same figures as one JSON object {name, fiveHour?, sevenDay?} or
-# {name, error}; a window with a null utilization is left out.
+# The same figures as one JSON object {name, plan?, ultra? or fiveHour?,
+# sevenDay?, scoped?} or {name, error}; a window with a null utilization is
+# left out.
 usage_object() {
   local name=$1 body
   shift
   body=$(usage_fetch "$@")
   case $body in
     error:\ *) jq -n --arg name "$name" --arg error "${body#error: }" '{name: $name, error: $error}' ;;
-    *) printf '%s' "$body" | jq --arg name "$name" '
-      def win(key): if .utilization == null then {} else
-        {(key): ({utilization} + (if .resets_at then {resetsAt: (.resets_at | sub("(\\.[0-9]+)?(\\+00:00|Z)$"; "Z"))} else {} end))} end;
-      {name: $name} + ((.five_hour // {}) | win("fiveHour")) + ((.seven_day // {}) | win("sevenDay"))' ;;
+    *) printf '%s' "$body" | jq --arg name "$name" "$usage_defs"'
+      def win: {utilization} + (if .resets_at then {resetsAt: (.resets_at | stamp)} else {} end);
+      def named(key): if .utilization == null then {} else {(key): win} end;
+      {name: $name}
+      + (if ._plan then {plan: ._plan} else {} end)
+      + (if ultra then {ultra: true} else ((.five_hour // {}) | named("fiveHour")) end)
+      + ((.seven_day // {}) | named("sevenDay"))
+      + (scoped | if length > 0 then {scoped: map({name} + win)} else {} end)' ;;
   esac
 }
 

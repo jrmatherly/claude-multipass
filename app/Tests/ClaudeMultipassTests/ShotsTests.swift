@@ -47,11 +47,23 @@ private func usageJSON(five: Double, seven: Double) -> String {
   return #"{"profiles":[{"name":"matherly-gmail","fiveHour":{"utilization":\#(five),"resetsAt":"\#(fiveReset)"},"sevenDay":{"utilization":\#(seven),"resetsAt":"\#(sevenReset)"}},{"name":"work","fiveHour":{"utilization":4},"sevenDay":{"utilization":12}},{"name":"max-plan","fiveHour":{"utilization":20},"sevenDay":{"utilization":81}}]}"#
 }
 
+/// The current account on Ultra: verified (no 5-hour limit), or still under
+/// its temporary session limit with its Fable weekly limit reached.
+private func planJSON(verified: Bool) -> String {
+  let iso = ISO8601DateFormatter()
+  let weekReset = iso.string(from: Date().addingTimeInterval(4 * 86400 + 3600))
+  let session = verified ? #""ultra":true"# : #""fiveHour":{"utilization":17,"resetsAt":"\#(iso.string(from: Date().addingTimeInterval(4 * 3600)))"}"#
+  let fable = verified ? 96 : 100
+  return #"{"profiles":[{"name":"matherly-gmail","plan":"Ultra",\#(session),"sevenDay":{"utilization":59,"resetsAt":"\#(weekReset)"},"scoped":[{"name":"Fable","utilization":\#(fable),"resetsAt":"\#(weekReset)"}]},{"name":"work","plan":"Max","fiveHour":{"utilization":4},"sevenDay":{"utilization":12}}]}"#
+}
+
 private let usageLevels: [(String, String?)] = [
   ("normal", usageJSON(five: 38, seven: 52)),
   ("warning", usageJSON(five: 38, seven: 73.4)),
   ("danger", usageJSON(five: 94, seven: 73.4)),
   ("off", nil),
+  ("ultra", planJSON(verified: true)),
+  ("fable", planJSON(verified: false)),
 ]
 
 /// One suite per test target, emptied before each AppState is made, so a run

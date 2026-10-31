@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- `usage` and the menu bar app show the per-model weekly limit (Fable on Max and Ultra) beside the 5-hour and weekly ones, and the ring fills to the fullest of them. A reached Fable limit showed as nothing: the endpoint reports it only in its `limits` list.
+- `usage` reads each account's plan name from the OAuth profile endpoint at most once a day, and a verified Ultra account, which has no 5-hour limit, shows `Ultra` in place of the 5-hour figure. The popover shows the plan beside the account name and an "Ultra · no 5-hour limit" line in place of the 5-hour bar.
+
 ## 0.6.1 (2026-10-29)
 
 - The backup prune in `switch`, `add`, `remove` and `save --force` keeps the folder it has just made whatever the clock says. Before, a Mac with its clock set back pruned that folder first, because the prune ordered folders by the timestamp in their names alone.

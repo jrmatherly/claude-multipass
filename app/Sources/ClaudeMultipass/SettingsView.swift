@@ -125,7 +125,7 @@ struct SettingsView: View {
       }
     } footer: {
       Text(draft.usageEnabled
-        ? "The ring fills to the fuller of the 5-hour and weekly windows: orange from 70 %, red from 90 %."
+        ? "The ring fills to the fullest usage window, the 5-hour, weekly and per-model weekly ones: orange from 70 %, red from 90 %."
         : "Usage is off, so the ring stays an empty outline.")
         .font(.caption).foregroundStyle(.secondary)
     }

@@ -912,8 +912,13 @@ check "and still prunes the folder" 10 "$(find "$spaced/backups" -mindepth 1 -ma
 # usage: a fixture token cache encrypted the way the app does; security and
 # curl are stubs on PATH, so no Keychain and no network
 mkdir -p "$p/usagey" "$p/stale"
+# The usage and profile endpoints answer from files; profile-code sets the
+# profile's HTTP code. Every call's argv and stdin go to curl-args.
+write_curl() {
+  printf '#!/bin/sh\n{ echo "curl $*"; cat; } >> "%s/curl-args"\ncase "$*" in\n  *oauth/profile*) cat "%s/profile.json" 2> /dev/null; printf "\\n%%s" "$(cat "%s/profile-code" 2> /dev/null || echo 200)" ;;\n  *) cat "%s/usage.json"; printf "\\n200" ;;\nesac\n' "$tmp" "$tmp" "$tmp" "$tmp" > "$tmp/bin/curl"
+}
 printf '{"five_hour":{"utilization":42.6,"resets_at":"2026-10-23T19:45:00.123456+00:00"},"seven_day":{"utilization":18.0,"resets_at":"2026-10-27T13:00:00Z"}}' > "$tmp/usage.json"
-printf '#!/bin/sh\n{ echo "curl $*"; cat; } >> "%s/curl-args"\ncat "%s/usage.json"; printf "\\n200"\n' "$tmp" "$tmp" > "$tmp/bin/curl"
+write_curl
 chmod +x "$tmp/bin/curl"
 key=$(printf '%s' "$pw" | /usr/bin/python3 -c 'import hashlib, sys; print(hashlib.pbkdf2_hmac("sha1", sys.stdin.buffer.read(), b"saltysalt", 1003, 16).hex())')
 encrypt() { {
@@ -946,7 +951,7 @@ printf '#!/bin/sh\ncat > /dev/null; printf "{}\\n401"\n' > "$tmp/bin/curl"
 check "usage reports a rejected token" "usagey           token expired, sign in and re-save" "$(cda usage usagey)"
 printf '#!/bin/sh\ncat > /dev/null; printf "{}\\n429"\n' > "$tmp/bin/curl"
 check "usage reports rate limiting" "usagey           rate limited" "$(cda usage usagey)"
-printf '#!/bin/sh\n{ echo "curl $*"; cat; } >> "%s/curl-args"\ncat "%s/usage.json"; printf "\\n200"\n' "$tmp" "$tmp" > "$tmp/bin/curl"
+write_curl
 printf '{"oauth:tokenCacheV2":"djEwbm90IHJlYWxseSBlbmNyeXB0ZWQgYnl0ZXM="}' > "$p/stale/config.json"
 check "usage says when a cache will not decrypt" "stale            cannot decrypt (the profile was saved on another Mac, or the app changed its key)" "$(cda usage stale)"
 enc=$(encrypt "${plain//PAST/$past}")
@@ -971,6 +976,50 @@ check "usage --json omits a null window" null "$(jq -r '.profiles[0].sevenDay' <
 cp "$tmp/usage-full.json" "$tmp/usage.json"
 mkdir -p "$tmp/emptyd" && printf '{"theme":"dark"}' > "$tmp/emptyd/config.json"
 check "usage --json with nothing saved" '{"profiles":[]}' "$(CLAUDE_DESKTOP_DIR="$tmp/emptyd" CLAUDE_MULTIPASS_DIR="$tmp/empty" cda usage --json)"
+
+# usage: the plan label from the profile endpoint, cached a day per account;
+# a verified Ultra (Ultra label, idle session with no reset) shows Ultra in
+# place of the 5-hour window; per-model weekly limits come from limits[]
+plans=$CLAUDE_MULTIPASS_DIR/plans
+rm -rf "$plans"
+: > "$tmp/curl-args"
+printf '{"organization":{"organization_type":"claude_max","rate_limit_tier":"default_claude_max_20x","plan_display_name":"Ultra"}}' > "$tmp/profile.json"
+printf '{"five_hour":{"utilization":0.0,"resets_at":null,"locked_reason":null},"seven_day":{"utilization":69.0,"resets_at":null},"limits":[{"kind":"session","percent":0,"resets_at":null,"scope":null},{"kind":"weekly_all","percent":69,"resets_at":null,"scope":null},{"kind":"weekly_scoped","percent":96,"severity":"critical","resets_at":null,"scope":{"model":{"id":null,"display_name":"Fable"},"surface":null}},{"kind":"weekly_scoped","percent":5,"scope":"odd"},"junk"]}' > "$tmp/usage.json"
+check "usage shows Ultra for a verified Ultra and the Fable limit" "usagey           Ultra  7d 69%  Fable 96%" "$(cda usage usagey)"
+check "usage reads the profile endpoint once" 1 "$(grep -c 'https://api.anthropic.com/api/oauth/profile' "$tmp/curl-args")"
+check "usage caches the plan per account" Ultra "$(cat "$plans/uuuuuuuu-1")"
+check "the plan cache is private" 600 "$(stat -f %Lp "$plans/uuuuuuuu-1")"
+check "the plans folder is private" 700 "$(stat -f %Lp "$plans")"
+out=$(cda usage usagey --json)
+check "a second run within a day reads the cache, not the endpoint" 1 "$(grep -c 'oauth/profile' "$tmp/curl-args")"
+check "usage --json plan" Ultra "$(jq -r '.profiles[0].plan' <<< "$out")"
+check "usage --json ultra" true "$(jq -r '.profiles[0].ultra' <<< "$out")"
+check "usage --json drops the 5-hour window for a verified Ultra" null "$(jq -r '.profiles[0].fiveHour' <<< "$out")"
+check "usage --json scoped limits, malformed entries skipped" '[{"name":"Fable","utilization":96}]' "$(jq -c '.profiles[0].scoped' <<< "$out")"
+check "usage --json never prints a token with the plan" 0 "$(grep -c tok-u <<< "$out")"
+check "the profile call keeps the token off the command line" 0 "$(grep -c 'curl .*tok-u' "$tmp/curl-args")"
+printf '{"five_hour":{"utilization":17.0,"resets_at":"2026-10-23T19:45:00Z"},"seven_day":{"utilization":59.0},"limits":[{"kind":"weekly_scoped","percent":100,"severity":"critical","resets_at":"2026-10-27T13:00:00Z","scope":{"model":{"display_name":"Fable"}}}]}' > "$tmp/usage.json"
+out=$(cda usage usagey --json)
+check "an Ultra still under a session limit keeps its 5-hour window" 17.0 "$(jq -r '.profiles[0].fiveHour.utilization' <<< "$out")"
+check "and is not marked ultra" null "$(jq -r '.profiles[0].ultra' <<< "$out")"
+check "usage --json scoped resetsAt" 2026-10-27T13:00:00Z "$(jq -r '.profiles[0].scoped[0].resetsAt' <<< "$out")"
+check "usage prints a reached Fable limit" "usagey           5h 17% (resets $(date -r 1792784700 '+%a %H:%M'))  7d 59%  Fable 100% (resets $(date -r 1793106000 '+%a %H:%M'))" "$(cda usage usagey)"
+printf '{"five_hour":{"utilization":0.0,"resets_at":null},"seven_day":{"utilization":3.0}}' > "$tmp/usage.json"
+touch -t 202001010000 "$plans/uuuuuuuu-1"
+printf '{"organization":{"plan_display_name":"Max"}}' > "$tmp/profile.json"
+check "a day-old plan is read again, and only Ultra replaces the 5-hour window" "usagey           5h 0%  7d 3%" "$(cda usage usagey)"
+check "the stale cache took the new label" Max "$(cat "$plans/uuuuuuuu-1")"
+touch -t 202001010000 "$plans/uuuuuuuu-1"
+printf 500 > "$tmp/profile-code"
+check "a failed profile read keeps the last label" Max "$(cda usage usagey --json | jq -r '.profiles[0].plan')"
+calls=$(grep -c 'oauth/profile' "$tmp/curl-args")
+cda usage usagey > /dev/null
+check "and is not retried until the day is out" "$calls" "$(grep -c 'oauth/profile' "$tmp/curl-args")"
+rm -f "$tmp/profile-code" "$plans/uuuuuuuu-1"
+printf '{"organization":{"plan_display_name":"Ultra\\u001b[31m"}}' > "$tmp/profile.json"
+check "a plan label outside the name pattern is dropped" null "$(cda usage usagey --json | jq -r '.profiles[0].plan')"
+rm -rf "$plans" "$tmp/profile.json"
+cp "$tmp/usage-full.json" "$tmp/usage.json"
 cp "$p/usagey/meta.json" "$tmp/usagey-meta"
 printf 'not json' > "$p/usagey/meta.json"
 bad_meta="usagey: $p/usagey/meta.json is not valid; remove usagey, then save it again"

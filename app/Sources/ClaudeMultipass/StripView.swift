@@ -1,7 +1,7 @@
 import MultipassCore
 import SwiftUI
 
-/// The menu bar strip: a ring filled to the signed-in account's fuller usage
+/// The menu bar strip: a ring filled to the signed-in account's fullest usage
 /// window, then its name and that percentage, as the strip style picks. The
 /// ring stays an empty outline while usage is off or not fetched yet.
 struct StripView: View {
