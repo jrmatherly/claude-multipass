@@ -2,8 +2,8 @@
 
 ## Unreleased
 
-- `usage` and the menu bar app show the per-model weekly limit (Fable on Max and Ultra) beside the 5-hour and weekly ones, and the ring fills to the fullest of them. A reached Fable limit showed as nothing: the endpoint reports it only in its `limits` list.
-- `usage` reads each account's plan name from the OAuth profile endpoint at most once a day, and an Ultra account whose 5-hour window is idle with no reset, which is how a verified Ultra account with no 5-hour limit reports, shows `Ultra` in place of the 5-hour figure. The popover shows the plan beside the account name and a row reading Ultra, no 5-hour limit in place of the 5-hour bar.
+- `usage` and the menu bar app show the per-model weekly limit (Fable on Max and Ultra) beside the 5-hour and weekly ones, and the ring fills to the fullest of them. A reached Fable limit showed as nothing: the endpoint reports it only in its `limits` list. A window or limit with an odd value, or a reset time with an offset, no longer drops the account from `usage --json`.
+- `usage` reads each account's plan name from the OAuth profile endpoint at most once a day, or an hour after a failed request while none is cached. An Ultra account whose 5-hour window is idle with no reset shows `Ultra` in place of the 5-hour figure. That is how a verified Ultra account, which has no 5-hour limit, reports. The popover shows the plan beside the account name and a row reading Ultra, no 5-hour limit in place of the 5-hour bar.
 
 ## 0.6.1 (2026-10-29)
 

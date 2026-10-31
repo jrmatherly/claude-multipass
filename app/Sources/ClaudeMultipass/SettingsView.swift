@@ -136,7 +136,7 @@ struct SettingsView: View {
       Toggle(isOn: binding(\.usageEnabled)) {
         VStack(alignment: .leading, spacing: 2) {
           Text("Show usage")
-          Text("Reads the saved tokens through the Keychain and Anthropic's usage endpoint, outside the app. Opt-in; read the caution first.")
+          Text("Reads the saved tokens through the Keychain and Anthropic's usage endpoint, and its profile endpoint for the plan name about once a day, outside the app. Opt-in; read the caution first.")
             .font(.caption).foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
           Link("Usage headroom caution", destination: URL(string: "#usage-headroom", relativeTo: Self.docs)!.absoluteURL)

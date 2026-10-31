@@ -1028,11 +1028,17 @@ check "and is not marked ultra" null "$(jq -r '.profiles[0].ultra' <<< "$out")"
 printf '{"five_hour":{"utilization":5.0,"resets_at":null},"seven_day":{"utilization":1.0}}' > "$tmp/usage.json"
 out=$(cda usage usagey --json)
 check "Ultra at 5% with no reset keeps its 5-hour window" 5.0 "$(jq -r '.profiles[0].fiveHour.utilization' <<< "$out")"
+printf '{"seven_day":{"utilization":1.0}}' > "$tmp/usage.json"
+check "Ultra with no 5-hour window at all is marked ultra" true "$(cda usage usagey --json | jq -r '.profiles[0].ultra')"
 check "every profile call sends the bearer header on stdin" "$(grep -c 'oauth/profile' "$tmp/curl-args")" "$(sed -n '/oauth\/profile/{n;p;}' "$tmp/curl-args" | grep -c -x 'header = "Authorization: Bearer tok-u"')"
-# a 200 with no usable label keeps the cached one
+# any 200 is the answer for a day, so a plan that loses its label stops showing
 touch -t 202001010000 "$plans/uuuuuuuu-1"
 printf '{"organization":{"plan_display_name":null}}' > "$tmp/profile.json"
-check "a 200 with no usable label keeps the cached label" Ultra "$(cda usage usagey --json | jq -r '.profiles[0].plan')"
+check "a 200 with no label replaces the cached one" null "$(cda usage usagey --json | jq -r '.profiles[0].plan')"
+calls=$(grep -c 'oauth/profile' "$tmp/curl-args")
+touch -A -020000 "$plans/uuuuuuuu-1"
+cda usage usagey > /dev/null
+check "and stands for the day, not an hour" "$calls" "$(grep -c 'oauth/profile' "$tmp/curl-args")"
 # a failed first read caches nothing usable for an hour, then retries
 rm -f "$plans/uuuuuuuu-1"
 printf 500 > "$tmp/profile-code"
@@ -1042,20 +1048,27 @@ cda usage usagey > /dev/null
 check "and is not retried within the hour" "$calls" "$(grep -c 'oauth/profile' "$tmp/curl-args")"
 rm -f "$tmp/profile-code"
 printf '{"organization":{"plan_display_name":"Ultra"}}' > "$tmp/profile.json"
-touch -t "$(date -v-2H +%Y%m%d%H%M)" "$plans/uuuuuuuu-1"
-check "an empty label over an hour old is read again" Ultra "$(cda usage usagey --json | jq -r '.profiles[0].plan')"
+touch -A -010100 "$plans/uuuuuuuu-1"
+check "an hour after a failed first read it is read again" Ultra "$(cda usage usagey --json | jq -r '.profiles[0].plan')"
 # a plans folder that cannot be written means no profile call at all
 rm -rf "$plans" && mkdir -m 500 "$plans"
 calls=$(grep -c 'oauth/profile' "$tmp/curl-args")
 check "an unwritable plans folder still reports usage" 1.0 "$(cda usage usagey --json | jq -r '.profiles[0].sevenDay.utilization')"
 check "and makes no profile call" "$calls" "$(grep -c 'oauth/profile' "$tmp/curl-args")"
+check_true "doctor warns about an unwritable plans folder" grep -q "^warn: plans: $plans is not writable" <<< "$(cda doctor)"
 chmod 700 "$plans"
+check "doctor is quiet about a writable plans folder" 0 "$(cda doctor | grep -c '^warn: plans:')"
 # odd limits[] shapes and reset times never cost the account
 printf '{"five_hour":{"utilization":5.0,"resets_at":"bogus"},"seven_day":{"utilization":9.0},"limits":[{"kind":"weekly_scoped","percent":5,"resets_at":1730000000,"scope":{"model":{"display_name":"Fable"}}},{"kind":"weekly_scoped","percent":7,"resets_at":"2026-11-01T00:00:00+05:00","scope":{"model":null,"surface":{"display_name":" Cowork "}}},{"kind":"weekly_scoped","percent":8,"scope":{"model":{"display_name":"   "}}}]}' > "$tmp/usage.json"
 out=$(cda usage usagey --json)
-check "unparsable reset times are dropped, the account kept" '[{"name":"Fable","utilization":5},{"name":"Cowork","utilization":7}]' "$(jq -c '.profiles[0].scoped' <<< "$out")"
+check "an unparsable reset time is dropped and an offset converted, the account kept" '[{"name":"Fable","utilization":5},{"name":"Cowork","utilization":7,"resetsAt":"2026-10-31T19:00:00Z"}]' "$(jq -c '.profiles[0].scoped' <<< "$out")"
 check "and the 5-hour window keeps its figure" 5.0 "$(jq -r '.profiles[0].fiveHour.utilization' <<< "$out")"
-check "the text line skips a bad reset time" "usagey           5h 5%  7d 9%  Fable 5%  Cowork 7%" "$(cda usage usagey)"
+check "the text line skips a bad reset time" "usagey           5h 5%  7d 9%  Fable 5%  Cowork 7% (resets $(date -r 1793473200 '+%a %H:%M'))" "$(cda usage usagey)"
+printf '{"five_hour":5,"seven_day":{"utilization":"20"},"limits":[{"kind":"weekly_scoped","percent":null,"scope":{"model":{"display_name":"Fable"}}},{"kind":"weekly_scoped","percent":"96","scope":{"model":{"display_name":"Fable"}}},{"kind":"weekly_scoped","percent":3,"scope":{"model":{"display_name":"Fa\\u001b[31mble"}}},{"kind":"weekly_scoped","percent":4,"scope":{"model":{"display_name":"A model name that runs well past forty characters"}}},{"kind":"weekly_scoped","percent":6,"scope":{"model":{"display_name":"Fable"}}}]}' > "$tmp/usage.json"
+out=$(cda usage usagey --json)
+check "odd windows are left out, the account kept" usagey "$(jq -r '.profiles[0] | select(has("fiveHour") or has("sevenDay") | not) | .name' <<< "$out")"
+check "a limit without a numeric percent or with an unsafe name is dropped" '[{"name":"Fable","utilization":6}]' "$(jq -c '.profiles[0].scoped' <<< "$out")"
+check "the text line shows only the safe limit" "usagey           5h 0%  7d 0%  Fable 6%" "$(cda usage usagey)"
 printf '[1]' > "$tmp/usage.json"
 check "a body that is not an object is an unreadable response" "unreadable response" "$(cda usage usagey --json | jq -r '.profiles[0].error')"
 # the account id names the cache file, so one that is not an id writes nothing

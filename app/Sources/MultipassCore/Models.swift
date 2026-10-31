@@ -77,14 +77,14 @@ public struct UsageReport: Decodable, Equatable {
 
 public struct UsageEntry: Decodable, Equatable, Identifiable {
   public var name: String
-  /// The server's plan label ("Ultra", "Max"), shown verbatim.
+  /// The server's plan label (`Ultra`), shown verbatim.
   public var plan: String?
   /// An Ultra account whose 5-hour window is idle with no reset, which is how
   /// a verified one (no 5-hour limit) reports; the tool then sends no `fiveHour`.
   public var ultra: Bool?
   public var fiveHour: UsageWindow?
   public var sevenDay: UsageWindow?
-  /// Weekly limits of one model, such as Fable, beside the all-models one.
+  /// Weekly limits of one model or surface, such as Fable, beside the all-models one.
   public var scoped: [ScopedWindow]?
   public var error: String?
   public var id: String { name }
@@ -120,7 +120,7 @@ extension UsageEntry {
   }
 }
 
-/// One model's weekly limit, named by the server (`Fable`). Names may repeat,
+/// One model's or surface's weekly limit, named by the server (`Fable`). Names may repeat,
 /// so lists of these are keyed by position.
 public struct ScopedWindow: Decodable, Equatable {
   public var name: String
