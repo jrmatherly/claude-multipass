@@ -312,6 +312,26 @@ private func enabledUsage(_ s: AppState) -> AppSettings {
   #expect(s.rowNote == nil)
 }
 
+@Test @MainActor func refreshClearsTheSwitchNote() async {
+  let (s, r) = await readyState()
+  r.onStderr["switch"] = "Claude Code is running (pid 11739); quit it first"
+  await s.switchTo("alpha")
+  #expect(s.rowNote != nil)
+  await s.refreshAll()
+  #expect(s.rowNote == nil)
+}
+
+@Test @MainActor func aCloseDuringTheSwitchKeepsItsNote() async {
+  let (s, r) = await readyState()
+  r.onStderr["switch"] = "switched Desktop only"
+  r.onCall = { args in
+    guard args == ["list", "--json"] else { return }
+    await MainActor.run { s.clearRowNote() }
+  }
+  await s.switchTo("alpha")
+  #expect(s.rowNote == RowNote(name: "alpha", message: "switched Desktop only"))
+}
+
 @Test @MainActor func switchRefusedSetsRowError() async {
   let (s, r) = await readyState()
   r.fail("switch", .refused("The signed-in account isn't saved"))

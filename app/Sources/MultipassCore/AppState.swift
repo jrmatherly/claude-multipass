@@ -24,7 +24,7 @@ public struct RowError: Equatable {
 }
 
 /// A warning the tool printed while a switch or save succeeded (for example
-/// "switched Desktop only"), shown under the row until the next action.
+/// "switched Desktop only"), shown under the row until the popover closes, the next action or Refresh.
 public struct RowNote: Equatable {
   public let name: String
   public let message: String
@@ -191,6 +191,7 @@ public final class AppState: ObservableObject {
   /// timer and the usage toggle call `refreshUsage` directly, spaced on their
   /// own, so only a click can land within the floor of the last attempt.
   public func refreshAll() async {
+    clearRowNote()
     await refresh()
     if let last = usageAttemptedAt, now().timeIntervalSince(last) < AppSettings.usageRefreshFloor { return }
     await refreshUsage()
@@ -202,6 +203,12 @@ public final class AppState: ObservableObject {
 
   public func saveCurrent(as name: String) async {
     await act(name, phase: .saving(name), args: ["save", name])
+  }
+
+  /// A note describes the moment of its switch, so a closed popover or a
+  /// Refresh drops it. Not while an act runs: it may have just set the note.
+  public func clearRowNote() {
+    if phase == .idle { rowNote = nil }
   }
 
   public func dismissRowError() {

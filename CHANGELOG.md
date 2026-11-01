@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- A warning a switch or save leaves in the popover clears when the popover closes or on Refresh. It describes the moment of the switch, such as a Claude Code process that has since quit, and used to stay until the next switch.
+
 ## 0.10.1 (2026-11-01)
 
 - The app and the tool work as in 0.10.0. This is the first version 0.10.0 can install by itself, from Check now and Update and relaunch in Settings, About.

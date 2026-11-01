@@ -39,5 +39,6 @@ final class PopoverController: NSObject, NSPopoverDelegate {
 
   func popoverWillClose(_ notification: Notification) {
     panel.dismiss()
+    appState.clearRowNote()
   }
 }
