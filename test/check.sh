@@ -30,7 +30,7 @@ shellcheck --severity=warning "${shell_scripts[@]}"
 prettier --log-level warn --ignore-unknown --check "**/*.{js,cjs,ts,md,json,sh}" "bin/*" ".github/**/*.yml"
 # bin/claude-multipass against a fixture Desktop folder (never the real one)
 bash test/claude-multipass.sh > /dev/null
-# scripts/make-appcast.sh with a stub sign_update
+# scripts/make-appcast.sh and scripts/verify-appcast.sh
 bash test/appcast.sh > /dev/null
 # make-appcast.sh refuses this, and a tag would find out only after notarizing
 if grep -qF ']]>' CHANGELOG.md; then

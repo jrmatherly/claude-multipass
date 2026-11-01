@@ -5,7 +5,7 @@
 #   SPARKLE_ED_KEY=<seed> scripts/make-appcast.sh <dmg> <version> <changelog>
 #
 # Environment:
-#   SPARKLE_ED_KEY        required, the EdDSA seed; it reaches sign_update only by pipe
+#   SPARKLE_ED_KEY        required, the EdDSA seed; never on argv or in a file
 #   SIGN_UPDATE           default: Sparkle's sign_update in app/.build/artifacts
 #   APPCAST_DOWNLOAD_BASE default: the GitHub release folder for this version
 set -euo pipefail
@@ -37,6 +37,7 @@ signature=$(printf '%s' "$SPARKLE_ED_KEY" | "$sign_update" --ed-key-file - -p "$
 [[ -n $signature ]] || die "sign_update printed no signature"
 printf '%s' "$SPARKLE_ED_KEY" | "$sign_update" --verify --ed-key-file - "$dmg" "$signature" > /dev/null || die "the signature does not verify"
 
+length=$(/usr/bin/stat -f %z "$dmg")
 minimum=$(plutil -extract LSMinimumSystemVersion raw -o - "$root/app/Info.plist.in").0
 
 cat << APPCAST
@@ -49,7 +50,7 @@ cat << APPCAST
       <sparkle:version>$version</sparkle:version>
       <sparkle:minimumSystemVersion>$minimum</sparkle:minimumSystemVersion>
       <description sparkle:format="markdown"><![CDATA[$changelog]]></description>
-      <enclosure url="$base/$(basename "$dmg")" length="$(stat -f %z "$dmg")" type="application/octet-stream" sparkle:edSignature="$signature"/>
+      <enclosure url="$base/$(basename "$dmg")" length="$length" type="application/octet-stream" sparkle:edSignature="$signature"/>
     </item>
   </channel>
 </rss>

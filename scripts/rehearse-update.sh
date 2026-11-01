@@ -1,11 +1,12 @@
 #!/bin/bash
 # Rehearse an in-app update from 0.0.1 to 0.0.2 with a real Sparkle install, on this Mac.
 # A bundle id of its own, so the real app's settings and login item stay out of it, and a
-# throwaway key, so no Keychain item is read. Click through About while it waits.
+# throwaway key, so the real Sparkle key is not used. Click through About while it waits.
 #
 #   scripts/rehearse-update.sh [--bad-signature | --stop-feed | --from-dmg]
 #
-#   (none)           serve a good feed; exit 0 once the disk reads 0.0.2, 1 at the deadline
+#   (none)           serve a good feed; exit 0 once the disk reads 0.0.2, the app has relaunched
+#                    and nothing of Sparkle's is left, 1 otherwise
 #   --bad-signature  the feed's signature is from another key; About shows the failure
 #   --stop-feed      nothing serves the feed; silent at launch, a message on Check now
 #   --from-dmg       the app runs from a mounted DMG; Check now says to move it
@@ -29,6 +30,10 @@ case ${1:-} in
     ;;
 esac
 deadline=${REHEARSE_SECONDS:-180}
+[[ $deadline =~ ^[1-9][0-9]*$ ]] || {
+  echo "rehearse: REHEARSE_SECONDS must be a positive number of seconds" >&2
+  exit 2
+}
 
 bundle_id=net.matherly.mp-rehearsal
 agents_dir=$HOME/Library/LaunchAgents
@@ -59,8 +64,9 @@ export SPARKLE_PUBLIC_KEY APP_BUNDLE_ID=$bundle_id
 SPARKLE_PUBLIC_KEY=$(sed -n 2p <<< "$keys")
 # A rehearsal build is signed, never notarized.
 unset APPLE_API_KEY_ID APPLE_API_ISSUER_ID APPLE_API_KEY_P8
+export MACOS_SIGN_REQUIRED=1
 
-# Copies, because the next build erases dist/.
+# Copies, because the next build replaces the app in dist/, and the feed gets its own folder.
 APP_VERSION=0.0.1 bash scripts/build-app.sh --dmg
 mkdir -p "$work/install" "$work/feed"
 cp -R "dist/Claude Multipass.app" "$work/install/"
@@ -84,9 +90,18 @@ SPARKLE_ED_KEY=$feed_key APPCAST_DOWNLOAD_BASE=http://127.0.0.1:$port \
 if [[ $mode != stop-feed ]]; then
   /usr/bin/python3 -m http.server "$port" --bind 127.0.0.1 --directory "$work/feed" > /dev/null 2>&1 &
   server=$!
+  for ((i = 0; i < 20; i++)); do
+    curl -fsS -o /dev/null "http://127.0.0.1:$port/appcast.xml" 2> /dev/null && break
+    sleep 0.5
+  done
+  curl -fsS -o /dev/null "http://127.0.0.1:$port/appcast.xml" || {
+    echo "rehearse: the feed server did not answer" >&2
+    exit 1
+  }
 fi
 
 app_path="$work/install/Claude Multipass.app"
+[[ $mode == bad-signature ]] || bash scripts/verify-appcast.sh "$app_path" "$new_dmg" "$work/feed/appcast.xml"
 if [[ $mode == from-dmg ]]; then
   mount=$work/mount
   mkdir "$mount"
@@ -103,7 +118,10 @@ disk_version() {
   plutil -extract CFBundleShortVersionString raw -o - "$app_path/Contents/Info.plist"
 }
 sparkle_jobs() {
-  launchctl print "gui/$(id -u)" | grep -oE "$bundle_id-sparkle-[a-z]+" | sort -u || true
+  local all
+  # Apart, because || true for grep finding nothing would also hide launchctl failing.
+  all=$(launchctl print "gui/$(id -u)")
+  grep -oE "$bundle_id-sparkle-[a-z]+" <<< "$all" | sort -u || true
 }
 
 seen_jobs=''
@@ -123,6 +141,10 @@ if [[ -z $updated ]]; then
     echo "rehearse: the disk still reads 0.0.1 after $deadline s" >&2
     exit 1
   fi
+  [[ $(disk_version) == 0.0.1 ]] || {
+    echo "rehearse: $mode: the disk reads '$(disk_version)', not 0.0.1" >&2
+    exit 1
+  }
   echo "rehearse: $mode: the disk still reads 0.0.1, as expected" >&2
   exit 0
 fi
