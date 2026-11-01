@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- The menu bar app checks for a newer version at launch and once a day, by reading one public file, the tap's `appcast.xml`. It sends no account data and reads no Keychain item. Nothing installs without a click.
 - The menu bar app has an icon: two open rings with a dot passing through the gap, taken from the menu bar gauge. On macOS 26 and later it has a dark version and a tinted one, and earlier versions get an `.icns`. The bundle had no icon, so launchers showed a blank tile.
 
 ## 0.9.0 (2026-10-31)

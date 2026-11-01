@@ -220,3 +220,9 @@ private final class Harness {
   ])
   #expect(BrewInstaller.command == "brew update && brew upgrade jrmatherly/tap/claude-multipass jrmatherly/tap/claude-multipass-app")
 }
+
+@Test func brewOutlastsTheDefaultTimeoutOnBothCommands() {
+  #expect(BrewInstaller.timeout > CLI(executable: appURL).mutatingTimeout)
+  #expect(!CLI.promptFreeCommands.contains("update"))
+  #expect(!CLI.promptFreeCommands.contains("upgrade"))
+}

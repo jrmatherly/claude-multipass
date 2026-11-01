@@ -40,7 +40,8 @@ Chats, Projects and memory on claude.ai are server-side per account and never mo
 
 ## What a reviewer rejects
 
-- A launch agent, cron entry, daemon or `--watch` mode separate from the user-visible menu bar app. The app's own timers are allowed: the snapshot poll (`list --json`, no Keychain) and the opt-in usage poll.
+- A launch agent, cron entry, daemon or `--watch` mode separate from the user-visible menu bar app. The app's own timers are allowed: the snapshot poll (`list --json`, no Keychain), the opt-in usage poll, and the update check: one GET of the tap's `appcast.xml` at launch and daily, off by a toggle, no account data, no Keychain. During a clicked install Sparkle runs transient launchd jobs (`<bundle id>-sparkle-updater`, `-sparkle-progress`) that end with the install and leave no file in `~/Library/LaunchAgents` (measured); that is the one exception.
+- An install, `brew` run or Sparkle install without a click.
 - Usage polling that is on by default or faster than 5 minutes; a `security` call outside `usage`, `save`, `add`, `switch`, `rename`, `remove` and the backup prune; any Keychain access from `list`, `show`, `current` or `doctor`; a CLI token in output or in a log, or on any argv but `security add-generic-password -X <hex>` for a line too long for `security -i` (Claude Code's own writer); a `~/.claude.json` write outside the CLI's locks or touching a key other than `oauthAccount`.
 - A token on a command line anywhere beyond the documented `openssl -K` moment and the oversize `security add-generic-password -X` write, or a token in output or a log.
 - A sync that deletes, renames, symlinks, or writes while Desktop runs without `--force`.
