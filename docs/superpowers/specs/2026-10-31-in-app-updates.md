@@ -128,10 +128,10 @@ At launch, then every 24 h, through the app's own task. Default: on, with a togg
 
 ## Not proven
 
-- **App Management on a real installed app.** The probe's control did not fire: an ad-hoc signed app could also write into throwaway apps, notarized copy included, so the probe cannot show that same-team signing is what lets brew through. Secondary sources say it does. A denial reaches the failed state with the exact command to copy. The first real upgrade settles it.
-- **Sparkle with a notarized, stapled, quarantined app.** Needs notarization, which only CI has. The gate in `release` step 7a settles it for 0.10.1, with no user exposed.
-- **The cask route in the real app.** `brew` from a signed app and a replaced running app were measured on scratch apps, not through `BrewInstaller`, and the rehearsal cannot run it because the package names are fixed. The wait-for-exit relaunch was measured as a script only. The first real upgrade proves it, and a failure there leaves the copyable command.
-- **Brew's relaunch prompt on the real app.** Brew carries the user's approval forward when the signer is unchanged (**source**), and the real app's quarantine flags include that bit (`01c1`, **measured**), so no prompt is expected (**inferred**).
+- **App Management on a real installed app.** The probe's control did not fire: an ad-hoc signed app could also write into throwaway apps, notarized copy included, so the probe cannot show that same-team signing is what lets brew through. Secondary sources say it does. A denial reaches the failed state with the exact command to copy. The first real upgrade settles it. **Measured on 0.10.1:** no prompt on the first real cask update, as Jason reported it. One run, so why it did not appear is still unproven.
+- **Sparkle with a notarized, stapled, quarantined app.** Needs notarization, which only CI has. The gate in `release` step 7a settles it for 0.10.1, with no user exposed. **Settled on 0.10.1:** the gate passed, and the updated copy is signed, notarized and stapled.
+- **The cask route in the real app.** `brew` from a signed app and a replaced running app were measured on scratch apps, not through `BrewInstaller`, and the rehearsal cannot run it because the package names are fixed. The wait-for-exit relaunch was measured as a script only. The first real upgrade proves it, and a failure there leaves the copyable command. **Settled on 0.10.1:** the installed app updated formula and cask through its own button and relaunched.
+- **Brew's relaunch prompt on the real app.** Brew carries the user's approval forward when the signer is unchanged (**source**), and the real app's quarantine flags include that bit (`01c1`, **measured**), so no prompt is expected (**inferred**). **Measured on 0.10.1:** no prompt, as Jason reported it, and the login item stayed enabled.
 
 ## Bootstrap
 

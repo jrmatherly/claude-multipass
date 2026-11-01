@@ -69,7 +69,12 @@ Measured 2026-11-01 with `scripts/rehearse-update.sh` (**M**), on Darwin 27.2, a
 - An agent cannot click this app's status item here: computer use does not list the app, the app reports no `AXExtrasMenuBar` (`-25212`), and no window belongs to its pid. A person opens About.
 - `codesign --timestamp` failed twice in a row on `Autoupdate` (`A timestamp was expected but was not found`), then passed with no change. Cause not established. `sign-mac-app.sh` tries each signature up to four times, 15 s apart, on that error only. The count and the wait are a guess; no run has exercised the retry against the real service.
 
-Not covered: the cask route, a notarized quarantined app, App Management. The first real pair settles them (`docs/superpowers/plans/2026-10-31-in-app-updates.md`, last section).
+The first real pair, 0.10.0 to 0.10.1, measured 2026-11-01 on Darwin 27.2 (**M**, the prompts as Jason reported them):
+
+- Sparkle on a notarized, quarantined app: a 0.10.0 copy from the release DMG in `~/Applications`, with the quarantine flag set and `SUFeedURL` overridden to the release's asset, reached 0.10.1 through Check now and Update and relaunch. The result passes `codesign --verify --deep --strict`, `spctl` (`Notarized Developer ID`) and `stapler validate`, and has no quarantine flag.
+- The cask route: the installed app reached 0.10.1 through the same two clicks, formula and cask both. macOS showed no prompt, App Management or Gatekeeper. The login item stayed `enabled, allowed` at `/Applications` (`sfltool dumpbtm`), including after the second copy with the same bundle id came and went. This is one run; it does not show why no App Management prompt appeared.
+- An offer brew cannot fill: with the feed overridden and the tap not yet bumped, the cask route said `Homebrew finished, but the app on disk is still 0.10.0.` with the manual command, and changed nothing.
+- Up to date came back about 3 minutes after the tap push and 0.10.1 inside 6 minutes, with `cache-control: max-age=300` on the feed. The feed cache is the inferred cause; a `curl` at the same moment already saw 0.10.1.
 
 ## Open tests
 
