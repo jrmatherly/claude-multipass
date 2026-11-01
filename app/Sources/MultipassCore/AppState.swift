@@ -5,7 +5,7 @@ public enum Phase: Equatable {
 }
 
 /// `failed` carries why the version probe got no version: a timeout, a
-/// non-zero exit (a missing `jq`) or output that is not a version line.
+/// non-zero exit or output that is not a version line.
 public enum CLIStatus: Equatable {
   case unknown, ready(String), missing, tooOld, failed(String)
 }

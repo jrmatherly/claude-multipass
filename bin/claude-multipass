@@ -260,6 +260,7 @@ ${bold}Commands${reset}
                        the OAuth profile, read at most once a day per
                        account, or an hour after a failed request while no
                        name is cached. Give a name to see one account.
+                       Exits 1 without the Command Line Tools.
                        Opt-in; see Cautions. With --json, {"profiles":[{name,
                        plan?, fiveHour? or ultra:true, sevenDay?, scoped?}
                        or {name, error}]}; each window has utilization and
@@ -277,7 +278,9 @@ ${bold}Commands${reset}
                        CLAUDE_CONFIG_DIR, CLAUDE_SECURESTORAGE_CONFIG_DIR,
                        ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN is set.
                        One ok:, warn: or fail: line per check; exits 1 on any
-                       fail:. Reads no Keychain and no network.
+                       fail:. Reads no Keychain and no network. Without a
+                       working jq it skips the config and token checks and
+                       says so.
 
 ${bold}Options${reset}
   --no-relaunch        Leave Desktop quit after save, switch, add or pick,
@@ -329,6 +332,10 @@ ${bold}Cautions${reset}
     menu bar app.
   - One save, switch, add, sync, rename or remove runs at a time; a second
     one exits 1 naming the first run's pid, before it quits Desktop.
+  - Every command but --version, --help and doctor exits 1 without a working
+    jq, before it quits Desktop.
+  - save, switch and add exit 1 before they quit Desktop on a config.json jq
+    cannot read as one object. --force does not lift it.
 EOF
 }
 
@@ -670,6 +677,8 @@ desktop_launch() {
   open -a Claude
 }
 
+# jq -e judges only the last document, so -s makes "[] {}" fail too.
+config_is_one_object() { jq -es 'length == 1 and (.[0] | type == "object")' "$config" > /dev/null 2>&1; }
 signed_in() { jq -e '.["oauth:tokenCacheV2"] | type == "string" and length > 0' "$config" > /dev/null; }
 
 live_account() {
@@ -875,6 +884,7 @@ index_sync() {
 # The password goes to python3 on stdin, never on a command line. System
 # python3 has PBKDF2; macOS's LibreSSL `openssl` lacks `kdf` but has `enc`.
 safe_storage_key() {
+  xcode-select -p > /dev/null 2>&1 || fail "usage needs the Command Line Tools (xcode-select --install)"
   security find-generic-password -w -s "Claude Safe Storage" 2> /dev/null \
     | /usr/bin/python3 -c 'import hashlib, sys; print(hashlib.pbkdf2_hmac("sha1", sys.stdin.buffer.read().rstrip(b"\n"), b"saltysalt", 1003, 16).hex())' \
     || fail "Could not read \"Claude Safe Storage\" from the login Keychain"
@@ -1059,13 +1069,21 @@ usage_object() {
 # One line per check, in a fixed order, no Keychain and no network. Exits 1
 # when any fail: line was printed.
 doctor_report() {
-  local status=0 tool mode meta dir name file logins set_aside legacy
-  if [[ -f $config ]]; then echo "ok: config: $config"; else
+  local status=0 tool mode meta dir name file logins set_aside legacy unchecked='' jq_works=''
+  jq -n 1 > /dev/null 2>&1 && jq_works=1
+  if [[ ! -f $config ]]; then
     echo "fail: config: no $config (open Claude Desktop once first)"
     status=1
+  elif [[ -z $jq_works ]]; then
+    echo "warn: config: not checked without jq"
+  elif ! config_is_one_object; then
+    echo "fail: config: could not read $config as a JSON object"
+    status=1
+  else
+    echo "ok: config: $config"
   fi
-  if command -v jq > /dev/null; then echo "ok: jq"; else
-    echo "fail: jq: not on PATH (brew install jq)"
+  if [[ -n $jq_works ]]; then echo "ok: jq"; else
+    echo "fail: jq: not on PATH or not working (https://jqlang.org/download/)"
     status=1
   fi
   if xcode-select -p > /dev/null 2>&1; then echo "ok: Command Line Tools (the system python3 for usage)"; else echo "warn: Command Line Tools: not installed (xcode-select --install), needed for usage"; fi
@@ -1092,6 +1110,8 @@ doctor_report() {
     elif [[ ! -f ${dir}config.json ]]; then
       echo "fail: $name: missing config.json (re-save it)"
       status=1
+    elif [[ -z $jq_works ]]; then
+      unchecked=1
     elif ! jq -e '.["oauth:tokenCacheV2"] | type == "string" and length > 0' "${dir}config.json" > /dev/null 2>&1; then
       echo "fail: $name: empty oauth:tokenCacheV2 (re-save it)"
       status=1
@@ -1100,6 +1120,7 @@ doctor_report() {
     fi
     [[ -f ${dir}cli.json ]] || echo "warn: $name: no CLI login saved (claude auth login, then save $name)"
   done
+  [[ -z $unchecked ]] || echo "warn: profiles: saved tokens not checked without jq"
   [[ -z ${CLAUDE_CONFIG_DIR:-} ]] || echo "warn: CLAUDE_CONFIG_DIR is set; the CLI login is not saved or switched"
   [[ -z ${CLAUDE_SECURESTORAGE_CONFIG_DIR:-} ]] || echo "warn: CLAUDE_SECURESTORAGE_CONFIG_DIR is set; the CLI login is not saved or switched"
   [[ -z ${ANTHROPIC_API_KEY:-} ]] || echo "warn: ANTHROPIC_API_KEY is set; it overrides the terminal login"
@@ -1391,6 +1412,7 @@ main() {
     doctor_report
     return $?
   fi
+  jq -n 1 > /dev/null 2>&1 || fail "jq is missing or not working and claude-multipass needs it (https://jqlang.org/download/)"
   [[ -f $config ]] || fail "No $config: open Claude Desktop once first"
   migrate_store
   case $cmd in
@@ -1398,6 +1420,11 @@ main() {
       run_lock
       trap run_unlock EXIT
       ;;
+  esac
+
+  # Before the refusals below, which would misread such a file: signed out, or an unsaved login.
+  case $cmd in
+    save | switch | add) config_is_one_object || fail "Could not read $config as a JSON object: nothing changed" ;;
   esac
 
   case $cmd in

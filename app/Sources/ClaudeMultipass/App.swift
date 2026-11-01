@@ -20,7 +20,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     let appState = AppState(
-      makeRunner: { settings in CLI.locate(override: settings.cliPathOverride).map { CLI(executable: $0) } },
+      makeRunner: { settings in
+        CLI.locate(
+          override: settings.cliPathOverride,
+          bundled: CLI.bundledTool(in: .main)
+        ).map { CLI(executable: $0) }
+      },
       store: SettingsStore(defaults: .standard))
     appState.start()
     let updates = Self.makeUpdates(appState: appState)
