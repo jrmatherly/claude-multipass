@@ -37,7 +37,8 @@ STUB
 chmod +x "$tmp/bin/codesign" "$tmp/bin/sleep"
 
 export STUB_DIR=$tmp PATH="$tmp/bin:$PATH" MACOS_SIGN_IDENTITY=fixture
-unset APPLE_API_KEY_ID APPLE_API_ISSUER_ID APPLE_API_KEY_P8 MACOS_SIGN_ENTITLEMENTS
+# release.yml sets MACOS_SIGN_REQUIRED and check.yml does not, so each case states its own
+unset APPLE_API_KEY_ID APPLE_API_ISSUER_ID APPLE_API_KEY_P8 MACOS_SIGN_ENTITLEMENTS MACOS_SIGN_REQUIRED
 timestamp_error="$tmp/x: A timestamp was expected but was not found."
 
 dmg=$tmp/x.dmg
@@ -83,6 +84,9 @@ chmod +x "$tmp/bin/security"
 rc=0
 out=$(env -u MACOS_SIGN_IDENTITY bash "$script" sign-dmg "$dmg" 2>&1) || rc=$?
 [ "$rc" = 0 ] && [[ $out == *'security find-identity failed'* ]] || fail "the keychain failure was not reported: rc $rc: $out"
+rc=0
+out=$(env -u MACOS_SIGN_IDENTITY MACOS_SIGN_REQUIRED=1 bash "$script" sign-dmg "$dmg" 2>&1) || rc=$?
+[ "$rc" = 1 ] && [[ $out == *'security find-identity failed'* ]] || fail "required signing: expected exit 1 naming the keychain failure, got rc $rc: $out"
 
 # A failed submission shows what notarytool said on stdout
 cat > "$tmp/bin/xcrun" << 'STUB'
