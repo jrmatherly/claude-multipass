@@ -104,7 +104,7 @@ struct SettingsView: View {
     } footer: {
       Text(customLocation
         ? "A path that is empty or not executable falls back to the automatic one."
-        : "Looked up in /opt/homebrew/bin, then /usr/local/bin.")
+        : "Looked up in /opt/homebrew/bin, then /usr/local/bin, then inside the app.")
         .font(.caption).foregroundStyle(.secondary)
     }
   }

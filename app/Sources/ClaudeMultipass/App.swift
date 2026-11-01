@@ -19,7 +19,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     let appState = AppState(
-      makeRunner: { settings in CLI.locate(override: settings.cliPathOverride).map { CLI(executable: $0) } },
+      makeRunner: { settings in
+        CLI.locate(
+          override: settings.cliPathOverride,
+          bundled: Bundle.main.url(forResource: "claude-multipass", withExtension: nil)
+        ).map { CLI(executable: $0) }
+      },
       store: SettingsStore(defaults: .standard))
     appState.start()
     let controller = StatusItemController(appState: appState)

@@ -34,8 +34,9 @@ app="dist/Claude Multipass.app"
 
 swift build --package-path app -c release
 rm -rf "$app"
-mkdir -p "$app/Contents/MacOS"
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp app/.build/release/ClaudeMultipass "$app/Contents/MacOS/ClaudeMultipass"
+install -m 755 bin/claude-multipass "$app/Contents/Resources/claude-multipass"
 sed "s/@VERSION@/$version/g" app/Info.plist.in > "$app/Contents/Info.plist"
 bash scripts/compile-icon.sh "$app/Contents/Resources"
 printf 'APPL????' > "$app/Contents/PkgInfo"

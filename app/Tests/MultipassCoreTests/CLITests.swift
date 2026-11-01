@@ -42,6 +42,14 @@ private func stubScript() throws -> URL {
   #expect(CLI.locate(override: "", isExecutable: isExecutable) == URL(fileURLWithPath: CLI.candidates[1]))
 }
 
+@Test func bundledToolIsLastInPrecedence() {
+  let b = URL(fileURLWithPath: "/App/Contents/Resources/claude-multipass")
+  #expect(CLI.locate(override: nil, bundled: b, isExecutable: { $0 == b.path }) == b)
+  #expect(CLI.locate(override: nil, bundled: b, isExecutable: { _ in true })?.path == "/opt/homebrew/bin/claude-multipass")
+  #expect(CLI.locate(override: "/custom", bundled: b, isExecutable: { _ in true })?.path == "/custom")
+  #expect(CLI.locate(override: nil, bundled: nil, isExecutable: { _ in false }) == nil)
+}
+
 @Test func locationIsTheExecutablePath() throws {
   let stub = try stubScript()
   #expect(CLI(executable: stub).location == stub.path)
