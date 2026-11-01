@@ -33,13 +33,13 @@ Sparkle 2.10.1 can be used here. Its `LICENSE` is MIT plus third-party notices (
 There is one feed: `https://raw.githubusercontent.com/jrmatherly/homebrew-tap/HEAD/appcast.xml`. It lands in the same tap commit as the cask and formula bump.
 
 - That commit is the announcement. "Newest version" and "brew can install it" cannot disagree. The measured gap between a GitHub release and its tap commit was 2.5 min for 0.9.0 and 53 min for 0.8.0, so `releases/latest` would announce versions brew cannot install.
-- It adds a gate. The DMG and appcast exist on the release before anyone is told, so the release can be rehearsed first.
+- It adds a gate. The DMG and appcast exist on the release before anyone is told, so a real older app can update from that release's own `appcast.xml` first. Setting `SUFeedURL` in `defaults` points it there, with no server (**measured**, including a real GitHub release asset as the feed).
 - It gives a rollback. Reverting the tap commit stops new offers on both routes.
 - GitHub serves the file as `text/plain` with `max-age=300`, and Sparkle parsed such a file (**measured**, with Sparkle's own sample appcast).
 
 The cost is that DMG users wait for the human tap bump, and the tap's name and path are frozen in shipped binaries.
 
-The item's `description` holds the whole `CHANGELOG.md` with `sparkle:format="markdown"`. A 20 KB appcast parsed and the probe found the update (**measured**; the delivered text length is checked in the rehearsal). The app filters to the sections newer than the running version, so skipped versions need no second fetch and the feed holds no state between releases.
+The item's `description` holds the whole `CHANGELOG.md` with `sparkle:format="markdown"`. A 20 KB appcast parsed and all 19,717 characters of the change log reached `itemDescription` (**measured**). The app filters to the sections newer than the running version, so skipped versions need no second fetch and the feed holds no state between releases.
 
 ### Routing
 
@@ -110,9 +110,16 @@ At launch, then every 24 h, through the app's own task. Default: on, with a togg
 | Signing with `XPCServices` removed: `Autoupdate`, `Updater.app`, framework, app | `codesign --verify --deep --strict` passes; prototype app 2.7 MB |
 | Sparkle update from a UDZO DMG, scratch folder and `/Applications` | Passes and relaunches; inode changes; login item stays enabled |
 | Bad EdDSA signature; EdDSA-signed DMG of another app | Both rejected with 4005; disk unchanged where checked |
-| Feed unreachable | `didAbortWithError` code 2001, then `didFinishUpdateCycleForUpdateCheck` |
+| Feed unreachable or malformed | `didAbortWithError` 2001, then `didFinishUpdateCycleFor` with 2001 |
+| Feed same or older (a rollback) | `didNotFind` and `didAbort` 1001, then `didFinishUpdateCycleFor` with 1001 |
+| App 0.9.0, feed 0.10.0 | Found: Sparkle compares numerically |
+| Probe, then install, in one process | Passes; `didFindValidUpdate` fires twice |
+| Second probe during a session | `canCheckForUpdates` is false and the call does nothing |
+| App run from a read-only DMG | Probe fails with 1003 |
+| A `@MainActor` class conforming to `SPUUserDriver`, `SPUUpdaterDelegate` and both protocols | Compiles clean in Swift 5 mode |
+| Plain HTTP to `127.0.0.1` with no App Transport Security key | Works; a `file://` feed fails with 2001 |
 | Local 302 to the appcast; real `github.com/.../latest/download` enclosure | Both followed |
-| `SUFeedURL` in `defaults` | Overrides the plist, so a released build can be pointed at a local feed |
+| `SUFeedURL` in `defaults` | Overrides the plist, so a released build can be pointed at one release's asset |
 | `sign_update --ed-key-file -` with the key on stdin; `--verify` | Signs with no temp file; good exit 0, bad exit 1 |
 | `brew upgrade` from a Developer ID app with stdin null, notarized DMGs | Exit 0 in 7 s, in place, no sudo |
 | Running app replaced by brew, then a detached `sleep 1; open` | Stays alive through the swap; the new version launches; login item stays enabled |
@@ -123,6 +130,7 @@ At launch, then every 24 h, through the app's own task. Default: on, with a togg
 
 - **App Management on a real installed app.** The probe's control did not fire: an ad-hoc signed app could also write into throwaway apps, notarized copy included, so the probe cannot show that same-team signing is what lets brew through. Secondary sources say it does. A denial reaches the failed state with the exact command to copy. The first real upgrade settles it.
 - **Sparkle with a notarized, stapled, quarantined app.** Needs notarization, which only CI has. The gate in `release` step 7a settles it for 0.10.1, with no user exposed.
+- **The cask route in the real app.** `brew` from a signed app and a replaced running app were measured on scratch apps, not through `BrewInstaller`, and the rehearsal cannot run it because the package names are fixed. The wait-for-exit relaunch was measured as a script only. The first real upgrade proves it, and a failure there leaves the copyable command.
 - **Brew's relaunch prompt on the real app.** Brew carries the user's approval forward when the signer is unchanged (**source**), and the real app's quarantine flags include that bit (`01c1`, **measured**), so no prompt is expected (**inferred**).
 
 ## Bootstrap
@@ -146,6 +154,7 @@ Installs at 0.9.0 or older have no updater. They reach 0.10.0 by `brew upgrade` 
 | Launch journal, stderr classifier, relaunch watchdog | Each handles a failure a disk read or Sparkle's own error already reports |
 | Cancel button | Killing brew between removing and placing a bundle is the one way to lose the app |
 | Bundled `jq` | A second signed binary with its own update duty, for one OS version |
+| Signed feed (`SURequireSignedFeed`) | The update itself is already EdDSA-signed. Without it, someone controlling the tap could only change the offer's text and version, and that person already controls what brew installs |
 | Newest of the two tools wins | The tool would change under a terminal user with no action of theirs |
 
 ## Out of scope
