@@ -199,6 +199,7 @@ private func fixture(
   gate.open()
   await first.value
   await second.value
+  #expect(feed.calls == 1)
   #expect(f.controller.state == .available(offer))
 }
 
