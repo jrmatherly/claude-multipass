@@ -7,6 +7,7 @@ set -euo pipefail
 hook=$(cd "$(dirname "$0")" && pwd -P)/commit-gate.sh
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/commit-gate.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
+real=$(cd "$tmp" && pwd -P)
 proj=$tmp/proj
 STATE=$tmp/state
 mkdir -p "$proj/test" "$proj/.claude/hooks" "$STATE" "$tmp/bin"
@@ -21,14 +22,19 @@ fail() {
 chmod +x "$proj/test/check.sh"
 cp "$hook" "$proj/.claude/hooks/commit-gate.sh"
 git -C "$proj" init -q
+# In the repo's own config, so no commit below uses the host's signing or hooks
+git -C "$proj" config user.name test
+git -C "$proj" config user.email test@example.com
+git -C "$proj" config commit.gpgsign false
+git -C "$proj" config core.hooksPath /dev/null
 git -C "$proj" add test/check.sh .claude/hooks/commit-gate.sh
-git -C "$proj" -c user.name=test -c user.email=test@example.com \
-  -c commit.gpgsign=false -c core.hooksPath=/dev/null commit -qm init
+git -C "$proj" commit -qm init
 
-# Stub pnpm: records that the check ran, exits with $STATE/check-rc
+# Stub pnpm: records that the check ran, where and as what, exits with $STATE/check-rc
 cat > "$tmp/bin/pnpm" << EOF
 #!/bin/bash
 touch "$STATE/check-ran"
+echo "\$PWD \$*" > "$STATE/check-args"
 echo "stub check output"
 exit "\$(cat "$STATE/check-rc" 2> /dev/null || echo 0)"
 EOF
@@ -41,12 +47,13 @@ mkdir -p "$other/test"
 git -C "$other" init -q
 
 # Feed the hook a PreToolUse payload with cwd $2 (default: the project);
-# sets out (stdout) and rc
+# sets out (stdout), err (stderr) and rc
 run() {
   local payload
   payload=$(jq -cn --arg c "$1" --arg d "${2:-$proj}" '{tool_name:"Bash",tool_input:{command:$c},cwd:$d}')
   rc=0
-  out=$(CLAUDE_PROJECT_DIR=$proj PATH="$tmp/bin:$PATH" "$hook" <<< "$payload" 2> /dev/null) || rc=$?
+  out=$(CLAUDE_PROJECT_DIR=$proj PATH="$tmp/bin:$PATH" "$hook" <<< "$payload" 2> "$tmp/stderr") || rc=$?
+  err=$(cat "$tmp/stderr")
 }
 touch_path() {
   mkdir -p "$(dirname "$proj/$1")"
@@ -60,6 +67,8 @@ run 'gh pr view --json commits'
 echo 1 > "$STATE/check-rc"
 run 'git commit -m "x"'
 [ "$rc" -eq 2 ] || fail "failing check: expected exit 2, got $rc"
+grep -q 'the commit is blocked' <<< "$err" && grep -q 'stub check output' <<< "$err" || fail "failing check: no reason on stderr: $err"
+[ "$(cat "$STATE/check-args")" = "$real/proj check" ] || fail "ran something other than pnpm check at the root: $(cat "$STATE/check-args")"
 # 3. every commit spelling gates
 echo 0 > "$STATE/check-rc"
 for c in 'git -C . commit --amend' 'git -c commit.gpgsign=false commit' '/usr/bin/git commit' 'GIT_EDITOR=true git commit' 'git add x && git commit -m y' 'echo x && git commit' \
@@ -85,6 +94,7 @@ done
 touch_path bin/claude-multipass
 run 'git commit -m "x"'
 [ "$rc" -eq 0 ] && grep -q README <<< "$out" || fail "docs-mirror warning missing"
+jq -e '.hookSpecificOutput | .hookEventName == "PreToolUse" and (.additionalContext | contains("README"))' <<< "$out" > /dev/null || fail "the reminder is not in the field Claude Code reads: $out"
 [ "$rc" -eq 0 ] && grep -q CHANGELOG <<< "$out" || fail "changelog reminder missing"
 # 6. a docs/ file changed alongside silences the docs warning, CHANGELOG.md the changelog one
 touch_path docs/x.md
@@ -104,6 +114,7 @@ for c in "cd $proj && git commit -m x" 'cd proj; git commit -m x' "git -C $proj 
   rm -f "$STATE/check-ran"
   run "$c" "$tmp"
   [ -e "$STATE/check-ran" ] || fail "not gated from outside: $c"
+  [ "$(cat "$STATE/check-args")" = "$real/proj check" ] || fail "checked the wrong repo from outside: $c"
 done
 # 8. git -C into a repo without the hook copy is not gated, even from this repo
 rm -f "$STATE/check-ran"
@@ -120,6 +131,7 @@ echo 1 > "$STATE/check-rc"
 rm -f "$STATE/check-ran"
 run 'git commit -m x' "$tmp/wt"
 [ "$rc" -eq 2 ] && [ -e "$STATE/copy-ran" ] && [ -e "$STATE/check-ran" ] || fail "worktree with a differing hook copy: expected its copy to block with exit 2, got $rc"
+[ "$(cat "$STATE/check-args")" = "$real/wt check" ] || fail "worktree: checked the wrong tree: $(cat "$STATE/check-args")"
 echo 0 > "$STATE/check-rc"
 # 8b. a differing copy in another repo is never run
 mkdir -p "$other/.claude/hooks"
