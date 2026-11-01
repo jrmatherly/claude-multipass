@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.10.1 (2026-11-01)
+
+- The app and the tool work as in 0.10.0. This is the first version 0.10.0 can install by itself, from Check now and Update and relaunch in Settings, About.
+- The release build tries a signature again when Apple's timestamp service returns none, and says why when the Keychain lookup or the notarization submission fails.
+
 ## 0.10.0 (2026-11-01)
 
 - The menu bar app checks for a newer version at launch and once a day, by reading one public file, the tap's `appcast.xml`. It sends no account data and reads no Keychain item. Nothing installs without a click.
