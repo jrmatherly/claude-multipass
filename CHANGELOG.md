@@ -3,7 +3,7 @@
 ## Unreleased
 
 - The menu bar app checks for a newer version at launch and once a day, by reading one public file, the tap's `appcast.xml`. It sends no account data and reads no Keychain item. Nothing installs without a click.
-- Settings, About shows a badge beside the version when a newer one exists, the change log for every version you skipped, and an Update and relaunch button. A Homebrew install updates through `brew`, and an install from the DMG updates in place. Check now runs a check on demand, and a toggle turns the daily check off. While an update is on offer, the popover footer and the right-click menu each have a line that opens About.
+- Settings, About shows a badge beside the version when a newer one exists, the change log for every version you skipped, and an Update and relaunch button. A Homebrew install updates through `brew`, and an install from the DMG updates in place. Check now runs a check on demand, and a toggle turns the daily check off. While an update is on offer, the popover footer and the right-click menu each have a line that opens About, and it says "Updating…" during an install and "Update failed" after one. If the updater cannot start, About says why and links to the release page.
 - The menu bar app has an icon: two open rings with a dot passing through the gap, taken from the menu bar gauge. On macOS 26 and later it has a dark version and a tinted one, and earlier versions get an `.icns`. The bundle had no icon, so launchers showed a blank tile.
 
 ## 0.9.0 (2026-10-31)

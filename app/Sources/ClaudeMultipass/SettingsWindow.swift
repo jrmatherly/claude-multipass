@@ -11,7 +11,7 @@ final class SettingsWindowController {
   let window: NSWindow
   private let tabs = NSTabViewController()
 
-  init(appState: AppState, updates: UpdateController? = nil) {
+  init(appState: AppState, updates: UpdateController?) {
     tabs.tabStyle = .toolbar
     for pane in SettingsPane.allCases {
       let hosting = NSHostingController(rootView: SettingsView(appState: appState, pane: pane, updates: updates))

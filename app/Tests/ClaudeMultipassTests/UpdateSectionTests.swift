@@ -110,6 +110,10 @@ private func ink(_ view: some View) throws -> CGFloat {
     let controller = StatusItemController(appState: s, updates: available)
     let menu = controller.makeMenu()
     #expect(menu.items[0].title == "Update to 0.19.0…")
+    #expect(menu.items[0].target === controller)
+    #expect(menu.items[0].action == Selector(("openAbout")))
+    #expect(menu.items[1].isSeparatorItem)
+    #expect(menu.items.dropFirst(2).map(\.title) == baseMenu)
   }
 
   @Test func theMenuLineFollowsAnInstallAndAFailure() async {
@@ -199,4 +203,61 @@ private func ink(_ view: some View) throws -> CGFloat {
     await s.endUpdate()
     #expect(try ink(row) == idle)
   }
+
+  @Test func copyPutsTheCommandOnThePasteboard() {
+    let pasteboard = NSPasteboard(name: .init("net.matherly.claude-multipass.tests.copy"))
+    defer { pasteboard.releaseGlobally() }
+    pasteboard.setString("stale", forType: .string)
+    UpdateSection.copy(BrewInstaller.command, to: pasteboard)
+    #expect(pasteboard.string(forType: .string) == BrewInstaller.command)
+    #expect(pasteboard.pasteboardItems?.count == 1)
+  }
+
+  @Test func turningTheDailyCheckOnChecks() async {
+    let s = await state(FixtureRunner())
+    var settings = s.settings
+    settings.updateChecksEnabled = false
+    await s.apply(settings)
+    let updates = updateController(s)
+    defer { updates.stop() }
+    let host = NSHostingView(rootView: SettingsView(appState: s, pane: .about, updates: updates))
+    host.layoutSubtreeIfNeeded()
+    await Task.yield()
+    #expect(updates.state == .idle)
+    settings.updateChecksEnabled = true
+    await s.apply(settings)
+    #expect(await soon {
+      host.layoutSubtreeIfNeeded()
+      return updates.state.offer != nil
+    }, "turning the toggle on did not check")
+  }
+
+  @Test func theRelaunchHelperOutlivesThePidThenOpensAPathWithASpace() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("relaunch helper \(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let opened = dir.appendingPathComponent("opened")
+    let stub = dir.appendingPathComponent("open")
+    try "#!/bin/sh\nprintf '%s' \"$1\" > '\(opened.path)'\n".write(to: stub, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: stub.path)
+
+    let dummy = Process()
+    dummy.executableURL = URL(fileURLWithPath: "/bin/sleep")
+    dummy.arguments = ["60"]
+    try dummy.run()
+    let app = dir.appendingPathComponent("Claude Multipass.app")
+    let helper = Process()
+    helper.executableURL = URL(fileURLWithPath: "/bin/sh")
+    helper.arguments = AppDelegate.relaunchArguments(app: app, pid: dummy.processIdentifier)
+    helper.environment = ["PATH": "\(dir.path):/bin:/usr/bin"]
+    try helper.run()
+    defer { helper.terminate() }
+
+    try await Task.sleep(for: .milliseconds(500))
+    #expect(!FileManager.default.fileExists(atPath: opened.path), "opened while the process still lived")
+    dummy.terminate()
+    dummy.waitUntilExit()
+    #expect(await soon { (try? String(contentsOf: opened, encoding: .utf8)) == app.path })
+  }
 }
+
