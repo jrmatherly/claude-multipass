@@ -144,9 +144,7 @@ public struct CLI: CommandRunner {
 
   /// At least 0.3.0 (cliSaved and the CLI warnings), compared per numeric component.
   public static func isSupported(_ version: String) -> Bool {
-    let parts = version.split(separator: ".").map { Int($0) }
-    guard parts.count >= 2, !parts.contains(nil) else { return false }
-    let nums = parts.compactMap { $0 }
+    guard let nums = Version.components(version), nums.count >= 2 else { return false }
     return nums.lexicographicallyPrecedes([0, 3, 0]) == false
   }
 
