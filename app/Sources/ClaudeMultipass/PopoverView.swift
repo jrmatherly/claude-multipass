@@ -8,6 +8,7 @@ struct PopoverView: View {
   var openSettings: (SettingsPane?) -> Void
   var close: () -> Void
   var panel: AccountPanelController?
+  var updates: UpdateController?
   @State private var expanded: String?
 
   var body: some View {
@@ -44,6 +45,12 @@ struct PopoverView: View {
         Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled)
       }
       Divider()
+      if let updates {
+        UpdateNotice(updates: updates) {
+          close()
+          openSettings(.about)
+        }
+      }
       HStack(spacing: 16) {
         Button("Refresh") { Task { await appState.refreshAll() } }
         Button("Settings…") {

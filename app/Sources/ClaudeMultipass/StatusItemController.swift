@@ -7,6 +7,7 @@ import SwiftUI
 @MainActor
 final class StatusItemController: NSObject {
   private let appState: AppState
+  private let updates: UpdateController
   private var statusItem: NSStatusItem?
   private var hosting: NSHostingController<StripView>?
   private static let buttonInsets: CGFloat = 12
@@ -14,8 +15,9 @@ final class StatusItemController: NSObject {
   private var popover: PopoverController?
   private var settingsWindow: SettingsWindowController?
 
-  init(appState: AppState) {
+  init(appState: AppState, updates: UpdateController) {
     self.appState = appState
+    self.updates = updates
   }
 
   func install() {
@@ -45,7 +47,7 @@ final class StatusItemController: NSObject {
     button.action = #selector(clicked(_:))
     button.sendAction(on: [.leftMouseUp, .rightMouseUp])
     self.hosting = hosting
-    popover = PopoverController(appState: appState) { [weak self] pane in self?.openSettings(pane: pane) }
+    popover = PopoverController(appState: appState, updates: updates) { [weak self] pane in self?.openSettings(pane: pane) }
   }
 
   private func fitLength() {
@@ -69,16 +71,28 @@ final class StatusItemController: NSObject {
 
   private func showMenu() {
     guard let item = statusItem else { return }
+    // The documented way to pop a menu from a status item that also handles
+    // clicks: attach it for the click, detach it afterwards.
+    item.menu = makeMenu()
+    item.button?.performClick(nil)
+    item.menu = nil
+  }
+
+  func makeMenu() -> NSMenu {
     let menu = NSMenu()
+    if let offer = updates.state.offer {
+      menu.addItem(withTitle: "Update to \(offer.version)…", action: #selector(openAbout), keyEquivalent: "").target = self
+      menu.addItem(.separator())
+    }
     menu.addItem(withTitle: "Refresh", action: #selector(refresh), keyEquivalent: "r").target = self
     menu.addItem(withTitle: "Settings…", action: #selector(openSettingsFromMenu), keyEquivalent: ",").target = self
     menu.addItem(.separator())
     menu.addItem(withTitle: "Quit Claude Multipass", action: #selector(quit), keyEquivalent: "q").target = self
-    // The documented way to pop a menu from a status item that also handles
-    // clicks: attach it for the click, detach it afterwards.
-    item.menu = menu
-    item.button?.performClick(nil)
-    item.menu = nil
+    return menu
+  }
+
+  @objc private func openAbout() {
+    openSettings(pane: .about)
   }
 
   @objc private func refresh() {
@@ -90,7 +104,7 @@ final class StatusItemController: NSObject {
   }
 
   func openSettings(pane: SettingsPane?) {
-    if settingsWindow == nil { settingsWindow = SettingsWindowController(appState: appState) }
+    if settingsWindow == nil { settingsWindow = SettingsWindowController(appState: appState, updates: updates) }
     settingsWindow?.show(pane: pane)
   }
 

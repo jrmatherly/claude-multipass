@@ -23,12 +23,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       makeRunner: { settings in CLI.locate(override: settings.cliPathOverride).map { CLI(executable: $0) } },
       store: SettingsStore(defaults: .standard))
     appState.start()
-    let controller = StatusItemController(appState: appState)
+    let updates = Self.makeUpdates(appState: appState)
+    let controller = StatusItemController(appState: appState, updates: updates)
     controller.install()
     self.appState = appState
     statusItem = controller
-    updates = Self.makeUpdates(appState: appState)
-    updates?.start()
+    self.updates = updates
+    updates.start()
   }
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
