@@ -11,6 +11,43 @@ import Testing
   #expect(!Version.isNewer("0.1.0", than: "garbage"))
 }
 
+@Test func emptyVersionPartsAreDropped() {
+  #expect(Version.components("1.0.") == [1, 0])
+  #expect(Version.components(".3.0") == [3, 0])
+  #expect(Version.components("1..0") == [1, 0])
+  #expect(CLI.isSupported("1.0."))
+  #expect(CLI.isSupported(".3.0"))
+  #expect(CLI.isSupported("1..0"))
+  #expect(!CLI.isSupported("1."))
+}
+
+@Test func aVersionWithNoNumbersIsNoVersion() {
+  #expect(Version.components("") == nil)
+  #expect(Version.components("...") == nil)
+  #expect(!Version.isNewer("0.1.0", than: ""))
+  #expect(!Version.isNewer("", than: "0.1.0"))
+}
+
+@Test func signedPartsAreNotVersions() {
+  #expect(Version.components("+9.0") == nil)
+  #expect(Version.components("-1.0") == nil)
+  #expect(Version.components("1.+2") == nil)
+  #expect(!Version.isNewer("+9.0", than: "0.9.0"))
+  #expect(!Version.isNewer("0.9.0", than: "-1.0"))
+}
+
+@Test func notesHandleEveryLineEnding() {
+  let md = "## 0.3.0 (2026-11-03)\n\n- three\n\n## 0.2.0 (2026-11-02)\n\n- two\n\n## 0.1.0 (2026-11-01)\n\n- one\n"
+  let expected = [
+    ReleaseNote(version: "0.3.0", date: "2026-11-03", lines: ["three"]),
+    ReleaseNote(version: "0.2.0", date: "2026-11-02", lines: ["two"]),
+    ReleaseNote(version: "0.1.0", date: "2026-11-01", lines: ["one"]),
+  ]
+  #expect(ChangeLog.notes(in: md, newerThan: "0.0.1") == expected)
+  #expect(ChangeLog.notes(in: md.replacingOccurrences(of: "\n", with: "\r\n"), newerThan: "0.0.1") == expected)
+  #expect(ChangeLog.notes(in: md.replacingOccurrences(of: "\n", with: "\r"), newerThan: "0.0.1") == expected)
+}
+
 @Test func notesKeepOnlyNewerSectionsNewestFirst() {
   let md = "# Changelog\n\n## Unreleased\n\n- soon\n\n## 0.11.0 (2026-11-02)\n\n- two\n- `three`\n\n## 0.10.0 (2026-11-01)\n\n- one\n\n## 0.9.0 (2026-10-31)\n\n- old\n"
   let notes = ChangeLog.notes(in: md, newerThan: "0.9.0")

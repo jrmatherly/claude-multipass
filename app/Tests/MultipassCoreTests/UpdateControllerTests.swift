@@ -29,9 +29,11 @@ private final class FakeInstaller: Installer {
   var gate: Gate?
   var error: Error?
   private(set) var calls = 0
+  private(set) var report: (@MainActor (InstallStage) -> Void)?
 
   func install(_ offer: UpdateOffer, report: @escaping @MainActor (InstallStage) -> Void) async throws {
     calls += 1
+    self.report = report
     if let stage { report(stage) }
     await gate?.wait()
     if let error { throw error }
@@ -395,6 +397,15 @@ private func fixture(
   #expect(f.controller.state == .installing(offer, .upgrading))
   gate.open()
   await install.value
+}
+
+@Test @MainActor func aStageAfterTheInstallerReturnedStaysRelaunching() async {
+  let f = await fixture(feed: FakeFeed([.success(newer)]))
+  await f.controller.check()
+  await f.controller.install()
+  f.installer.report?(.upgrading)
+  #expect(f.controller.state == .installing(offer, .relaunching))
+  #expect(!f.controller.state.blocksQuit)
 }
 
 @Test @MainActor func aDevelopmentBuildHasNoUpdates() async {

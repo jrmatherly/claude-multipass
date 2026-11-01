@@ -101,6 +101,51 @@ private final class Harness {
   #expect(problem.detail == "Warning: already installed")
 }
 
+@Test @MainActor func aWarningAfterAFailedUpdateExplainsTheOldDisk() async throws {
+  for updateError in [CLIError.timedOut, .failed(status: 1, stderr: "stale tap")] {
+    let h = Harness(disk: ["0.10.0"])
+    h.runner.fail("update", updateError)
+    h.runner.onStderr["upgrade"] = "Warning: the real reason"
+    let problem = try #require(await h.problem())
+    #expect(problem.message == "Homebrew finished, but the app on disk is still 0.10.0.")
+    #expect(problem.detail == "Warning: the real reason")
+    #expect(problem.fallback == .command(BrewInstaller.command))
+    #expect(h.relaunched == nil)
+  }
+}
+
+@Test @MainActor func aSilentUpgradeLeavesTheUpdateFailureInCharge() async throws {
+  let timedOut = Harness(disk: ["0.10.0"])
+  timedOut.runner.fail("update", .timedOut)
+  let late = try #require(await timedOut.problem())
+  #expect(late.message.contains("in time"))
+  #expect(late.detail == nil)
+
+  let failed = Harness(disk: ["0.10.0"])
+  failed.runner.fail("update", .failed(status: 1, stderr: "stale tap"))
+  failed.runner.fail("upgrade", .failed(status: 1, stderr: ""))
+  let problem = try #require(await failed.problem())
+  #expect(problem.message == "Homebrew could not update the app.")
+  #expect(problem.detail == "stale tap")
+}
+
+@Test @MainActor func anUpgradeTimeoutKeepsTheUpdateOutput() async throws {
+  let h = Harness(disk: ["0.10.0"])
+  h.runner.fail("update", .failed(status: 1, stderr: "stale tap"))
+  h.runner.fail("upgrade", .timedOut)
+  let problem = try #require(await h.problem())
+  #expect(problem.message.contains("in time"))
+  #expect(problem.detail == "stale tap")
+}
+
+@Test @MainActor func aWarningAfterAFailedUpdateStillRelaunchesOnANewDisk() async throws {
+  let h = Harness(disk: ["0.10.0", "0.11.0"])
+  h.runner.fail("update", .timedOut)
+  h.runner.onStderr["upgrade"] = "Warning: the real reason"
+  try await h.install()
+  #expect(h.relaunched == appURL)
+}
+
 @Test @MainActor func aFailureWithNoOutputHasNoDetail() async throws {
   let h = Harness(disk: ["0.10.0"])
   h.runner.fail("upgrade", .failed(status: 1, stderr: ""))

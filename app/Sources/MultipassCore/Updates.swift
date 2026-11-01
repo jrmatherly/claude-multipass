@@ -1,10 +1,11 @@
 import Foundation
 
 public enum Version {
-  /// "0.10.1" → [0, 10, 1]; nil unless every dot-separated part is a number.
+  /// "0.10.1" → [0, 10, 1]. Empty parts are dropped; nil unless what is left
+  /// is digits, since `Int` alone would also take the "+9" a feed could send.
   public static func components(_ v: String) -> [Int]? {
-    let parts = v.split(separator: ".", omittingEmptySubsequences: false).map { Int($0) }
-    return parts.contains(nil) ? nil : parts.compactMap { $0 }
+    let parts = v.split(separator: ".").map { $0.allSatisfy(\.isWholeNumber) ? Int($0) : nil }
+    return parts.isEmpty || parts.contains(nil) ? nil : parts.compactMap { $0 }
   }
 
   /// Missing components count as 0. An unparseable side is never newer.
@@ -60,7 +61,8 @@ public enum ChangeLog {
   public static func notes(in markdown: String, newerThan running: String) -> [ReleaseNote] {
     var all: [ReleaseNote] = []
     var inSection = false
-    for raw in markdown.split(separator: "\n") {
+    // Not `separator: "\n"`, because "\r\n" is one Character and would never match.
+    for raw in markdown.split(whereSeparator: \.isNewline) {
       let line = raw.trimmingCharacters(in: .whitespaces)
       if line.hasPrefix("## ") {
         let note = heading(line)
@@ -178,16 +180,30 @@ public final class BrewInstaller: Installer {
   public func install(_ offer: UpdateOffer, report: @escaping @MainActor (InstallStage) -> Void) async throws {
     let landed = { (disk: String) in Version.components(disk) != nil && !Version.isNewer(offer.version, than: disk) }
     var failure: Error?
-    var warnings = ""
+    var output = ""
+    let fail = { (error: Error) in
+      failure = error
+      let said = Self.output(of: error)
+      if !said.isEmpty { output = said }
+    }
     // A terminal `brew upgrade` may have got here first.
     if diskVersion(appURL).map(landed) != true {
       report(.updatingHomebrew)
       // Any one stale tap fails `brew update`, so the upgrade still gets its chance.
-      do { _ = try await runner.run(["update", "--quiet"]) } catch { failure = error }
+      do { _ = try await runner.run(["update", "--quiet"]) } catch { fail(error) }
       report(.upgrading)
-      do { warnings = try await runner.runCapturing(["upgrade"] + Self.packages).stderr } catch { failure = error }
+      do {
+        let warnings = try await runner.runCapturing(["upgrade"] + Self.packages).stderr
+        // The upgrade got past any update failure, so what it said explains the outcome.
+        if !warnings.isEmpty {
+          failure = nil
+          output = warnings
+        }
+      } catch {
+        fail(error)
+      }
     }
-    let detail = Self.tail(of: failure, warnings: warnings)
+    let detail = output.isEmpty ? nil : output.split(separator: "\n", omittingEmptySubsequences: false).suffix(20).joined(separator: "\n")
     guard let disk = diskVersion(appURL) else {
       throw UpdateProblem(message: "The app could not be read from disk after Homebrew ran. Download it to reinstall.", detail: detail, fallback: .download(UpdateController.releasePage))
     }
@@ -210,19 +226,15 @@ public final class BrewInstaller: Installer {
     }
   }
 
-  private static func tail(of failure: Error?, warnings: String) -> String? {
-    let text: String
-    switch failure {
-    case nil:
-      text = warnings
-    case CLIError.timedOut?:
-      return nil
-    case CLIError.failed(_, let stderr)?, CLIError.refused(let stderr)?:
-      text = stderr
-    case let other?:
-      text = other.localizedDescription
+  private static func output(of error: Error) -> String {
+    switch error {
+    case CLIError.timedOut:
+      return ""
+    case CLIError.failed(_, let stderr), CLIError.refused(let stderr):
+      return stderr
+    default:
+      return error.localizedDescription
     }
-    return text.isEmpty ? nil : text.split(separator: "\n", omittingEmptySubsequences: false).suffix(20).joined(separator: "\n")
   }
 }
 
@@ -332,7 +344,8 @@ public final class UpdateController: ObservableObject {
     }
     do {
       try await installer.install(offer) { [weak self] stage in
-        guard let self, case .installing = self.state else { return }
+        // A late stage must not undo .relaunching: blocksQuit would cancel the relaunch's terminate.
+        guard let self, case .installing(_, let shown) = self.state, shown != .relaunching else { return }
         self.state = .installing(offer, stage)
       }
       // The phase stays held until the process exits.
