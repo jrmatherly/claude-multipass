@@ -1202,6 +1202,54 @@ check "usage passes the decrypted token cache to jq through a pipe" 0 "$(grep -c
 check_true "and the log saw jq read a pipe" grep -q '^jq Fifo File' "$tmp/stdin-types"
 cp "$tmp/config-saved-live" "$d/config.json"
 
+# Without jq, signed_in would read a signed-in login as signed out, so add
+# would skip its unsaved-login refusal and quit Desktop. The system folders
+# are linked one by one, because /usr/bin holds a jq from macOS 15.
+mkdir -p "$tmp/no-jq"
+ln -sf /usr/bin/* /bin/* "$tmp/no-jq/"
+rm -f "$tmp/no-jq/jq"
+nojq="$tmp/bin:$tmp/no-jq"
+check "the no-jq PATH has no jq" "" "$(env PATH="$nojq" /bin/sh -c "command -v jq || true")"
+# Reports Claude running until a stub logs a quit, so a quit is seen and returns at once.
+printf '#!/bin/sh\ntest ! -s "%s/calls"\n' "$tmp" > "$tmp/bin/pgrep"
+: > "$tmp/calls"
+n_login=$(find "$b" -mindepth 1 -maxdepth 1 -name 'login-*' | wc -l | tr -d ' ')
+jq_message='jq is not on PATH and claude-multipass needs it (https://jqlang.org/download/)'
+add_rc=$(PATH=$nojq exit_code cda add nojq-new)
+check "add without jq never quits Desktop" "" "$(cat "$tmp/calls")"
+check "add without jq exits 1" 1 "$add_rc"
+check "and names jq" "$jq_message" "$(PATH=$nojq err_of cda add nojq-new)"
+check "--force does not lift it" 1 "$(PATH=$nojq exit_code cda add nojq-new --force)"
+check "switch without jq exits 1" 1 "$(PATH=$nojq exit_code cda switch usagey)"
+check "and names jq" "$jq_message" "$(PATH=$nojq err_of cda switch usagey)"
+check "current without jq exits 1" 1 "$(PATH=$nojq exit_code cda current)"
+check "and names jq" "$jq_message" "$(PATH=$nojq err_of cda current)"
+check "no stub saw a quit or a launch" "" "$(cat "$tmp/calls")"
+check "and no login was backed up" "$n_login" "$(find "$b" -mindepth 1 -maxdepth 1 -name 'login-*' | wc -l | tr -d ' ')"
+check "--version runs without jq" "claude-multipass $pkg_version" "$(PATH=$nojq cda --version)"
+check "--help runs without jq" 0 "$(PATH=$nojq exit_code cda --help)"
+check_true "doctor runs without jq and reports it" grep -q '^fail: jq: not on PATH' <<< "$(PATH=$nojq cda doctor || true)"
+check "doctor without jq blames no profile's token" 0 "$(PATH=$nojq cda doctor | grep -c 'empty oauth:tokenCacheV2')"
+check "and calls no profile ok" 0 "$(PATH=$nojq cda doctor | grep -c '^ok: usagey')"
+check "and says once that it skipped the check" 1 "$(PATH=$nojq cda doctor | grep -c '^warn: profiles: saved tokens not checked without jq')"
+# A jq that runs and fails is a read failure too, never "signed out".
+cp "$d/config.json" "$tmp/config-before-bad-read"
+printf '{"oauth:tokenCacheV2":' > "$d/config.json"
+check "add on a corrupt config.json exits 1" 1 "$(exit_code cda add badread-new)"
+check "and never quits Desktop" "" "$(cat "$tmp/calls")"
+check "current on a corrupt config.json exits 1" 1 "$(exit_code cda current)"
+cp "$tmp/config-before-bad-read" "$d/config.json"
+mkdir -p "$tmp/broken-jq"
+printf '#!/bin/sh\nexit 126\n' > "$tmp/broken-jq/jq"
+chmod +x "$tmp/broken-jq/jq"
+brokenjq="$tmp/broken-jq:$PATH"
+check "add with a broken jq exits 1" 1 "$(PATH=$brokenjq exit_code cda add badread-new)"
+check "and never quits Desktop" "" "$(cat "$tmp/calls")"
+check "current with a broken jq exits 1" 1 "$(PATH=$brokenjq exit_code cda current)"
+check "doctor with a broken jq reports it" 1 "$(PATH=$brokenjq cda doctor | grep -c '^fail: jq: ')"
+check "and blames no profile's token" 0 "$(PATH=$brokenjq cda doctor | grep -c 'empty oauth:tokenCacheV2')"
+printf '#!/bin/sh\nexit 1\n' > "$tmp/bin/pgrep"
+
 # the dotfiles-era store moves into the default location once, backups too
 # (XDG_CONFIG_HOME, not HOME: tools on PATH may read their own config from HOME)
 mkdir -p "$tmp/home/.config/dotfiles/claude-desktop-accounts/old" "$tmp/home/.config/dotfiles/claude-desktop-accounts-backups/login-1"

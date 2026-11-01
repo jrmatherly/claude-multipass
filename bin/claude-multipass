@@ -277,7 +277,8 @@ ${bold}Commands${reset}
                        CLAUDE_CONFIG_DIR, CLAUDE_SECURESTORAGE_CONFIG_DIR,
                        ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN is set.
                        One ok:, warn: or fail: line per check; exits 1 on any
-                       fail:. Reads no Keychain and no network.
+                       fail:. Reads no Keychain and no network. Without a
+                       working jq it skips the token check and says so.
 
 ${bold}Options${reset}
   --no-relaunch        Leave Desktop quit after save, switch, add or pick,
@@ -670,7 +671,14 @@ desktop_launch() {
   open -a Claude
 }
 
-signed_in() { jq -e '.["oauth:tokenCacheV2"] | type == "string" and length > 0' "$config" > /dev/null; }
+# jq -e exits 1 for false. Any other failure is an unread config, never "signed out",
+# which would skip add's unsaved-login refusal.
+signed_in() {
+  local rc=0
+  jq -e '.["oauth:tokenCacheV2"] | type == "string" and length > 0' "$config" > /dev/null || rc=$?
+  ((rc < 2)) || fail "Could not read $config with jq (exit $rc)"
+  return "$rc"
+}
 
 live_account() {
   signed_in || return 0
@@ -1059,13 +1067,13 @@ usage_object() {
 # One line per check, in a fixed order, no Keychain and no network. Exits 1
 # when any fail: line was printed.
 doctor_report() {
-  local status=0 tool mode meta dir name file logins set_aside legacy
+  local status=0 tool mode meta dir name file logins set_aside legacy unchecked=''
   if [[ -f $config ]]; then echo "ok: config: $config"; else
     echo "fail: config: no $config (open Claude Desktop once first)"
     status=1
   fi
-  if command -v jq > /dev/null; then echo "ok: jq"; else
-    echo "fail: jq: not on PATH (brew install jq)"
+  if jq -n 1 > /dev/null 2>&1; then echo "ok: jq"; else
+    echo "fail: jq: not on PATH or not working (https://jqlang.org/download/)"
     status=1
   fi
   if xcode-select -p > /dev/null 2>&1; then echo "ok: Command Line Tools (the system python3 for usage)"; else echo "warn: Command Line Tools: not installed (xcode-select --install), needed for usage"; fi
@@ -1092,6 +1100,8 @@ doctor_report() {
     elif [[ ! -f ${dir}config.json ]]; then
       echo "fail: $name: missing config.json (re-save it)"
       status=1
+    elif ! jq -n 1 > /dev/null 2>&1; then
+      unchecked=1
     elif ! jq -e '.["oauth:tokenCacheV2"] | type == "string" and length > 0' "${dir}config.json" > /dev/null 2>&1; then
       echo "fail: $name: empty oauth:tokenCacheV2 (re-save it)"
       status=1
@@ -1100,6 +1110,7 @@ doctor_report() {
     fi
     [[ -f ${dir}cli.json ]] || echo "warn: $name: no CLI login saved (claude auth login, then save $name)"
   done
+  [[ -z $unchecked ]] || echo "warn: profiles: saved tokens not checked without jq"
   [[ -z ${CLAUDE_CONFIG_DIR:-} ]] || echo "warn: CLAUDE_CONFIG_DIR is set; the CLI login is not saved or switched"
   [[ -z ${CLAUDE_SECURESTORAGE_CONFIG_DIR:-} ]] || echo "warn: CLAUDE_SECURESTORAGE_CONFIG_DIR is set; the CLI login is not saved or switched"
   [[ -z ${ANTHROPIC_API_KEY:-} ]] || echo "warn: ANTHROPIC_API_KEY is set; it overrides the terminal login"
@@ -1391,6 +1402,7 @@ main() {
     doctor_report
     return $?
   fi
+  command -v jq > /dev/null || fail "jq is not on PATH and claude-multipass needs it (https://jqlang.org/download/)"
   [[ -f $config ]] || fail "No $config: open Claude Desktop once first"
   migrate_store
   case $cmd in
