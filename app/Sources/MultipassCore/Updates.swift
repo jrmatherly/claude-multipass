@@ -147,7 +147,8 @@ public protocol UpdateFeed: AnyObject {
 }
 
 public protocol Installer: AnyObject {
-  /// Returning means the process is about to relaunch. Throws UpdateProblem.
+  /// Returning means the process is about to relaunch, and an installer may instead
+  /// never return while the process exits. Throws UpdateProblem.
   @MainActor func install(_ offer: UpdateOffer, report: @escaping @MainActor (InstallStage) -> Void) async throws
 }
 
@@ -161,6 +162,8 @@ public final class BrewInstaller: Installer {
     "HOMEBREW_NO_INSTALL_CLEANUP": "1",
     "HOMEBREW_NO_ENV_HINTS": "1",
   ]
+  /// Long, because the timeout kills brew, and a kill mid-swap is the one way to lose the app.
+  public static let timeout: TimeInterval = 1800
   private static let packages = ["jrmatherly/tap/claude-multipass", "jrmatherly/tap/claude-multipass-app"]
   public static let command = "brew update && brew upgrade " + packages.joined(separator: " ")
 

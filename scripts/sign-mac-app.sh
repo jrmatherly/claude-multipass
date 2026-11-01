@@ -1,6 +1,6 @@
 #!/bin/bash
 # sign-mac-app.sh - Developer ID signing and notarization for the menu bar app and its DMG.
-# Copied from jrmatherly/ai-kb (scripts/sign-mac-app.sh), with MACOS_SIGN_ENTITLEMENTS added.
+# Copied from jrmatherly/ai-kb (scripts/sign-mac-app.sh), with MACOS_SIGN_ENTITLEMENTS and the Sparkle parts added.
 # The only place the repository calls codesign, notarytool or stapler.
 #
 #   sign-mac-app.sh sign-app <App.app>   sign with the hardened runtime and verify, then notarize,
@@ -97,6 +97,14 @@ case "$mode" in
   sign-app)
     entitlements=()
     [ -z "${MACOS_SIGN_ENTITLEMENTS:-}" ] || entitlements=(--entitlements "$MACOS_SIGN_ENTITLEMENTS")
+    # Inside out, since an app's signature seals what is nested in it. Never
+    # --deep, which would hand the app's entitlements to Sparkle's helpers.
+    sparkle="$target/Contents/Frameworks/Sparkle.framework"
+    if [ -d "$sparkle" ]; then
+      for part in "$sparkle/Versions/B/Autoupdate" "$sparkle/Versions/B/Updater.app" "$sparkle"; do
+        codesign --force --options runtime --timestamp --sign "$identity" "$part"
+      done
+    fi
     codesign --force --options runtime --timestamp ${entitlements[@]+"${entitlements[@]}"} --sign "$identity" "$target"
     codesign --verify --deep --strict --verbose=2 "$target"
     if [ "$notarize" = 1 ]; then

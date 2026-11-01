@@ -68,6 +68,12 @@ pkg_version=$(jq -r .version package.json)
   echo "check: bin/claude-multipass version=$script_version differs from package.json $pkg_version" >&2
   exit 1
 }
+# One file imports Sparkle, so Core and the UI stay testable without it
+sparkle_importers=$(grep -rlE '^[[:space:]]*(@[A-Za-z_]+[[:space:]]+)*import[[:space:]]+([a-z]+[[:space:]]+)?Sparkle\b' app/Sources app/Tests | grep -vxF app/Sources/ClaudeMultipass/SparkleUpdater.swift || true)
+[[ -z $sparkle_importers ]] || {
+  echo "check: only SparkleUpdater.swift may import Sparkle, found: $sparkle_importers" >&2
+  exit 1
+}
 # Both workflows pin the same ShellCheck release
 pins=$(grep -ho 'SHELLCHECK_SHA256: *[0-9a-f]*' .github/workflows/check.yml .github/workflows/release.yml | tr -d ' ' | sort -u | wc -l | tr -d ' ')
 [[ $pins == 1 ]] || {
