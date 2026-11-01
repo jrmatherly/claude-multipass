@@ -1,4 +1,3 @@
-import AppKit
 import MultipassCore
 import Sparkle
 
@@ -11,17 +10,14 @@ final class SparkleUpdater: NSObject, SPUUserDriver, SPUUpdaterDelegate, UpdateF
     let canCheck: () -> Bool
     let probe: () -> Void
     let install: () -> Void
-    var quit: () -> Void = { NSApp.terminate(nil) }
   }
 
   private var calls: Calls!
   /// Stored only: `didFindValidUpdate` also fires during an install.
-  var found: FeedItem?
+  private var found: FeedItem?
   private var probeWaiter: CheckedContinuation<FeedItem?, Error>?
   /// Nil once the install has resumed, which is what stops any later callback reporting a stage.
   private var installing: (waiter: CheckedContinuation<Void, Error>, report: @MainActor (InstallStage) -> Void)?
-  /// Set once install has returned, which the controller reads as about to relaunch.
-  private var returned = false
   private var expectedBytes: UInt64 = 0
   private var receivedBytes: UInt64 = 0
 
@@ -58,10 +54,6 @@ final class SparkleUpdater: NSObject, SPUUserDriver, SPUUpdaterDelegate, UpdateF
 
   /// The one end of a probe. `didAbortWithError` also fires for "nothing newer", so it stays unused.
   func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: Error?) {
-    finishCycle(error: error)
-  }
-
-  func finishCycle(error: Error?) {
     guard let waiter = probeWaiter else { return }
     probeWaiter = nil
     if let error, (error as NSError).code != Int(SUError.noUpdateError.rawValue) {
@@ -73,6 +65,8 @@ final class SparkleUpdater: NSObject, SPUUserDriver, SPUUpdaterDelegate, UpdateF
 
   // MARK: Installer
 
+  /// Never returns on success: Sparkle's quit ends the process with the waiter pending,
+  /// which leaves a late failure something to throw to.
   func install(_ offer: UpdateOffer, report: @escaping @MainActor (InstallStage) -> Void) async throws {
     guard calls.canCheck(), installing == nil else { throw Self.busy }
     try await withCheckedThrowingContinuation { (waiter: CheckedContinuation<Void, Error>) in
@@ -81,14 +75,10 @@ final class SparkleUpdater: NSObject, SPUUserDriver, SPUUpdaterDelegate, UpdateF
     }
   }
 
-  private func finishInstall(_ result: Result<Void, Error>) {
+  private func failInstall(_ message: String, fallback: UpdateProblem.Fallback? = .download(UpdateController.releasePage)) {
     guard let waiter = installing?.waiter else { return }
     installing = nil
-    waiter.resume(with: result)
-  }
-
-  private func failInstall(_ message: String) {
-    finishInstall(.failure(UpdateProblem(message: message, detail: nil, fallback: .download(UpdateController.releasePage))))
+    waiter.resume(throwing: UpdateProblem(message: message, detail: nil, fallback: fallback))
   }
 
   /// Nothing installs without a click, so with no install waiting the answer is no.
@@ -130,33 +120,21 @@ final class SparkleUpdater: NSObject, SPUUserDriver, SPUUpdaterDelegate, UpdateF
   /// Arrives after the ready reply, and Sparkle's quit event follows it.
   func showInstallingUpdate(withApplicationTerminated applicationTerminated: Bool, retryTerminatingApplication: @escaping () -> Void) {
     installing?.report(.relaunching)
-    returned = installing != nil
-    finishInstall(.success(()))
-  }
-
-  /// Sparkle gave up after install returned, so the controller holds the phase until
-  /// this process exits. Quit, as a failed relaunch does: the user reopens the app.
-  private func quitIfReturned(_ reason: String) {
-    guard returned else { return }
-    NSLog("Claude Multipass: the update stopped after the relaunch began: %@", reason)
-    calls.quit()
   }
 
   func showUpdaterError(_ error: Error, acknowledgement: @escaping () -> Void) {
     acknowledgement()
     failInstall(Self.message(for: error))
-    quitIfReturned(error.localizedDescription)
   }
 
   func showUpdateNotFoundWithError(_ error: Error, acknowledgement: @escaping () -> Void) {
     acknowledgement()
-    finishInstall(.failure(UpdateProblem(message: "This update is no longer offered.", detail: nil, fallback: nil)))
+    failInstall("This update is no longer offered.", fallback: nil)
   }
 
   /// Sparkle's teardown: an install it ends with no error must still release the phase.
   func dismissUpdateInstallation() {
     failInstall("The update stopped before it finished.")
-    quitIfReturned("dismissed")
   }
 
   private static let busy = UpdateProblem(message: "An update check is still running. Try again in a moment.", detail: nil, fallback: nil)
