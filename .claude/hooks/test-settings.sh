@@ -39,11 +39,13 @@ has 'any(.hooks.PostToolUse[]; .matcher == "Bash"
   and any(.hooks[]; .command | endswith("/.claude/hooks/lint-bash-edits.sh")))' \
   "no PostToolUse Bash entry runs lint-bash-edits.sh"
 
+# A variable, not a process substitution, whose failure the loop would never see
+hook_commands=$(jq -r '.hooks[][].hooks[].command' "$settings") || fail "cannot read the hook commands"
 while IFS= read -r cmd; do
   file=${cmd/\$\{CLAUDE_PROJECT_DIR\}/$root}
   [[ $file != "$cmd" ]] || fail "hook command not under \${CLAUDE_PROJECT_DIR}: $cmd"
   [ -x "$file" ] || fail "hook command missing or not executable: $cmd"
-done < <(jq -r '.hooks[][].hooks[].command' "$settings")
+done <<< "$hook_commands"
 
 has '[.permissions.allow[], .permissions.ask[]] | all(startswith("Bash("))' \
   "a permissions.allow or ask entry does not start with Bash("
