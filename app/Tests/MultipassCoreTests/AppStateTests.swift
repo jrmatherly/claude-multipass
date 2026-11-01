@@ -321,6 +321,25 @@ private func enabledUsage(_ s: AppState) -> AppSettings {
   #expect(s.rowNote == nil)
 }
 
+@Test @MainActor func aNoteSetWhileOpenWaitsForTheNextOpen() async {
+  let (s, r) = await readyState()
+  r.onStderr["switch"] = "Claude Code is running (pid 11739); quit it first"
+  let open = s.noteSerial
+  await s.switchTo("alpha")
+  s.clearRowNote(seen: open)
+  #expect(s.rowNote != nil)
+  s.clearRowNote(seen: s.noteSerial)
+  #expect(s.rowNote == nil)
+}
+
+@Test @MainActor func refreshKeepsARefusal() async {
+  let (s, r) = await readyState()
+  r.fail("switch", .refused("The signed-in account isn't saved"))
+  await s.switchTo("alpha")
+  await s.refreshAll()
+  #expect(s.rowError?.refused == true)
+}
+
 @Test @MainActor func aCloseDuringTheSwitchKeepsItsNote() async {
   let (s, r) = await readyState()
   r.onStderr["switch"] = "switched Desktop only"
