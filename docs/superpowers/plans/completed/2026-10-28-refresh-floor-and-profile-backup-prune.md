@@ -8,7 +8,7 @@
 
 **Tech Stack:** Swift 5 language mode (`app/Package.swift`, tools 5.9, SwiftPM, Swift Testing, `FakeRunner`), bash 3.2, `jq`, the fixture self-check `test/claude-multipass.sh`.
 
-**Spec:** `docs/superpowers/specs/2026-10-28-refresh-floor-and-profile-backup-prune.md`
+**Spec:** `docs/superpowers/specs/completed/2026-10-28-refresh-floor-and-profile-backup-prune.md`
 
 Line numbers below are from `main` at `aa591e4`. PR 35 adds six lines to `test/claude-multipass.sh` and shifts `bin/claude-multipass` by a few lines, so each step also names the function or the string to search for; the anchor wins over the number.
 

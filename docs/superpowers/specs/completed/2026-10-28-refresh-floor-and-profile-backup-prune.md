@@ -1,6 +1,6 @@
 # Refresh floor and profile backup prune
 
-Two design calls left by the 2026-10-28 audit, investigated on 2026-10-28 against `main` at `aa591e4` plus PR 35. This is the decision record the plan at `docs/superpowers/plans/2026-10-28-refresh-floor-and-profile-backup-prune.md` implements.
+Two design calls left by the 2026-10-28 audit, investigated on 2026-10-28 against `main` at `aa591e4` plus PR 35. This is the decision record the plan at `docs/superpowers/plans/completed/2026-10-28-refresh-floor-and-profile-backup-prune.md` implements.
 
 ## 1. A floor on the menu bar app's manual usage refresh
 
