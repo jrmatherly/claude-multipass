@@ -9,8 +9,8 @@
 # ---
 # Never touches the real Claude Desktop folder: CLAUDE_DESKTOP_DIR and
 # CLAUDE_MULTIPASS_DIR point into a temp dir, and pgrep, osascript, pkill,
-# open, fzf, security and curl are stubbed on PATH so no app is quit or
-# launched and no Keychain or network is touched.
+# open, fzf, security, xcode-select and curl are stubbed on PATH so no app is
+# quit or launched and no Keychain or network is touched.
 #
 # License: MIT
 
@@ -28,6 +28,7 @@ printf '#!/bin/sh\nexit 1\n' > "$tmp/bin/pgrep"
 for stub in osascript pkill open; do
   printf '#!/bin/sh\necho "%s $*" >> "%s/calls"\n' "$stub" "$tmp" > "$tmp/bin/$stub"
 done
+printf '#!/bin/sh\necho /Library/Developer/CommandLineTools\n' > "$tmp/bin/xcode-select"
 # A stateful security stub. Every call and every `-i` stdin line goes to
 # $tmp/security-calls, so the log tells the stdin route from the argv one the
 # script takes for an item too large for a security -i line. The "Claude Safe
@@ -1156,6 +1157,15 @@ touch "$tmp/calls"
 check "doctor healthy" 0 "$(exit_code cda doctor)"
 check_true "doctor reports jq" grep -q '^ok: jq' <<< "$(cda doctor)"
 check_true "doctor reports the Command Line Tools" grep -q '^ok: Command Line Tools' <<< "$(cda doctor)"
+# Without the Tools /usr/bin/python3 is a shim that fails, which must not read as a Keychain failure.
+printf '#!/bin/sh\nexit 2\n' > "$tmp/bin/xcode-select"
+n_security=$(wc -l < "$tmp/security-calls")
+check "usage without the Command Line Tools exits 1" 1 "$(exit_code cda usage)"
+check "and names them" "usage needs the Command Line Tools (xcode-select --install)" "$(err_of cda usage)"
+check "usage --json without them exits 1 too" 1 "$(exit_code cda usage --json)"
+check "and neither reads the Keychain" "$n_security" "$(wc -l < "$tmp/security-calls")"
+check_true "doctor warns about them" grep -q '^warn: Command Line Tools: not installed' <<< "$(cda doctor)"
+printf '#!/bin/sh\necho /Library/Developer/CommandLineTools\n' > "$tmp/bin/xcode-select"
 n_sec=$(wc -l < "$tmp/security-calls" | tr -d ' ')
 cda doctor > /dev/null
 check "doctor never calls security" "$n_sec" "$(wc -l < "$tmp/security-calls" | tr -d ' ')"
@@ -1228,10 +1238,32 @@ check "no stub saw a quit or a launch" "" "$(cat "$tmp/calls")"
 check "and no login was backed up" "$n_login" "$(find "$b" -mindepth 1 -maxdepth 1 -name 'login-*' | wc -l | tr -d ' ')"
 check "--version runs without jq" "claude-multipass $pkg_version" "$(PATH=$nojq cda --version)"
 check "--help runs without jq" 0 "$(PATH=$nojq exit_code cda --help)"
-check_true "doctor runs without jq and reports it" grep -q '^fail: jq: not on PATH' <<< "$(PATH=$nojq cda doctor || true)"
-check "doctor without jq blames no profile's token" 0 "$(PATH=$nojq cda doctor | grep -c 'empty oauth:tokenCacheV2')"
-check "and calls no profile ok" 0 "$(PATH=$nojq cda doctor | grep -c '^ok: usagey')"
-check "and says once that it skipped the check" 1 "$(PATH=$nojq cda doctor | grep -c '^warn: profiles: saved tokens not checked without jq')"
+store_state() { (cd "$CLAUDE_MULTIPASS_DIR" && find . -type f -exec cksum {} + | sort); }
+store_before=$(store_state)
+check_jq_refused() {
+  local jq_path=$1 run err rc
+  for run in 'save usagey' list 'list --json' 'show usagey' 'sync --force' usage 'rename usagey jq-renamed' 'remove usagey' pick; do
+    err=$(PATH=$jq_path TERM=dumb cda $run 2>&1 > /dev/null) && rc=0 || rc=$?
+    check "$run with this jq exits 1" 1 "$rc"
+    check "and names jq" "$jq_message" "$err"
+  done
+  check "and none changed the store" "$store_before" "$(store_state)"
+  check "or quit Desktop" "" "$(cat "$tmp/calls")"
+}
+check_jq_refused "$nojq"
+check_doctor_without_jq() {
+  local out rc
+  out=$(PATH=$1 cda doctor) && rc=0 || rc=$?
+  check "doctor with this jq exits 1" 1 "$rc"
+  check_true "and reports it" grep -q '^fail: jq: not on PATH or not working' <<< "$out"
+  check "and that is its only fail: line" 1 "$(grep -c '^fail: ' <<< "$out")"
+  check "and says it did not check the config" 1 "$(grep -c '^warn: config: not checked without jq$' <<< "$out")"
+  check "and does not call the config ok" 0 "$(grep -c '^ok: config: ' <<< "$out")"
+  check "and blames no profile's token" 0 "$(grep -c 'empty oauth:tokenCacheV2' <<< "$out")"
+  check "and calls no profile ok" 0 "$(grep -c '^ok: usagey' <<< "$out")"
+  check "and says once that it skipped the check" 1 "$(grep -c '^warn: profiles: saved tokens not checked without jq' <<< "$out")"
+}
+check_doctor_without_jq "$nojq"
 # A jq that runs and fails, as a stale version-manager shim does (exit 1), must
 # not read as signed out either.
 mkdir -p "$tmp/broken-jq"
@@ -1242,9 +1274,8 @@ check "add with a jq that exits 1 exits 1" 1 "$(PATH=$brokenjq exit_code cda add
 check "and names jq" "$jq_message" "$(PATH=$brokenjq err_of cda add badread-new)"
 check "and never quits Desktop" "" "$(cat "$tmp/calls")"
 check "current with a jq that exits 1 exits 1" 1 "$(PATH=$brokenjq exit_code cda current)"
-check "doctor with a jq that exits 1 reports it" 1 "$(PATH=$brokenjq cda doctor | grep -c '^fail: jq: ')"
-check "and blames no profile's token" 0 "$(PATH=$brokenjq cda doctor | grep -c 'empty oauth:tokenCacheV2')"
-check "and blames no config" 0 "$(PATH=$brokenjq cda doctor | grep -c '^fail: config: ')"
+check_jq_refused "$brokenjq"
+check_doctor_without_jq "$brokenjq"
 # A config.json jq cannot read: the commands that quit Desktop stop first, and
 # everything else answers as it always did. The cases run with Desktop "running".
 cp "$d/config.json" "$tmp/config-before-bad-read"
@@ -1268,7 +1299,7 @@ check_bad_config() {
   check "and fails the config" 1 "$(grep -c "^fail: config: could not read $d/config.json" <<< "$out")"
   check "and does not call it ok" 0 "$(grep -c '^ok: config: ' <<< "$out")"
 }
-for bad in '{"oauth:tokenCacheV2":' '[]'; do
+for bad in '{"oauth:tokenCacheV2":' '[]' '[] {}' '{} {}'; do
   check_bad_config "$bad"
   for run in 'add badread-new --force' 'switch usagey' 'switch usagey --force' 'save usagey' 'save usagey --force' pick; do
     check "$run on config '$bad' exits 1" 1 "$(exit_code cda $run)"
@@ -1277,11 +1308,19 @@ for bad in '{"oauth:tokenCacheV2":' '[]'; do
   check "and none quit Desktop" "" "$(cat "$tmp/calls")"
   check "or backed up a login" "$n_login" "$(find "$b" -mindepth 1 -maxdepth 1 -name 'login-*' | wc -l | tr -d ' ')"
   check "switch names the file" 1 "$(err_of cda switch usagey | grep -c "^Could not read $d/config.json")"
+  check "save names the file" 1 "$(err_of cda save usagey | grep -c "^Could not read $d/config.json")"
   check "list still answers" 1 "$(cda list 2> /dev/null | grep -c '^  usagey ')"
   check "current still answers" "signed out" "$(cda current 2> /dev/null)"
   check "usage --json is not blocked" 0 "$(exit_code cda usage --json)"
   check "sync is not blocked" 0 "$(exit_code cda sync --force)"
 done
+# signed_in judges the last document, so this one reads as a signed-in login no profile holds.
+printf '{"oauth:tokenCacheV2":"x"} {"oauth:tokenCacheV2":"y"}' > "$d/config.json"
+for run in 'switch usagey' 'add badread-new' 'save badread-new'; do
+  check "$run on a signed-in two-document config exits 1, not a refusal" 1 "$(exit_code cda $run)"
+  check "and names the file" 1 "$(err_of cda $run | grep -c "^Could not read $d/config.json")"
+done
+check "and none quit Desktop" "" "$(cat "$tmp/calls")"
 check_bad_config ''
 chmod 000 "$d/config.json"
 check "add on a config it may not read exits 1" 1 "$(exit_code cda add badread-new)"

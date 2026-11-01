@@ -260,6 +260,7 @@ ${bold}Commands${reset}
                        the OAuth profile, read at most once a day per
                        account, or an hour after a failed request while no
                        name is cached. Give a name to see one account.
+                       Exits 1 without the Command Line Tools.
                        Opt-in; see Cautions. With --json, {"profiles":[{name,
                        plan?, fiveHour? or ultra:true, sevenDay?, scoped?}
                        or {name, error}]}; each window has utilization and
@@ -278,7 +279,8 @@ ${bold}Commands${reset}
                        ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN is set.
                        One ok:, warn: or fail: line per check; exits 1 on any
                        fail:. Reads no Keychain and no network. Without a
-                       working jq it skips the token check and says so.
+                       working jq it skips the config and token checks and
+                       says so.
 
 ${bold}Options${reset}
   --no-relaunch        Leave Desktop quit after save, switch, add or pick,
@@ -333,7 +335,7 @@ ${bold}Cautions${reset}
   - Every command but --version, --help and doctor exits 1 without a working
     jq, before it quits Desktop.
   - save, switch and add exit 1 before they quit Desktop on a config.json jq
-    cannot read as an object. --force does not lift it.
+    cannot read as one object. --force does not lift it.
 EOF
 }
 
@@ -675,6 +677,8 @@ desktop_launch() {
   open -a Claude
 }
 
+# jq -e judges only the last document, so -s makes "[] {}" fail too.
+config_is_one_object() { jq -es 'length == 1 and (.[0] | type == "object")' "$config" > /dev/null 2>&1; }
 signed_in() { jq -e '.["oauth:tokenCacheV2"] | type == "string" and length > 0' "$config" > /dev/null; }
 
 live_account() {
@@ -880,6 +884,7 @@ index_sync() {
 # The password goes to python3 on stdin, never on a command line. System
 # python3 has PBKDF2; macOS's LibreSSL `openssl` lacks `kdf` but has `enc`.
 safe_storage_key() {
+  xcode-select -p > /dev/null 2>&1 || fail "usage needs the Command Line Tools (xcode-select --install)"
   security find-generic-password -w -s "Claude Safe Storage" 2> /dev/null \
     | /usr/bin/python3 -c 'import hashlib, sys; print(hashlib.pbkdf2_hmac("sha1", sys.stdin.buffer.read().rstrip(b"\n"), b"saltysalt", 1003, 16).hex())' \
     || fail "Could not read \"Claude Safe Storage\" from the login Keychain"
@@ -1069,7 +1074,9 @@ doctor_report() {
   if [[ ! -f $config ]]; then
     echo "fail: config: no $config (open Claude Desktop once first)"
     status=1
-  elif [[ -n $jq_works ]] && ! jq -e 'type == "object"' "$config" > /dev/null 2>&1; then
+  elif [[ -z $jq_works ]]; then
+    echo "warn: config: not checked without jq"
+  elif ! config_is_one_object; then
     echo "fail: config: could not read $config as a JSON object"
     status=1
   else
@@ -1415,6 +1422,11 @@ main() {
       ;;
   esac
 
+  # Before the refusals below, which would misread such a file: signed out, or an unsaved login.
+  case $cmd in
+    save | switch | add) config_is_one_object || fail "Could not read $config as a JSON object: nothing changed" ;;
+  esac
+
   case $cmd in
     list)
       if [[ -n $json ]]; then list_json; else list_profiles; fi
@@ -1477,8 +1489,6 @@ main() {
       ;;
   esac
 
-  # signed_in reads an unreadable config as signed out, so switch and add get this far.
-  jq -e 'type == "object"' "$config" > /dev/null 2>&1 || fail "Could not read $config as a JSON object: nothing changed"
   # Everything past here needs the app quit. Relaunch from the trap so an
   # error midway still brings it back. Quitting Desktop from a shell it owns
   # would end that shell mid-switch, so refuse instead.

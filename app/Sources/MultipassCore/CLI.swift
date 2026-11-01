@@ -55,6 +55,10 @@ public struct CLI: CommandRunner {
 
   public var location: String? { executable.path }
 
+  public static func bundledTool(in bundle: Bundle) -> URL? {
+    bundle.url(forResource: "claude-multipass", withExtension: nil)
+  }
+
   public static func locate(
     override: String?,
     bundled: URL? = nil,

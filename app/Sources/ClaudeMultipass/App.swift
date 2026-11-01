@@ -22,7 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       makeRunner: { settings in
         CLI.locate(
           override: settings.cliPathOverride,
-          bundled: Bundle.main.url(forResource: "claude-multipass", withExtension: nil)
+          bundled: CLI.bundledTool(in: .main)
         ).map { CLI(executable: $0) }
       },
       store: SettingsStore(defaults: .standard))

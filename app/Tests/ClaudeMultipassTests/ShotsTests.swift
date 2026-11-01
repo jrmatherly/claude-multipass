@@ -23,7 +23,7 @@ struct FixtureRunner: CommandRunner {
     func out(_ text: String) -> CommandOutput { CommandOutput(stdout: Data(text.utf8), stderr: "") }
     switch args[0] {
     case "--version":
-      if versionFails { throw CLIError.failed(status: 127, stderr: "/opt/homebrew/bin/claude-multipass: line 12: jq: command not found") }
+      if versionFails { throw CLIError.failed(status: 127, stderr: "/opt/homebrew/bin/claude-multipass: line 12: syntax error: bogus line") }
       return out("claude-multipass 0.4.0\n")
     case "list": return out(snapshot)
     case "usage":

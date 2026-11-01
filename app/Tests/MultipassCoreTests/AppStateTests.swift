@@ -160,13 +160,12 @@ private func enabledUsage(_ s: AppState) -> AppSettings {
 }
 
 @Test @MainActor func relocateFailedWhenVersionProbeFails() async {
-  // A non-zero exit (a missing jq), a timeout or stray output is not an old
-  // version; "brew upgrade" would not fix it.
+  // A non-zero exit, a timeout or stray output is not an old version; "brew upgrade" would not fix it.
   let r = FakeRunner()
-  r.fail("--version", .failed(status: 2, stderr: "jq: command not found"))
+  r.fail("--version", .failed(status: 2, stderr: "bogus line"))
   let s = makeState(r)
   await s.relocate()
-  #expect(s.cliStatus == .failed("jq: command not found"))
+  #expect(s.cliStatus == .failed("bogus line"))
   r.fail("--version", .timedOut)
   await s.relocate()
   #expect(s.cliStatus == .failed("the CLI did not finish in time"))
