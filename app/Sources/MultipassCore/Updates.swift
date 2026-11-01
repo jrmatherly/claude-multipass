@@ -79,3 +79,194 @@ public enum ChangeLog {
     return ReleaseNote(version: String(parts[1]), date: String(parts[2].dropFirst().dropLast()), lines: [])
   }
 }
+
+/// What a probe of the feed found. `changelog` is the whole `CHANGELOG.md`.
+public struct FeedItem: Equatable {
+  public let version: String
+  public let changelog: String
+
+  public init(version: String, changelog: String) {
+    self.version = version
+    self.changelog = changelog
+  }
+}
+
+public struct UpdateOffer: Equatable {
+  public let version: String
+  public let notes: [ReleaseNote]
+
+  public init(version: String, notes: [ReleaseNote]) {
+    self.version = version
+    self.notes = notes
+  }
+}
+
+public enum InstallStage: Equatable {
+  case preparing, updatingHomebrew, upgrading, downloading(Double?), extracting, installing, relaunching
+}
+
+public struct UpdateProblem: Equatable {
+  public enum Fallback: Equatable { case command(String), download(URL) }
+  public let message: String
+  public let detail: String?
+  public let fallback: Fallback?
+
+  public init(message: String, detail: String?, fallback: Fallback?) {
+    self.message = message
+    self.detail = detail
+    self.fallback = fallback
+  }
+}
+
+extension UpdateProblem: Error {}
+
+public enum UpdateState: Equatable {
+  case idle, checking, upToDate(Date), available(UpdateOffer)
+  case installing(UpdateOffer, InstallStage), failed(UpdateOffer?, UpdateProblem)
+
+  public var offer: UpdateOffer? {
+    switch self {
+    case .available(let offer), .installing(let offer, _): return offer
+    case .failed(let offer, _): return offer
+    case .idle, .checking, .upToDate: return nil
+    }
+  }
+
+  /// Killing brew between removing and placing a bundle is the one way to
+  /// lose the app. Sparkle's own terminate and the relaunch must still pass.
+  public var blocksQuit: Bool {
+    guard case .installing(_, let stage) = self else { return false }
+    return stage == .updatingHomebrew || stage == .upgrading
+  }
+}
+
+public protocol UpdateFeed: AnyObject {
+  @MainActor func probe() async throws -> FeedItem?
+}
+
+public protocol Installer: AnyObject {
+  /// Returning means the process is about to relaunch. Throws UpdateProblem.
+  @MainActor func install(_ offer: UpdateOffer, report: @escaping @MainActor (InstallStage) -> Void) async throws
+}
+
+/// The one owner of `UpdateState`. Nothing installs but `install`, which only
+/// the Update button calls.
+@MainActor
+public final class UpdateController: ObservableObject {
+  @Published public private(set) var state: UpdateState = .idle
+  @Published public private(set) var checkedAt: Date?
+
+  public static let releasePage = URL(string: "https://github.com/jrmatherly/claude-multipass/releases/latest")!
+
+  /// False for a development build: no update rows.
+  public var isAvailable: Bool { feed != nil && runningVersion != nil }
+  /// Read from disk each time: a menu bar app runs for weeks, and brew can appear under it.
+  public var installKind: InstallKind { detect() }
+
+  private let appState: AppState
+  private let feed: UpdateFeed?
+  private let detect: @MainActor () -> InstallKind
+  private let installer: @MainActor (InstallKind) -> Installer?
+  private let runningVersion: String?
+  private let checkInterval: TimeInterval
+  private let now: () -> Date
+  private var schedule: Task<Void, Never>?
+  /// The probe in flight. Sparkle has one continuation, and it ignores a check
+  /// during a session, so probes never overlap and an install waits for this.
+  private var probing: Task<Void, Never>?
+
+  public init(
+    appState: AppState,
+    feed: UpdateFeed?,
+    detect: @escaping @MainActor () -> InstallKind,
+    installer: @escaping @MainActor (InstallKind) -> Installer?,
+    runningVersion: String?,
+    checkInterval: TimeInterval = 86_400,
+    now: @escaping () -> Date = Date.init
+  ) {
+    self.appState = appState
+    self.feed = feed
+    self.detect = detect
+    self.installer = installer
+    self.runningVersion = runningVersion
+    self.checkInterval = checkInterval
+    self.now = now
+  }
+
+  public func start() {
+    stop()
+    let interval = checkInterval
+    schedule = Task { [weak self] in
+      while !Task.isCancelled {
+        if let self, self.appState.settings.updateChecksEnabled { await self.probe(manual: false) }
+        // The continuous clock, because a closed lid must count toward a daily check.
+        guard (try? await Task.sleep(for: .seconds(interval))) != nil, self != nil else { return }
+      }
+    }
+  }
+
+  public func stop() {
+    schedule?.cancel()
+    schedule = nil
+  }
+
+  public func check() async {
+    await probe(manual: true)
+  }
+
+  /// A scheduled failure changes nothing on screen, since a laptop waking
+  /// offline is not news. A manual one reports and keeps any offer.
+  private func probe(manual: Bool) async {
+    guard let feed, let runningVersion, probing == nil, appState.phase == .idle else { return }
+    let shown = state.offer
+    if manual { state = .checking }
+    let work = Task {
+      defer { probing = nil }
+      do {
+        let item = try await feed.probe()
+        let checked = now()
+        checkedAt = checked
+        if let item, Version.isNewer(item.version, than: runningVersion) {
+          state = .available(UpdateOffer(version: item.version, notes: ChangeLog.notes(in: item.changelog, newerThan: runningVersion)))
+        } else {
+          state = .upToDate(checked)
+        }
+      } catch {
+        if manual { state = .failed(shown, Self.problem(from: error)) }
+      }
+    }
+    probing = work
+    await work.value
+  }
+
+  public func install() async {
+    while let probe = probing { await probe.value }
+    guard let offer = state.offer else { return }
+    if case .installing = state { return }
+    guard let installer = installer(detect()) else {
+      state = .failed(offer, UpdateProblem(message: "Homebrew installed this app, but brew was not found. Download the update instead.", detail: nil, fallback: .download(Self.releasePage)))
+      return
+    }
+    // Before the lock, because beginUpdate can wait out a Keychain prompt and the UI must say so.
+    state = .installing(offer, .preparing)
+    guard await appState.beginUpdate() else {
+      state = .available(offer)
+      return
+    }
+    do {
+      try await installer.install(offer) { [weak self] stage in
+        guard let self, case .installing = self.state else { return }
+        self.state = .installing(offer, stage)
+      }
+      // The phase stays held until the process exits.
+      state = .installing(offer, .relaunching)
+    } catch {
+      state = .failed(offer, Self.problem(from: error))
+      await appState.endUpdate()
+    }
+  }
+
+  private static func problem(from error: Error) -> UpdateProblem {
+    error as? UpdateProblem ?? UpdateProblem(message: error.localizedDescription, detail: nil, fallback: nil)
+  }
+}

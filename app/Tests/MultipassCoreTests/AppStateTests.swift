@@ -77,7 +77,7 @@ final class Gate: @unchecked Sendable {
 }
 
 @MainActor
-private func until(_ condition: () -> Bool) async {
+func until(_ condition: () -> Bool) async {
   for _ in 0..<10_000 {
     if condition() { break }
     await Task.yield()
