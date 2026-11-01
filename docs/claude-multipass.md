@@ -56,7 +56,7 @@ Desktop quits, relaunches signed in as that account, and the Code tab lists both
 | Claude Code sessions (Code tab and terminal) | `~/.claude/projects/<folder>/<session>.jsonl`, one store for every account | Available. `switch` adds the other account's entries to the Code tab's list. Whether Desktop's cross-session tools read the copied entries is not yet checked |
 | The terminal's `claude` login | The login-Keychain item `Claude Code-credentials` (tokens) and `oauthAccount` in `~/.claude.json` (account, org) | Moves with the profile when it holds a CLI login: `switch` swaps the account part of the item and the `oauthAccount` block, under the CLI's own lock dirs, and keeps the shared MCP keys. A `claude` process already running keeps its old token and can write it back on its next refresh, so quit terminal sessions first; `switch` warns when one runs. The Code tab is unchanged |
 | The remember plugin's handoff and auto memory | The repo's `.remember/` and `~/.claude/projects/<folder>/memory/` | Available; both key on the project folder, not the account |
-| Desktop projects (Cowork spaces) | `local-agent-mode-sessions/<account>/<org>/spaces.json` | Not synced yet; a copied session shows outside its project grouping |
+| Desktop projects (Cowork spaces) | Desktop's data folder, per account; the `spaces.json` older versions kept is gone since Desktop 4.29.0 | Not synced yet; a copied session shows outside its project grouping |
 | claude.ai chats, Projects, memory | Anthropic's servers, per account | Stay with their account. Export memory with the verbatim prompt and import it on the other account by hand |
 
 ## Raycast

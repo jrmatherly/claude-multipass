@@ -1,6 +1,6 @@
 # In-app updates design
 
-Status: awaiting Jason's review. Evidence labels: **measured** (run on this Mac on 2026-10-31, macOS 27.2), **source** (read in the vendor's code or docs), **inferred**, **not proven**.
+Status: shipped in 0.10.0, first real updates on 0.10.1. Evidence labels: **measured** (run on this Mac on 2026-10-31, macOS 27.2), **source** (read in the vendor's code or docs), **inferred**, **not proven**.
 
 ## Goal
 

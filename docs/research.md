@@ -23,7 +23,7 @@ Evidence labels: **M** measured on a Mac or in cloned source, **O** official Ant
 
 - App support folder `~/Library/Application Support/Claude/`. `config.json` login keys: `oauth:tokenCache`, `oauth:tokenCacheV2`, `lastKnownAccountUuid`. One login at a time. Plus `Cookies` and `Cookies-journal` (in `Network/` when that folder exists). All encrypted with the app's "Claude Safe Storage" Keychain key, which is per Mac, so profiles don't transfer between Macs.
 - Desktop signs in with its own OAuth flow and ignores `ANTHROPIC_API_KEY`, `apiKeyHelper` and CLI profiles (O). It may ignore `CLAUDE_CONFIG_DIR` (U).
-- Other measured files: `claude_desktop_config.json` (local MCP servers; survival across sign-out is U), `ccd-session-presets.json` keyed `byAccount`, `local-agent-mode-sessions/<accountUuid>/` (with `<org>/spaces.json` and `scheduled-tasks.json`), per-org `archived-sessions.idx` and `scheduled-tasks.json` beside the session pointers (M 2026-10-25), and a claude.ai IndexedDB that is a React Query cache, not chat storage (R). `app.asar` is about 50 MB under the hardened runtime.
+- Other measured files: `claude_desktop_config.json` (local MCP servers; survival across sign-out is U), `ccd-session-presets.json` keyed `byAccount`, `local-agent-mode-sessions/<accountUuid>/` (with `<org>/spaces.json`, gone on Desktop 4.29.0 by the 2026-10-28 measurement, and `scheduled-tasks.json`), per-org `archived-sessions.idx` and `scheduled-tasks.json` beside the session pointers (M 2026-10-25), and a claude.ai IndexedDB that is a React Query cache, not chat storage (R). `app.asar` is about 50 MB under the hardened runtime.
 - `config.json.journal` is the app's write-ahead copy, headed by the sha256 of the `config.json` it came from; the app discards it at startup when the digest no longer matches, as after a switch. Leave it alone.
 
 **Code-tab process environment (M, `ps -E`, names only)**
@@ -67,7 +67,7 @@ Cloned and source-read 2026-10-23, none executed.
 
 ## 4. Recommendation and rejected alternatives
 
-- CLI and VS Code: `uv tool install claude-swap`, manual `cswap switch`, avoid the TUI and `cswap auto`. CCSwitcher is the GUI alternative that never touches the private endpoint. `/login` is the no-tool fallback.
+- CLI and VS Code: `uv tool install claude-swap`, manual `cswap switch`, avoid the TUI and `cswap auto`. CCSwitcher is the GUI alternative that never touches the private endpoint. `/login` is the no-tool fallback. This was the advice on 2026-10-23. Since 0.3.0 `switch` moves the CLI login too, so claude-swap is only an alternative.
 - Desktop: claude-multipass. Commands `list`, `show`, `save`, `add`, `switch`, `sync`, `rename`, `remove`, `usage`, `current`, `pick`, `doctor`. `switch` quits Desktop via AppleScript, re-saves the outgoing login, merges the target's three keys into `config.json` (other keys byte-identical), copies the cookies, union-syncs `local_*.json` across every account folder (newer `lastActivityAt` wins, tombstones honoured, nothing deleted) and relaunches. No private endpoints (except the opt-in `usage`), no daemon, manual by construction.
 - Recall: a transcript-search MCP reading the shared store (obra/episodic-memory ranked first; thedotmack/claude-mem rejected).
 - Routine after a switch: sign Desktop in as the other account, open a new Code-tab session in the same project folder, ask to continue (handoff notes, auto memory, CLAUDE.md, past transcripts), or `claude --resume <id>` and `claude --desktop --resume <id>`.
@@ -93,7 +93,7 @@ Cloned and source-read 2026-10-23, none executed.
 - Quit Desktop before touching `config.json`, `Cookies` or `claude-code-sessions`; `sync` refuses while Desktop runs unless `--force`. A failure after the quit must still relaunch the app; back up `config.json` before every merge.
 - Profiles are per Mac (the Safe Storage key); the files hold only encrypted tokens and a UUID.
 - Never overwrite a saved profile that holds a different account (a reproduced defect, fixed with the `--force` refusal). An empty session list must not crash under bash 3.2 `set -u` (reproduced, fixed). `signed_in` requires a non-empty token string.
-- Pointer sync is add-only; honour `deleted_*` tombstones; never symlink the folders; never touch records owned by a running Desktop; the `projects` and `migration` keys in `spaces.json` are org-bound (not synced).
+- Pointer sync is add-only; honour `deleted_*` tombstones; never symlink the folders; never touch records owned by a running Desktop; the `projects` and `migration` keys in `spaces.json`, a file gone on Desktop 4.29.0, are org-bound (not synced).
 - Keychain: reading the stored token prompts for access; `/usr/bin/security` makes "Always Allow" persist; avoid polling (the issue 496 storm). Identity (`oauthAccount`) must swap together with the token on the CLI side.
 - Do not `/logout` before adding an account to claude-swap. Never use Desktop's own Log out to change accounts; it may revoke the saved token server-side. A stray `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY` or `apiKeyHelper` silently overrides the login or bills the API instead of the subscription.
 - `CLAUDE_CONFIG_DIR` splits history (resume only searches the current dir).
@@ -104,7 +104,6 @@ Cloned and source-read 2026-10-23, none executed.
 ## 7. Future enhancement ideas (not built)
 
 - `--dry-run`; account names or emails in `list` (needs decrypting; today only the UUID prefix shows).
-- Sync Desktop projects (`local-agent-mode-sessions/<account>/<org>/spaces.json`, minus the org-bound `projects` and `migration` keys), the per-org `archived-sessions.idx` and `scheduled-tasks.json`, so copied sessions keep their grouping, archived state and scheduled tasks.
+- Sync Desktop projects (their layout changed in Desktop 4.29.0, so measure it first), the per-org `archived-sessions.idx` and `scheduled-tasks.json`, so copied sessions keep their grouping, archived state and scheduled tasks.
 - Install and configure obra/episodic-memory for recall.
-- Optional claude-swap one-shot commands as shell aliases for the CLI side.
 - A note on switch cost: the first turn after a switch re-sends the transcript (per-account prompt cache).

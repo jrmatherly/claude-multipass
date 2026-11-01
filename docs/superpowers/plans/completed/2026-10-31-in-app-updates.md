@@ -8,7 +8,7 @@
 
 **Tech Stack:** Swift 5 language mode (tools 5.9, SwiftPM, Swift Testing, `FakeRunner`), Sparkle 2.10.1, bash 3.2, GitHub Actions.
 
-**Spec:** `docs/superpowers/specs/2026-10-31-in-app-updates.md`
+**Spec:** `docs/superpowers/specs/completed/2026-10-31-in-app-updates.md`
 
 Line numbers are from `main` at `a4e1e5f`.
 

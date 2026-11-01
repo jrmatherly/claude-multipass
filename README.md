@@ -1,3 +1,4 @@
+<!-- markdownlint-disable-next-line MD033 MD041 -->
 <img src="docs/icon.png" alt="Claude Multipass icon: two open rings with a dot in the gap" width="128" align="right">
 
 # claude-multipass
