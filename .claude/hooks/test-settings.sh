@@ -69,7 +69,8 @@ matches() { # matches <rule...> -- <command>
 asks=(claude-multipass bin/claude-multipass ./bin/claude-multipass "bash bin/claude-multipass" "bash test/../bin/claude-multipass switch w" "/opt/homebrew/bin/claude-multipass save --force w"
   "raycast/switch-claude-account.sh w" "bash raycast/switch-claude-account.sh w"
   '"/Users/x/bin/claude-multipass" switch w' "bash 'bin/claude-multipass' sync")
-for prefix in claude-multipass bin/claude-multipass ./bin/claude-multipass "bash bin/claude-multipass" "$root/bin/claude-multipass"; do
+bundled="/Applications/Claude Multipass.app/Contents/Resources/claude-multipass"
+for prefix in claude-multipass bin/claude-multipass ./bin/claude-multipass "bash bin/claude-multipass" "$root/bin/claude-multipass" "\"$bundled\"" "bash \"$bundled\""; do
   for cmd in switch add save remove rename sync usage pick; do
     asks+=("$prefix $cmd w")
   done
@@ -77,7 +78,7 @@ done
 for c in "${asks[@]}"; do
   matches "${ask_rules[@]}" -- "$c" || fail "permissions.ask does not cover: $c"
 done
-for c in "claude-multipass list" "bin/claude-multipass show w" "bash test/claude-multipass.sh" 'git commit -m "claude-multipass add refuses x"' "shellcheck bin/claude-multipass"; do
+for c in "\"$bundled\" --version" "\"$bundled\" list" "claude-multipass list" "bin/claude-multipass show w" "bash test/claude-multipass.sh" 'git commit -m "claude-multipass add refuses x"' "shellcheck bin/claude-multipass"; do
   ! matches "${ask_rules[@]}" -- "$c" || fail "permissions.ask covers a read-only command: $c"
 done
 for c in "bash test/../bin/claude-multipass switch w" "bash test/other.sh" ".claude/hooks/test-../../bin/claude-multipass switch w"; do
