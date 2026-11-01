@@ -11,6 +11,7 @@ private func stubScript() throws -> URL {
     case "$1" in
       --version) echo "claude-multipass 0.3.0";;
       warn) echo '{"ok":true}'; echo "careful" >&2;;
+      env) printf '%s %s' "$HOMEBREW_NO_ASK" "$TERM";;
       list) echo '{"version":"0.2.0","signedIn":false,"desktopRunning":false,"current":null,"profiles":[]}';;
       switch) echo "refused here" >&2; exit 3;;
       big) head -c 200000 /dev/zero | tr '\\0' x;;
@@ -125,6 +126,11 @@ private func stubScript() throws -> URL {
   #expect(String(decoding: try await cli.run(["save", "x"]), as: UTF8.self) == "saved\n")
   #expect(String(decoding: try await cli.run(["usage", "--json"]), as: UTF8.self) == "usage\n")
   await #expect(throws: CLIError.timedOut) { try await cli.run(["doctor"]) }
+}
+
+@Test func extraEnvironmentReachesTheCommand() async throws {
+  let cli = CLI(executable: try stubScript(), extraEnvironment: ["HOMEBREW_NO_ASK": "1", "TERM": "xterm"])
+  #expect(String(decoding: try await cli.run(["env"]), as: UTF8.self) == "1 xterm")
 }
 
 @Test func versionCompare() {
