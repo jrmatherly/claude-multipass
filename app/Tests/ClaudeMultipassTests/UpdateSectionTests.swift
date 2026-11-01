@@ -59,6 +59,7 @@ private func ink(_ view: some View) throws -> CGFloat {
     "[x](x-apple.systempreferences:com.apple.preference.security)",
     "[x](//example.com/a)",
     "[x](/etc/passwd)",
+    "[x](http://example.com)",
   ])
   func aFeedLinkThatIsNotHttpsIsNotALink(line: String) {
     #expect(releaseNoteText(line).runs.allSatisfy { $0.link == nil })

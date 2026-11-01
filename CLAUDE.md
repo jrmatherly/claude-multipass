@@ -28,7 +28,7 @@ app/                     the menu bar app, a Swift package: Sources/MultipassCor
 scripts/                 build-app.sh (swift build, bundle, sign, optional DMG), compile-icon.sh (app/AppIcon.icon to Assets.car and AppIcon.icns with actool), sign-mac-app.sh (copied from ai-kb)
 docs/                    claude-multipass.md (how it works, for users), research.md (scrubbed research digest), superpowers/ (specs and plans)
 .claude/                 settings.json (permissions, hooks), hooks/ (lint and commit gate with self-checks), rules/, skills/, agents/
-.github/workflows/       check.yml (pnpm check on PRs and main), release.yml (on v* tags: build, sign, notarize, upload the DMG)
+.github/workflows/       check.yml (pnpm check and an unsigned scripts/build-app.sh on PRs and main), release.yml (on v* tags: build, sign, notarize, upload the DMG)
 private/                 git-ignored research and notes, never published
 ```
 
