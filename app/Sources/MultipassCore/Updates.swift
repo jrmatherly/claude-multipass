@@ -149,6 +149,83 @@ public protocol Installer: AnyObject {
   @MainActor func install(_ offer: UpdateOffer, report: @escaping @MainActor (InstallStage) -> Void) async throws
 }
 
+/// Upgrades the formula and the cask, then relaunches. The disk decides the
+/// outcome, not brew's exit code: brew can exit 0 and leave the old version, or
+/// time out after the new one landed.
+public final class BrewInstaller: Installer {
+  public static let environment = [
+    "HOMEBREW_NO_ASK": "1",
+    "HOMEBREW_NO_AUTO_UPDATE": "1",
+    "HOMEBREW_NO_INSTALL_CLEANUP": "1",
+    "HOMEBREW_NO_ENV_HINTS": "1",
+  ]
+  private static let packages = ["jrmatherly/tap/claude-multipass", "jrmatherly/tap/claude-multipass-app"]
+  public static let command = "brew update && brew upgrade " + packages.joined(separator: " ")
+
+  private let runner: CommandRunner
+  private let appURL: URL
+  private let diskVersion: (URL) -> String?
+  private let relaunch: (URL) -> Void
+
+  public init(runner: CommandRunner, appURL: URL, diskVersion: @escaping (URL) -> String?, relaunch: @escaping (URL) -> Void) {
+    self.runner = runner
+    self.appURL = appURL
+    self.diskVersion = diskVersion
+    self.relaunch = relaunch
+  }
+
+  @MainActor
+  public func install(_ offer: UpdateOffer, report: @escaping @MainActor (InstallStage) -> Void) async throws {
+    let landed = { (disk: String) in Version.components(disk) != nil && !Version.isNewer(offer.version, than: disk) }
+    var failure: Error?
+    var warnings = ""
+    // A terminal `brew upgrade` may have got here first.
+    if diskVersion(appURL).map(landed) != true {
+      report(.updatingHomebrew)
+      // Any one stale tap fails `brew update`, so the upgrade still gets its chance.
+      do { _ = try await runner.run(["update", "--quiet"]) } catch { failure = error }
+      report(.upgrading)
+      do { warnings = try await runner.runCapturing(["upgrade"] + Self.packages).stderr } catch { failure = error }
+    }
+    let detail = Self.tail(of: failure, warnings: warnings)
+    guard let disk = diskVersion(appURL) else {
+      throw UpdateProblem(message: "The app could not be read from disk after Homebrew ran. Download it to reinstall.", detail: detail, fallback: .download(UpdateController.releasePage))
+    }
+    guard landed(disk) else {
+      throw UpdateProblem(message: Self.message(for: failure, detail: detail, disk: disk), detail: detail, fallback: .command(Self.command))
+    }
+    report(.relaunching)
+    relaunch(appURL)
+  }
+
+  private static func message(for failure: Error?, detail: String?, disk: String) -> String {
+    switch failure {
+    case nil:
+      return "Homebrew finished, but the app on disk is still \(disk)."
+    case CLIError.timedOut?:
+      return "Homebrew did not finish in time. The app on disk is still \(disk)."
+    default:
+      let denied = detail?.contains("Operation not permitted") == true
+      return "Homebrew could not update the app." + (denied ? " macOS may be blocking this. Check System Settings, Privacy and Security, App Management." : "")
+    }
+  }
+
+  private static func tail(of failure: Error?, warnings: String) -> String? {
+    let text: String
+    switch failure {
+    case nil:
+      text = warnings
+    case CLIError.timedOut?:
+      return nil
+    case CLIError.failed(_, let stderr)?, CLIError.refused(let stderr)?:
+      text = stderr
+    case let other?:
+      text = other.localizedDescription
+    }
+    return text.isEmpty ? nil : text.split(separator: "\n", omittingEmptySubsequences: false).suffix(20).joined(separator: "\n")
+  }
+}
+
 /// The one owner of `UpdateState`. Nothing installs but `install`, which only
 /// the Update button calls.
 @MainActor
