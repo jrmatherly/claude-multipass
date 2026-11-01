@@ -9,6 +9,11 @@
 # The app module uses SwiftUI macros whose compiler plugin only Xcode ships, so
 # when xcode-select points at the Command Line Tools and Xcode is installed the
 # build goes through Xcode's developer dir (test/check.sh does the same).
+#
+# Environment, all optional, for the update rehearsal:
+#   APP_VERSION           default: package.json
+#   APP_BUNDLE_ID         default: net.matherly.claude-multipass
+#   SPARKLE_PUBLIC_KEY    default: the key whose seed signs real releases
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -29,7 +34,9 @@ if [[ -z ${DEVELOPER_DIR:-} && ! -e "$(xcode-select -p)/$swiftui_plugin" && -e /
   export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 fi
 
-version=$(jq -r .version package.json)
+version=${APP_VERSION:-$(jq -r .version package.json)}
+bundle_id=${APP_BUNDLE_ID:-net.matherly.claude-multipass}
+sparkle_key=${SPARKLE_PUBLIC_KEY:-lbhBShOOk5mkUbxO/Ln3Cc6N8USH2EC57/L5+/JvBs0=}
 app="dist/Claude Multipass.app"
 
 swift build --package-path app -c release
@@ -45,6 +52,12 @@ tool_version=$(sed -n 's/^version=//p' bin/claude-multipass)
   echo "build-app: the bundled tool does not report version $tool_version" >&2
   exit 1
 }
+sed -i '' -e "s/@BUNDLE_ID@/$bundle_id/g" -e "s|@SPARKLE_PUBLIC_KEY@|$sparkle_key|g" "$app/Contents/Info.plist"
+sparkle="$app/Contents/Frameworks/Sparkle.framework"
+ditto app/.build/release/Sparkle.framework "$sparkle"
+# The XPC services only serve a sandboxed app, and this one is not sandboxed.
+rm -rf "$sparkle/Versions/B/XPCServices" "$sparkle/XPCServices"
+cp app/.build/artifacts/sparkle/Sparkle/LICENSE "$app/Contents/Resources/Sparkle-LICENSE"
 MACOS_SIGN_ENTITLEMENTS="$PWD/app/ClaudeMultipass.entitlements" bash scripts/sign-mac-app.sh sign-app "$app"
 echo "build-app: $app ($version)"
 
