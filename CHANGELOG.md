@@ -3,6 +3,10 @@
 ## Unreleased
 
 - The menu bar app has an icon: two open rings with a dot passing through the gap, taken from the menu bar gauge. On macOS 26 and later it has a dark version and a tinted one, and earlier versions get an `.icns`. The bundle had no icon, so launchers showed a blank tile.
+- The menu bar app carries the tool inside its bundle and uses that copy when no Homebrew tool is found, so a DMG install works without Homebrew and no longer shows `CLI ?`. On macOS 14, and on any Mac without `/usr/bin/jq`, it also needs `jq`, and turning usage on needs the Command Line Tools. A Homebrew tool still wins, so the app and the terminal run the same script.
+- Without a working `jq`, every command but `--version`, `--help` and `doctor` exits 1 with a message naming `jq`, before Desktop quits. `current` printed `signed out` for a signed-in login, and `add` skipped its unsaved-login refusal and quit Desktop. `doctor` without a working `jq` says it did not check the config or the saved tokens, and no longer calls each token empty.
+- `save`, `switch` and `add` exit 1 before Desktop quits on a `config.json` that `jq` cannot read as one object, and `--force` does not lift it. `list`, `current` and `usage` answer on such a file as before, and `doctor` reports it as a `fail:` line.
+- `usage` without the Command Line Tools exits 1 and says it needs them, before any Keychain read. It blamed the Keychain, because the `/usr/bin/python3` shim failed in the same step.
 
 ## 0.9.0 (2026-10-31)
 

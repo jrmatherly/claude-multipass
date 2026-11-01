@@ -34,11 +34,17 @@ app="dist/Claude Multipass.app"
 
 swift build --package-path app -c release
 rm -rf "$app"
-mkdir -p "$app/Contents/MacOS"
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp app/.build/release/ClaudeMultipass "$app/Contents/MacOS/ClaudeMultipass"
+install -m 755 bin/claude-multipass "$app/Contents/Resources/claude-multipass"
 sed "s/@VERSION@/$version/g" app/Info.plist.in > "$app/Contents/Info.plist"
 bash scripts/compile-icon.sh "$app/Contents/Resources"
 printf 'APPL????' > "$app/Contents/PkgInfo"
+tool_version=$(sed -n 's/^version=//p' bin/claude-multipass)
+[[ $("$app/Contents/Resources/claude-multipass" --version) == "claude-multipass $tool_version" ]] || {
+  echo "build-app: the bundled tool does not report version $tool_version" >&2
+  exit 1
+}
 MACOS_SIGN_ENTITLEMENTS="$PWD/app/ClaudeMultipass.entitlements" bash scripts/sign-mac-app.sh sign-app "$app"
 echo "build-app: $app ($version)"
 

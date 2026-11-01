@@ -55,14 +55,19 @@ public struct CLI: CommandRunner {
 
   public var location: String? { executable.path }
 
+  public static func bundledTool(in bundle: Bundle) -> URL? {
+    bundle.url(forResource: "claude-multipass", withExtension: nil)
+  }
+
   public static func locate(
     override: String?,
+    bundled: URL? = nil,
     isExecutable: (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) }
   ) -> URL? {
     if let override, !override.isEmpty, isExecutable(override) {
       return URL(fileURLWithPath: override)
     }
-    return candidates.first(where: isExecutable).map { URL(fileURLWithPath: $0) }
+    return (candidates + (bundled.map { [$0.path] } ?? [])).first(where: isExecutable).map { URL(fileURLWithPath: $0) }
   }
 
   public func runCapturing(_ args: [String]) async throws -> CommandOutput {
