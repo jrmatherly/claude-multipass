@@ -46,6 +46,10 @@ swift test --package-path app > "$swift_log" 2>&1 || {
   exit 1
 }
 rm -f "$swift_log"
+# The app icon compiles with this Xcode, or a tag finds out in release.yml
+icon_out=$(mktemp -d)
+bash scripts/compile-icon.sh "$icon_out"
+rm -rf "$icon_out"
 # the Claude Code hooks against sample payloads, and their wiring
 for hook_check in .claude/hooks/test-*.sh; do
   bash "$hook_check" > /dev/null

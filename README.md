@@ -1,3 +1,5 @@
+<img src="docs/icon.png" alt="Claude Multipass icon: two open rings with a dot in the gap" width="128" align="right">
+
 # claude-multipass
 
 Switch the Claude Desktop app on macOS between several claude.ai accounts without typing an email code each time, and keep every account's Claude Code sessions listed in the Code tab after a switch.
