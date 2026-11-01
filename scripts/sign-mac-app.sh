@@ -1,7 +1,7 @@
 #!/bin/bash
 # sign-mac-app.sh - Developer ID signing and notarization for the menu bar app and its DMG.
-# Copied from jrmatherly/ai-kb (scripts/sign-mac-app.sh), with MACOS_SIGN_ENTITLEMENTS and the Sparkle parts added.
-# The only place the repository calls codesign, notarytool or stapler.
+# Copied from jrmatherly/ai-kb (scripts/sign-mac-app.sh), with MACOS_SIGN_ENTITLEMENTS, the Sparkle parts and the timestamp retry added.
+# The only place the repository signs or notarizes; release.yml also runs codesign --verify.
 #
 #   sign-mac-app.sh sign-app <App.app>   sign with the hardened runtime and verify, then notarize,
 #                                        staple and assess with spctl
@@ -57,7 +57,7 @@ esac
 
 identity="${MACOS_SIGN_IDENTITY:-}"
 if [ -z "$identity" ]; then
-  identity=$({ security find-identity -v -p codesigning 2> /dev/null || true; } \
+  identity=$({ security find-identity -v -p codesigning 2> /dev/null || echo "sign-mac-app: security find-identity failed" >&2; } \
     | sed -n '/"Developer ID Application: /{s/^[^"]*"\(.*\)"$/\1/p;q;}')
 fi
 if [ -z "$identity" ]; then
@@ -81,6 +81,7 @@ notarize_file() {
   out=$(xcrun notarytool submit "$1" --key "$key" --key-id "${APPLE_API_KEY_ID:-}" \
     --issuer "${APPLE_API_ISSUER_ID:-}" --wait --timeout 30m --output-format json) \
     || {
+      echo "$out" >&2
       echo "sign-mac-app: notarytool submit failed for $1" >&2
       exit 1
     }
@@ -96,17 +97,16 @@ notarize_file() {
 # Apple's timestamp service can fail and then pass with nothing changed, twice in a
 # row on 2026-11-01. Any other failure stops at once. --force makes a retry safe.
 sign_part() {
-  local attempt err
+  local attempt err rc
   for attempt in 1 2 3 4; do
-    if err=$(codesign --force --timestamp "$@" 2>&1); then
-      echo "$err" >&2
-      return 0
-    fi
-    echo "$err" >&2
-    [[ $err == *'A timestamp was expected but was not found'* ]] || exit 1
+    rc=0
+    err=$(codesign --force --timestamp "$@" 2>&1) || rc=$?
+    [ -z "$err" ] || echo "$err" >&2
+    [ "$rc" != 0 ] || return 0
+    [[ $err == *'A timestamp was expected but was not found'* ]] || exit "$rc"
     [ "$attempt" = 4 ] || sleep 15
   done
-  exit 1
+  exit "$rc"
 }
 
 case "$mode" in

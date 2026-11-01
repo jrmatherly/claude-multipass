@@ -1,7 +1,7 @@
 #!/bin/bash
 #
-# The whole gate: shell syntax, ShellCheck, formatting, the tool's fixture
-# self-check, the hook self-checks and the bin/ header rule. Run: pnpm check
+# The whole gate: shell syntax, ShellCheck, formatting, the self-checks, the
+# app's tests, the icon and the repo's own rules. Run: pnpm check
 # A glob that matches nothing stays literal, so a missing script fails here
 # instead of being skipped.
 
