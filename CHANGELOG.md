@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.10.2 (2026-11-01)
 
 - A warning a switch or save leaves in the popover clears on Refresh, and when you close a popover that opened on it. Desktop takes focus and closes the popover just after a switch, so a warning that arrives then shows at the next open. It describes the moment of the switch, such as a Claude Code process that has since quit, and used to stay until the next switch.
 
