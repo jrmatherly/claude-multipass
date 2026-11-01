@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- The menu bar app has an icon: two open rings with a dot passing through the gap, taken from the menu bar gauge. On macOS 26 and later it has a dark version and a tinted one, and earlier versions get an `.icns`. The bundle had no icon, so launchers showed a blank tile.
+
 ## 0.9.0 (2026-10-31)
 
 - With usage on, hovering a "Switch to" row with a fetched report shows a small panel beside the popover with that account's plan and weekly reset, then its 5-hour countdown and bars or its fetch error. The row's tooltip is gone, since a tooltip never showed in this popover while the app was inactive. The figures come from the last fetch, so hovering starts no fetch.
