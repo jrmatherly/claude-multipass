@@ -41,11 +41,13 @@ public struct CLI: CommandRunner {
   /// an Automation or Keychain prompt the user has not answered yet, and
   /// usage on its Safe Storage read.
   public let mutatingTimeout: TimeInterval
+  public let extraEnvironment: [String: String]
 
-  public init(executable: URL, timeout: TimeInterval = 120, mutatingTimeout: TimeInterval = 600) {
+  public init(executable: URL, timeout: TimeInterval = 120, mutatingTimeout: TimeInterval = 600, extraEnvironment: [String: String] = [:]) {
     self.executable = executable
     self.timeout = timeout
     self.mutatingTimeout = mutatingTimeout
+    self.extraEnvironment = extraEnvironment
   }
 
   /// The short timeout's commands; anything else, a new command included, gets the long one.
@@ -79,6 +81,7 @@ public struct CLI: CommandRunner {
     let home = FileManager.default.homeDirectoryForCurrentUser.path
     env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:\(home)/.local/bin:" + (env["PATH"] ?? "/usr/bin:/bin")
     env["TERM"] = "dumb"
+    env.merge(extraEnvironment) { _, extra in extra }
     process.environment = env
     let stdout = Pipe()
     let stderr = Pipe()
@@ -149,9 +152,7 @@ public struct CLI: CommandRunner {
 
   /// At least 0.3.0 (cliSaved and the CLI warnings), compared per numeric component.
   public static func isSupported(_ version: String) -> Bool {
-    let parts = version.split(separator: ".").map { Int($0) }
-    guard parts.count >= 2, !parts.contains(nil) else { return false }
-    let nums = parts.compactMap { $0 }
+    guard let nums = Version.components(version), nums.count >= 2 else { return false }
     return nums.lexicographicallyPrecedes([0, 3, 0]) == false
   }
 

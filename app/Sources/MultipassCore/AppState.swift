@@ -1,7 +1,7 @@
 import Foundation
 
 public enum Phase: Equatable {
-  case idle, switching(String), saving(String)
+  case idle, switching(String), saving(String), updating
 }
 
 /// `failed` carries why the version probe got no version: a timeout, a
@@ -227,6 +227,21 @@ public final class AppState: ObservableObject {
     mainTask = nil
     snapshotTask = nil
     usageTask = nil
+  }
+
+  /// False unless idle. Holds the phase before waiting, as `act` does, so
+  /// nothing starts while a usage run finishes on its Keychain prompt.
+  public func beginUpdate() async -> Bool {
+    guard phase == .idle else { return false }
+    phase = .updating
+    await usageFetch?.value
+    return true
+  }
+
+  /// A failed upgrade may still have moved the formula, so the tool is probed again.
+  public func endUpdate() async {
+    phase = .idle
+    await relocate()
   }
 
   private func act(_ name: String, phase: Phase, args: [String]) async {

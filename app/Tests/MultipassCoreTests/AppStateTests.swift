@@ -77,7 +77,7 @@ final class Gate: @unchecked Sendable {
 }
 
 @MainActor
-private func until(_ condition: () -> Bool) async {
+func until(_ condition: () -> Bool) async {
   for _ in 0..<10_000 {
     if condition() { break }
     await Task.yield()
@@ -551,6 +551,67 @@ private func enabledUsage(_ s: AppState) -> AppSettings {
   gate.open()
   await switching.value
   #expect(r.calls == [["switch", "alpha"], ["list", "--json"]])
+}
+
+@Test @MainActor func switchIsBlockedDuringAnUpdate() async {
+  let (s, r) = await readyState()
+  #expect(await s.beginUpdate())
+  #expect(s.phase == .updating)
+  await s.switchTo("alpha")
+  await s.saveCurrent(as: "gamma")
+  await s.refreshAll()
+  #expect(r.calls.isEmpty)
+  await s.endUpdate()
+  #expect(s.phase == .idle)
+}
+
+@Test @MainActor func updateCannotStartDuringASwitch() async {
+  let (s, r) = await readyState()
+  let gate = Gate()
+  r.onCall = { args in if args[0] == "switch" { await gate.wait() } }
+  let switching = Task { await s.switchTo("alpha") }
+  await until { r.calls.count == 1 }
+  #expect(await s.beginUpdate() == false)
+  #expect(s.phase == .switching("alpha"))
+  gate.open()
+  await switching.value
+}
+
+@Test @MainActor func updateCannotStartTwice() async {
+  let (s, _) = await readyState()
+  #expect(await s.beginUpdate())
+  #expect(await s.beginUpdate() == false)
+}
+
+@Test @MainActor func updateWaitsOutAUsageFetch() async {
+  let (s, r) = await readyState()
+  await s.apply(enabledUsage(s))
+  r.clearCalls()
+  let gate = Gate()
+  r.onCall = { args in if args[0] == "usage" { await gate.wait() } }
+  let usage = Task { await s.refreshUsage() }
+  await until { r.calls.count == 1 }
+  var began = false
+  let update = Task {
+    let ok = await s.beginUpdate()
+    began = true
+    return ok
+  }
+  await until { s.phase == .updating }
+  for _ in 0..<100 { await Task.yield() }
+  #expect(!began)
+  gate.open()
+  #expect(await update.value)
+  await usage.value
+}
+
+@Test @MainActor func endUpdateProbesTheToolAgain() async {
+  let (s, r) = await readyState()
+  #expect(await s.beginUpdate())
+  r.answer("--version", "claude-multipass 0.4.0\n")
+  await s.endUpdate()
+  #expect(r.calls.contains(["--version"]))
+  #expect(s.cliStatus == .ready("0.4.0"))
 }
 
 @Test @MainActor func switchWaitsOutAUsageRun() async {
