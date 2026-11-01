@@ -75,6 +75,6 @@ Usage is off by default. It covers the rings' fill and the percentage in the str
 
 ## Development
 
-`pnpm check` is the gate: `bash -n`, ShellCheck, Prettier, the fixture self-check (`test/claude-multipass.sh`, which stubs the app, Keychain and network and never touches the real Desktop folder), the Claude Code hook self-checks, and the menu bar app's `swift test` (which needs Xcode, not only the Command Line Tools, for the SwiftUI macro plugin). CI runs it on macOS for every pull request and push to `main`.
+`pnpm check` is the gate: `bash -n`, ShellCheck, Prettier, the fixture self-check (`test/claude-multipass.sh`, which stubs the app, Keychain and network and never touches the real Desktop folder), the Claude Code hook self-checks, the menu bar app's `swift test` (which needs Xcode, not only the Command Line Tools, for the SwiftUI macro plugin), and the app icon's compile (`scripts/compile-icon.sh`, which also needs Xcode, for `actool`). CI runs it on macOS for every pull request and push to `main`.
 
 The mechanism follows [SnlperStripes/claude-account-switcher](https://github.com/SnlperStripes/claude-account-switcher) (Desktop login swap and session-list sync) and the token scheme shared by [realiti4/claude-swap](https://github.com/realiti4/claude-swap) and [XueshiQiao/CCSwitcher](https://github.com/XueshiQiao/CCSwitcher). MIT licence.

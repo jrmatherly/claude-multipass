@@ -1,6 +1,7 @@
 #!/bin/bash
-# Compile app/AppIcon.icon (Icon Composer's format) into <dir>/Assets.car, which
-# macOS 26 and later read, and <dir>/AppIcon.icns, which earlier versions read.
+# Compile app/AppIcon.icon (Icon Composer's format) into <dir>/Assets.car, the
+# layered icon for macOS 26 and later, and <dir>/AppIcon.icns, the flat one for
+# earlier versions.
 # Needs Xcode's actool; build-app.sh and test/check.sh set DEVELOPER_DIR for it.
 #
 #   scripts/compile-icon.sh <dir>
@@ -12,7 +13,7 @@ set -euo pipefail
 }
 out=$1
 mkdir -p "$out"
-# actool resolves a relative path against a directory of its own, not the caller's
+# actool resolved a relative path against an earlier run's directory, not the caller's (measured)
 out=$(cd "$out" && pwd)
 rm -f "$out/Assets.car" "$out/AppIcon.icns"
 # Info.plist.in already names the icon, so nothing reads the partial plist

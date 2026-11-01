@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- The menu bar app has an icon: two open rings with a dot passing through the gap, taken from the menu bar gauge. It has default, dark, tinted and clear versions on macOS 26 and later, and an `.icns` on earlier versions. The bundle had no icon, so launchers showed a blank tile.
+- The menu bar app has an icon: two open rings with a dot passing through the gap, taken from the menu bar gauge. On macOS 26 and later it has a dark version and a tinted one, and earlier versions get an `.icns`. The bundle had no icon, so launchers showed a blank tile.
 
 ## 0.9.0 (2026-10-31)
 

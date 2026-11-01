@@ -1,7 +1,8 @@
 #!/bin/bash
 # Build the menu bar app: swift build in release, assemble dist/Claude Multipass.app
-# from app/Info.plist.in, sign it with scripts/sign-mac-app.sh (unsigned when no
-# Developer ID identity exists), and with --dmg package, sign and notarize a DMG.
+# from app/Info.plist.in and the compiled icon, sign it with scripts/sign-mac-app.sh
+# (unsigned when no Developer ID identity exists), and with --dmg package, sign and
+# notarize a DMG.
 #
 #   scripts/build-app.sh [--dmg]
 #
