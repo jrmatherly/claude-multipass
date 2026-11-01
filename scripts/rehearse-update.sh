@@ -72,7 +72,8 @@ new_dmg=$work/feed/$(basename "$new_dmg")
 
 {
   printf '# Changelog\n\n## 0.0.2 (%s)\n\n- The rehearsal build.\n\n' "$(date +%Y-%m-%d)"
-  cat CHANGELOG.md
+  # Past the file's own title, which would read as a line of the new section.
+  tail -n +2 CHANGELOG.md
 } > "$work/CHANGELOG.md"
 port=$(/usr/bin/python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
 feed_key=$seed
