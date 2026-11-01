@@ -52,3 +52,68 @@ import Testing
   #expect(notes[0].lines.isEmpty)
   #expect(notes[1].lines == ["A bullet that wraps", "onto a second source line.", "Another bullet."])
 }
+
+/// A Homebrew prefix and an installed bundle under one temp folder.
+private func installFixture() throws -> (prefix: URL, bundle: URL) {
+  let root = FileManager.default.temporaryDirectory.appendingPathComponent("install-kind-\(UUID().uuidString)")
+  let bundle = root.appendingPathComponent("Applications/Claude Multipass.app")
+  try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true)
+  return (root.appendingPathComponent("prefix"), bundle)
+}
+
+private func linkCask(in prefix: URL, to target: URL) throws {
+  let dir = prefix.appendingPathComponent("Caskroom/claude-multipass-app/0.9.0")
+  try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+  try FileManager.default.createSymbolicLink(at: dir.appendingPathComponent("Claude Multipass.app"), withDestinationURL: target)
+}
+
+private func addBrew(to prefix: URL) throws -> URL {
+  let bin = prefix.appendingPathComponent("bin")
+  try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+  let brew = bin.appendingPathComponent("brew")
+  try "#!/bin/sh\n".write(to: brew, atomically: true, encoding: .utf8)
+  try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: brew.path)
+  return brew
+}
+
+@Test func caskSymlinkToThisBundleIsHomebrew() throws {
+  let (prefix, bundle) = try installFixture()
+  try linkCask(in: prefix, to: bundle)
+  let brew = try addBrew(to: prefix)
+  #expect(InstallKind.detect(bundleURL: bundle, version: "0.9.0", prefixes: [prefix]) == .homebrew(brew: brew))
+  // Bundle.main.bundleURL ends in a slash, and the temp folder is itself behind a /private link.
+  let asBundleMainGivesIt = URL(fileURLWithPath: bundle.path, isDirectory: true)
+  #expect(InstallKind.detect(bundleURL: asBundleMainGivesIt, version: "0.9.0", prefixes: [prefix]) == .homebrew(brew: brew))
+  let realPath = URL(fileURLWithPath: "/private" + bundle.path)
+  #expect(InstallKind.detect(bundleURL: realPath, version: "0.9.0", prefixes: [prefix]) == .homebrew(brew: brew))
+}
+
+@Test func caskSymlinkToAnotherBundleIsDirect() throws {
+  let (prefix, bundle) = try installFixture()
+  let other = bundle.deletingLastPathComponent().appendingPathComponent("Other/Claude Multipass.app")
+  try FileManager.default.createDirectory(at: other, withIntermediateDirectories: true)
+  try linkCask(in: prefix, to: other)
+  _ = try addBrew(to: prefix)
+  #expect(InstallKind.detect(bundleURL: bundle, version: "0.9.0", prefixes: [prefix]) == .direct)
+}
+
+@Test func caskroomWithoutBrewIsHomebrewMissing() throws {
+  let (prefix, bundle) = try installFixture()
+  try linkCask(in: prefix, to: bundle)
+  #expect(InstallKind.detect(bundleURL: bundle, version: "0.9.0", prefixes: [prefix]) == .homebrewMissing)
+}
+
+@Test func noCaskroomIsDirect() throws {
+  let (prefix, bundle) = try installFixture()
+  _ = try addBrew(to: prefix)
+  #expect(InstallKind.detect(bundleURL: bundle, version: "0.9.0", prefixes: [prefix]) == .direct)
+}
+
+@Test func missingVersionOrNonAppBundleIsDevelopment() throws {
+  let (prefix, bundle) = try installFixture()
+  try linkCask(in: prefix, to: bundle)
+  _ = try addBrew(to: prefix)
+  #expect(InstallKind.detect(bundleURL: bundle, version: nil, prefixes: [prefix]) == .development)
+  let debug = bundle.deletingLastPathComponent().appendingPathComponent("debug")
+  #expect(InstallKind.detect(bundleURL: debug, version: "0.9.0", prefixes: [prefix]) == .development)
+}

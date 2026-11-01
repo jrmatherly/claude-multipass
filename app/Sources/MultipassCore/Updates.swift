@@ -16,6 +16,31 @@ public enum Version {
   }
 }
 
+/// How this bundle got here, which decides who may replace it.
+public enum InstallKind: Equatable {
+  case homebrew(brew: URL), homebrewMissing, direct, development
+
+  /// Stat only, never a subprocess. A second copy of the app beside a cask
+  /// install is `direct`, since only the cask's own symlink proves brew owns it.
+  public static func detect(
+    bundleURL: URL,
+    version: String?,
+    prefixes: [URL] = [URL(fileURLWithPath: "/opt/homebrew"), URL(fileURLWithPath: "/usr/local")]
+  ) -> InstallKind {
+    guard version != nil, bundleURL.pathExtension == "app" else { return .development }
+    let fm = FileManager.default
+    let bundle = bundleURL.resolvingSymlinksInPath().path
+    for prefix in prefixes {
+      let cask = prefix.appendingPathComponent("Caskroom/claude-multipass-app")
+      let versions = (try? fm.contentsOfDirectory(at: cask, includingPropertiesForKeys: nil)) ?? []
+      guard versions.contains(where: { $0.appendingPathComponent("Claude Multipass.app").resolvingSymlinksInPath().path == bundle }) else { continue }
+      let brew = prefix.appendingPathComponent("bin/brew")
+      return fm.isExecutableFile(atPath: brew.path) ? .homebrew(brew: brew) : .homebrewMissing
+    }
+    return .direct
+  }
+}
+
 /// One version's section of `CHANGELOG.md`.
 public struct ReleaseNote: Equatable, Identifiable {
   public let version: String
