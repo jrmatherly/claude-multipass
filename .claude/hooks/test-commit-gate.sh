@@ -21,9 +21,13 @@ fail() {
 chmod +x "$proj/test/check.sh"
 cp "$hook" "$proj/.claude/hooks/commit-gate.sh"
 git -C "$proj" init -q
+# In the repo's own config, so no commit below uses the host's signing or hooks
+git -C "$proj" config user.name test
+git -C "$proj" config user.email test@example.com
+git -C "$proj" config commit.gpgsign false
+git -C "$proj" config core.hooksPath /dev/null
 git -C "$proj" add test/check.sh .claude/hooks/commit-gate.sh
-git -C "$proj" -c user.name=test -c user.email=test@example.com \
-  -c commit.gpgsign=false -c core.hooksPath=/dev/null commit -qm init
+git -C "$proj" commit -qm init
 
 # Stub pnpm: records that the check ran, exits with $STATE/check-rc
 cat > "$tmp/bin/pnpm" << EOF
