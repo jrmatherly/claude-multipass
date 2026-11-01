@@ -30,6 +30,13 @@ shellcheck --severity=warning "${shell_scripts[@]}"
 prettier --log-level warn --ignore-unknown --check "**/*.{js,cjs,ts,md,json,sh}" "bin/*" ".github/**/*.yml"
 # bin/claude-multipass against a fixture Desktop folder (never the real one)
 bash test/claude-multipass.sh > /dev/null
+# scripts/make-appcast.sh and scripts/verify-appcast.sh
+bash test/appcast.sh > /dev/null
+# make-appcast.sh refuses this, and a tag would find out only after notarizing
+if grep -qF ']]>' CHANGELOG.md; then
+  echo "check: CHANGELOG.md contains ]]>, which would end the appcast's CDATA section" >&2
+  exit 1
+fi
 # The menu bar app, a debug build and its tests. The app module uses SwiftUI
 # macros whose compiler plugin only Xcode ships (the Command Line Tools have
 # the Testing plugin but not libSwiftUIMacros), so when xcode-select points at

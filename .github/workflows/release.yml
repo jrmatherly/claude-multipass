@@ -45,7 +45,7 @@ jobs:
           HOMEBREW_NO_ANALYTICS: 1
       - name: Check the tag, the changelog and the release secrets
         env:
-          HAS_SECRETS: ${{ secrets.MACOS_CERT_P12 != '' && secrets.MACOS_CERT_PASSWORD != '' && secrets.APPLE_API_KEY_ID != '' && secrets.APPLE_API_ISSUER_ID != '' && secrets.APPLE_API_KEY_P8 != '' }}
+          HAS_SECRETS: ${{ secrets.MACOS_CERT_P12 != '' && secrets.MACOS_CERT_PASSWORD != '' && secrets.APPLE_API_KEY_ID != '' && secrets.APPLE_API_ISSUER_ID != '' && secrets.APPLE_API_KEY_P8 != '' && secrets.SPARKLE_ED_KEY != '' }}
         run: |
           version=$(jq -r .version package.json)
           if [ "${GITHUB_REF_NAME#v}" != "$version" ]; then
@@ -62,7 +62,7 @@ jobs:
             exit 1
           fi
           if [ "$HAS_SECRETS" != true ]; then
-            echo "::error::MACOS_CERT_P12, MACOS_CERT_PASSWORD and the three APPLE_API_* secrets are all required to publish a signed, notarized DMG"
+            echo "::error::MACOS_CERT_P12, MACOS_CERT_PASSWORD, the three APPLE_API_* secrets and SPARKLE_ED_KEY are all required to publish a signed, notarized DMG and its appcast"
             exit 1
           fi
       - run: pnpm install --frozen-lockfile
@@ -94,12 +94,30 @@ jobs:
           APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
           APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
         run: bash scripts/build-app.sh --dmg
+      # After the build, because the signature covers the final stapled bytes
+      - name: Sign the DMG and write the appcast
+        env:
+          SPARKLE_ED_KEY: ${{ secrets.SPARKLE_ED_KEY }}
+        run: bash scripts/make-appcast.sh dist/*.dmg "$(jq -r .version package.json)" CHANGELOG.md > dist/appcast.xml
+      # The bytes users get, after build-app.sh's staging copy
+      - name: Check the app inside the DMG
+        run: |
+          version=$(jq -r .version package.json)
+          mount=$(mktemp -d)
+          hdiutil attach -quiet -nobrowse -readonly -mountpoint "$mount" dist/*.dmg
+          # || true, or a busy detach would fail a good build after it notarized
+          trap 'hdiutil detach -quiet -force "$mount" || true' EXIT
+          codesign --verify --deep --strict "$mount/Claude Multipass.app"
+          # A wrong SPARKLE_ED_KEY stops here: every installed app would reject the update
+          bash scripts/verify-appcast.sh "$mount/Claude Multipass.app" dist/*.dmg dist/appcast.xml
+          [ "$("$mount/Claude Multipass.app/Contents/Resources/claude-multipass" --version)" = "claude-multipass $version" ]
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dmg
           path: |
             dist/*.dmg
             dist/*.sha256
+            dist/appcast.xml
           if-no-files-found: error
 
   release:
@@ -122,13 +140,13 @@ jobs:
           # The cask pins the published DMG's sha256, so an asset is never replaced. A rebuild
           # is not byte-identical, so a leftover .sha256 would not match a new DMG either.
           if existing=$(gh release view "$TAG" --json assets -q '.assets[].name'); then
-            for f in dist/*.dmg dist/*.sha256; do
+            for f in dist/*.dmg dist/*.sha256 dist/appcast.xml; do
               if grep -qxF "$(basename "$f")" <<< "$existing"; then
                 echo "::error::release $TAG already has $(basename "$f"); delete the asset by hand to republish"
                 exit 1
               fi
             done
-            gh release upload "$TAG" dist/*.dmg dist/*.sha256
+            gh release upload "$TAG" dist/*.dmg dist/*.sha256 dist/appcast.xml
           else
-            gh release create "$TAG" dist/*.dmg dist/*.sha256 --generate-notes
+            gh release create "$TAG" dist/*.dmg dist/*.sha256 dist/appcast.xml --generate-notes
           fi
