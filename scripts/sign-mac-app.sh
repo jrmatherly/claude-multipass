@@ -1,7 +1,7 @@
 #!/bin/bash
 # sign-mac-app.sh - Developer ID signing and notarization for the menu bar app and its DMG.
-# Copied from jrmatherly/ai-kb (scripts/sign-mac-app.sh), with MACOS_SIGN_ENTITLEMENTS and the Sparkle parts added.
-# The only place the repository calls codesign, notarytool or stapler.
+# Copied from jrmatherly/ai-kb (scripts/sign-mac-app.sh), with MACOS_SIGN_ENTITLEMENTS, the Sparkle parts and the timestamp retry added.
+# The only place the repository signs or notarizes; release.yml also runs codesign --verify.
 #
 #   sign-mac-app.sh sign-app <App.app>   sign with the hardened runtime and verify, then notarize,
 #                                        staple and assess with spctl
@@ -57,7 +57,7 @@ esac
 
 identity="${MACOS_SIGN_IDENTITY:-}"
 if [ -z "$identity" ]; then
-  identity=$({ security find-identity -v -p codesigning 2> /dev/null || true; } \
+  identity=$({ security find-identity -v -p codesigning 2> /dev/null || echo "sign-mac-app: security find-identity failed" >&2; } \
     | sed -n '/"Developer ID Application: /{s/^[^"]*"\(.*\)"$/\1/p;q;}')
 fi
 if [ -z "$identity" ]; then
@@ -81,6 +81,7 @@ notarize_file() {
   out=$(xcrun notarytool submit "$1" --key "$key" --key-id "${APPLE_API_KEY_ID:-}" \
     --issuer "${APPLE_API_ISSUER_ID:-}" --wait --timeout 30m --output-format json) \
     || {
+      echo "$out" >&2
       echo "sign-mac-app: notarytool submit failed for $1" >&2
       exit 1
     }
@@ -93,6 +94,21 @@ notarize_file() {
   fi
 }
 
+# Apple's timestamp service can fail and then pass with nothing changed, twice in a
+# row on 2026-11-01. Any other failure stops at once. --force makes a retry safe.
+sign_part() {
+  local attempt err rc
+  for attempt in 1 2 3 4; do
+    rc=0
+    err=$(codesign --force --timestamp "$@" 2>&1) || rc=$?
+    [ -z "$err" ] || echo "$err" >&2
+    [ "$rc" != 0 ] || return 0
+    [[ $err == *'A timestamp was expected but was not found'* ]] || exit "$rc"
+    [ "$attempt" = 4 ] || sleep 15
+  done
+  exit "$rc"
+}
+
 case "$mode" in
   sign-app)
     entitlements=()
@@ -102,10 +118,10 @@ case "$mode" in
     sparkle="$target/Contents/Frameworks/Sparkle.framework"
     if [ -d "$sparkle" ]; then
       for part in "$sparkle/Versions/B/Autoupdate" "$sparkle/Versions/B/Updater.app" "$sparkle"; do
-        codesign --force --options runtime --timestamp --sign "$identity" "$part"
+        sign_part --options runtime --sign "$identity" "$part"
       done
     fi
-    codesign --force --options runtime --timestamp ${entitlements[@]+"${entitlements[@]}"} --sign "$identity" "$target"
+    sign_part --options runtime ${entitlements[@]+"${entitlements[@]}"} --sign "$identity" "$target"
     codesign --verify --deep --strict --verbose=2 "$target"
     if [ "$notarize" = 1 ]; then
       # notarytool takes a zip, not a bundle; the ticket is stapled to the app itself
@@ -116,7 +132,7 @@ case "$mode" in
     fi
     ;;
   sign-dmg)
-    codesign --force --timestamp --sign "$identity" "$target"
+    sign_part --sign "$identity" "$target"
     codesign --verify --verbose=2 "$target"
     if [ "$notarize" = 1 ]; then
       notarize_file "$target"
