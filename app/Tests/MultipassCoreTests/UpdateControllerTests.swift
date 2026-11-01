@@ -9,6 +9,8 @@ private struct Offline: Error {}
 private final class FakeFeed: UpdateFeed {
   var results: [Result<FeedItem?, Error>]
   var gate: Gate?
+  /// Runs once the gate opens, in the job that goes on to finish the probe.
+  var afterGate: (@MainActor () -> Void)?
   private(set) var calls = 0
 
   init(_ results: [Result<FeedItem?, Error>]) {
@@ -19,6 +21,7 @@ private final class FakeFeed: UpdateFeed {
     calls += 1
     let result = results.count > 1 ? results.removeFirst() : results[0]
     await gate?.wait()
+    afterGate?()
     return try result.get()
   }
 }
@@ -110,6 +113,12 @@ private func fixture(
   #expect(f.controller.checkedAt == clock)
 }
 
+@Test @MainActor func anOlderFeedItemIsNoOffer() async {
+  let f = await fixture(feed: FakeFeed([.success(FeedItem(version: "0.8.0", changelog: changelog))]))
+  await f.controller.check()
+  #expect(f.controller.state == .upToDate(clock))
+}
+
 @Test @MainActor func aFeedItemThatIsNotNewerIsUpToDate() async {
   let f = await fixture(feed: FakeFeed([.success(same)]))
   await f.controller.check()
@@ -161,6 +170,7 @@ private func fixture(
     return
   }
   #expect(!problem.message.isEmpty)
+  #expect(f.controller.checkedAt == nil)
 }
 
 @Test @MainActor func aManualCheckShowsChecking() async {
@@ -182,10 +192,13 @@ private func fixture(
   let f = await fixture(feed: feed)
   let first = Task { await f.controller.check() }
   await until { feed.calls == 1 }
-  await f.controller.check()
+  // In a task, so a second probe waiting on the gate fails the count and cannot hang the run.
+  let second = Task { await f.controller.check() }
+  for _ in 0..<100 { await Task.yield() }
   #expect(feed.calls == 1)
   gate.open()
   await first.value
+  await second.value
   #expect(f.controller.state == .available(offer))
 }
 
@@ -235,6 +248,35 @@ private func fixture(
   #expect(f.installer.calls == 1)
 }
 
+@Test @MainActor func installWaitsOutACheckThatStartsAsTheFirstEnds() async {
+  let first = Gate()
+  let second = Gate()
+  let feed = FakeFeed([.success(newer)])
+  let f = await fixture(feed: feed)
+  await f.controller.check()
+  feed.gate = first
+  let firstCheck = Task { await f.controller.check() }
+  await until { feed.calls == 2 }
+  let install = Task { await f.controller.install() }
+  for _ in 0..<100 { await Task.yield() }
+  // This task is queued before the probe's job ends, so it runs ahead of the install's wake.
+  feed.afterGate = {
+    feed.afterGate = nil
+    feed.gate = second
+    Task { await f.controller.check() }
+  }
+  first.open()
+  await firstCheck.value
+  await until { feed.calls == 3 }
+  for _ in 0..<100 { await Task.yield() }
+  #expect(f.installer.calls == 0)
+  #expect(f.appState.phase == .idle)
+  second.open()
+  await install.value
+  #expect(f.installer.calls == 1)
+  #expect(f.controller.state == .installing(offer, .relaunching))
+}
+
 @Test @MainActor func aRollbackSeenWhileWaitingCancelsTheInstall() async {
   let gate = Gate()
   let feed = FakeFeed([.success(newer), .success(nil)])
@@ -256,11 +298,14 @@ private func fixture(
 @Test @MainActor func aSecondClickInstallsOnce() async {
   let gate = Gate()
   let f = await fixture(feed: FakeFeed([.success(newer)]))
+  f.installer.stage = .upgrading
   f.installer.gate = gate
   await f.controller.check()
   let first = Task { await f.controller.install() }
   await until { f.installer.calls == 1 }
   await f.controller.install()
+  #expect(f.controller.state == .installing(offer, .upgrading))
+  #expect(f.controller.state.blocksQuit)
   gate.open()
   await first.value
   #expect(f.installer.calls == 1)
@@ -290,6 +335,40 @@ private func fixture(
   f.controller.stop()
   #expect(f.installer.calls == 0)
   #expect(f.controller.state == .available(offer))
+}
+
+@Test @MainActor func theScheduleNeverProbesThroughAnInstall() async {
+  let gate = Gate()
+  let feed = FakeFeed([.success(newer), .success(nil)])
+  let f = await fixture(feed: feed, checkInterval: 0.001)
+  f.installer.gate = gate
+  await f.controller.check()
+  let install = Task { await f.controller.install() }
+  await until { f.installer.calls == 1 }
+  f.controller.start()
+  try? await Task.sleep(nanoseconds: 30_000_000)
+  #expect(feed.calls == 1)
+  #expect(f.controller.state == .installing(offer, .preparing))
+  gate.open()
+  await install.value
+  try? await Task.sleep(nanoseconds: 30_000_000)
+  f.controller.stop()
+  #expect(feed.calls == 1)
+  #expect(f.controller.state == .installing(offer, .relaunching))
+}
+
+@Test @MainActor func aSecondStartLeavesOneTimer() async {
+  let feed = FakeFeed([.success(nil)])
+  let f = await fixture(feed: feed, checkInterval: 0.001)
+  f.controller.start()
+  await untilSlept { feed.calls >= 1 }
+  f.controller.start()
+  await untilSlept { feed.calls >= 3 }
+  f.controller.stop()
+  try? await Task.sleep(nanoseconds: 5_000_000)
+  let settled = feed.calls
+  try? await Task.sleep(nanoseconds: 30_000_000)
+  #expect(feed.calls == settled)
 }
 
 @Test @MainActor func checksOffMeansStartDoesNotProbe() async {
@@ -333,6 +412,26 @@ private func fixture(
   // Held until the process exits: nothing may start in the app about to relaunch.
   #expect(f.appState.phase == .updating)
   #expect(f.controller.state == .installing(offer, .relaunching))
+}
+
+@Test @MainActor func preparingShowsWhileTheLockWaitsOutAUsageRun() async {
+  let gate = Gate()
+  let f = await fixture(feed: FakeFeed([.success(newer)]))
+  await f.controller.check()
+  f.runner.onCall = { args in if args[0] == "usage" { await gate.wait() } }
+  var settings = f.appState.settings
+  settings.usageEnabled = true
+  let usage = Task { await f.appState.apply(settings) }
+  await until { f.runner.calls.contains(["usage", "--json"]) }
+  let install = Task { await f.controller.install() }
+  await until { f.appState.phase == .updating }
+  for _ in 0..<100 { await Task.yield() }
+  #expect(f.installer.calls == 0)
+  #expect(f.controller.state == .installing(offer, .preparing))
+  gate.open()
+  await install.value
+  await usage.value
+  f.appState.stop()
 }
 
 @Test @MainActor func aFailedInstallReleasesThePhase() async {
@@ -397,6 +496,16 @@ private func fixture(
   #expect(f.controller.state == .installing(offer, .upgrading))
   gate.open()
   await install.value
+}
+
+@Test @MainActor func aStageAfterAFailureLeavesTheFailure() async {
+  let problem = UpdateProblem(message: "brew failed", detail: nil, fallback: nil)
+  let f = await fixture(feed: FakeFeed([.success(newer)]))
+  f.installer.error = problem
+  await f.controller.check()
+  await f.controller.install()
+  f.installer.report?(.upgrading)
+  #expect(f.controller.state == .failed(offer, problem))
 }
 
 @Test @MainActor func aStageAfterTheInstallerReturnedStaysRelaunching() async {
