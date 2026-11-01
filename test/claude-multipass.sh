@@ -1214,7 +1214,7 @@ check "the no-jq PATH has no jq" "" "$(env PATH="$nojq" /bin/sh -c "command -v j
 printf '#!/bin/sh\ntest ! -s "%s/calls"\n' "$tmp" > "$tmp/bin/pgrep"
 : > "$tmp/calls"
 n_login=$(find "$b" -mindepth 1 -maxdepth 1 -name 'login-*' | wc -l | tr -d ' ')
-jq_message='jq is not on PATH and claude-multipass needs it (https://jqlang.org/download/)'
+jq_message='jq is missing or not working and claude-multipass needs it (https://jqlang.org/download/)'
 add_rc=$(PATH=$nojq exit_code cda add nojq-new)
 check "add without jq never quits Desktop" "" "$(cat "$tmp/calls")"
 check "add without jq exits 1" 1 "$add_rc"
@@ -1232,22 +1232,71 @@ check_true "doctor runs without jq and reports it" grep -q '^fail: jq: not on PA
 check "doctor without jq blames no profile's token" 0 "$(PATH=$nojq cda doctor | grep -c 'empty oauth:tokenCacheV2')"
 check "and calls no profile ok" 0 "$(PATH=$nojq cda doctor | grep -c '^ok: usagey')"
 check "and says once that it skipped the check" 1 "$(PATH=$nojq cda doctor | grep -c '^warn: profiles: saved tokens not checked without jq')"
-# A jq that runs and fails is a read failure too, never "signed out".
-cp "$d/config.json" "$tmp/config-before-bad-read"
-printf '{"oauth:tokenCacheV2":' > "$d/config.json"
-check "add on a corrupt config.json exits 1" 1 "$(exit_code cda add badread-new)"
-check "and never quits Desktop" "" "$(cat "$tmp/calls")"
-check "current on a corrupt config.json exits 1" 1 "$(exit_code cda current)"
-cp "$tmp/config-before-bad-read" "$d/config.json"
+# A jq that runs and fails, as a stale version-manager shim does (exit 1), must
+# not read as signed out either.
 mkdir -p "$tmp/broken-jq"
-printf '#!/bin/sh\nexit 126\n' > "$tmp/broken-jq/jq"
+printf '#!/bin/sh\necho "mise ERROR not a valid shim" >&2\nexit 1\n' > "$tmp/broken-jq/jq"
 chmod +x "$tmp/broken-jq/jq"
 brokenjq="$tmp/broken-jq:$PATH"
-check "add with a broken jq exits 1" 1 "$(PATH=$brokenjq exit_code cda add badread-new)"
+check "add with a jq that exits 1 exits 1" 1 "$(PATH=$brokenjq exit_code cda add badread-new)"
+check "and names jq" "$jq_message" "$(PATH=$brokenjq err_of cda add badread-new)"
 check "and never quits Desktop" "" "$(cat "$tmp/calls")"
-check "current with a broken jq exits 1" 1 "$(PATH=$brokenjq exit_code cda current)"
-check "doctor with a broken jq reports it" 1 "$(PATH=$brokenjq cda doctor | grep -c '^fail: jq: ')"
+check "current with a jq that exits 1 exits 1" 1 "$(PATH=$brokenjq exit_code cda current)"
+check "doctor with a jq that exits 1 reports it" 1 "$(PATH=$brokenjq cda doctor | grep -c '^fail: jq: ')"
 check "and blames no profile's token" 0 "$(PATH=$brokenjq cda doctor | grep -c 'empty oauth:tokenCacheV2')"
+check "and blames no config" 0 "$(PATH=$brokenjq cda doctor | grep -c '^fail: config: ')"
+# A config.json jq cannot read: the commands that quit Desktop stop first, and
+# everything else answers as it always did. The cases run with Desktop "running".
+cp "$d/config.json" "$tmp/config-before-bad-read"
+printf '#!/bin/sh\ngrep "^usagey "\n' > "$tmp/bin/fzf"
+check_bad_config() {
+  local out rc=0
+  printf '%s' "$1" > "$d/config.json"
+  check "add on config '$1' exits 1" 1 "$(exit_code cda add badread-new)"
+  check "and names the file" 1 "$(err_of cda add badread-new | grep -c "^Could not read $d/config.json")"
+  check "and none quit Desktop" "" "$(cat "$tmp/calls")"
+  check "or backed up a login" "$n_login" "$(find "$b" -mindepth 1 -maxdepth 1 -name 'login-*' | wc -l | tr -d ' ')"
+  check "or wrote the config" "$1" "$(cat "$d/config.json")"
+  check_true "or left the run lock" test ! -L "$CLAUDE_MULTIPASS_DIR/.run.lock"
+  out=$(cda list --json 2> /dev/null) || rc=$?
+  check "list --json still answers" 0 "$rc"
+  check "as signed out" false "$(jq -r .signedIn <<< "$out")"
+  check "with the profiles listed" 1 "$(jq '[.profiles[] | select(.name == "usagey")] | length' <<< "$out")"
+  rc=0
+  out=$(cda doctor) || rc=$?
+  check "doctor exits 1" 1 "$rc"
+  check "and fails the config" 1 "$(grep -c "^fail: config: could not read $d/config.json" <<< "$out")"
+  check "and does not call it ok" 0 "$(grep -c '^ok: config: ' <<< "$out")"
+}
+for bad in '{"oauth:tokenCacheV2":' '[]'; do
+  check_bad_config "$bad"
+  for run in 'add badread-new --force' 'switch usagey' 'switch usagey --force' 'save usagey' 'save usagey --force' pick; do
+    check "$run on config '$bad' exits 1" 1 "$(exit_code cda $run)"
+    check_true "and leaves no run lock" test ! -L "$CLAUDE_MULTIPASS_DIR/.run.lock"
+  done
+  check "and none quit Desktop" "" "$(cat "$tmp/calls")"
+  check "or backed up a login" "$n_login" "$(find "$b" -mindepth 1 -maxdepth 1 -name 'login-*' | wc -l | tr -d ' ')"
+  check "switch names the file" 1 "$(err_of cda switch usagey | grep -c "^Could not read $d/config.json")"
+  check "list still answers" 1 "$(cda list 2> /dev/null | grep -c '^  usagey ')"
+  check "current still answers" "signed out" "$(cda current 2> /dev/null)"
+  check "usage --json is not blocked" 0 "$(exit_code cda usage --json)"
+  check "sync is not blocked" 0 "$(exit_code cda sync --force)"
+done
+check_bad_config ''
+chmod 000 "$d/config.json"
+check "add on a config it may not read exits 1" 1 "$(exit_code cda add badread-new)"
+check "and never quits Desktop" "" "$(cat "$tmp/calls")"
+check "list --json still answers" 0 "$(exit_code cda list --json)"
+chmod 600 "$d/config.json"
+# An object is readable, whatever it holds: a signed-out config goes on to the quit.
+for readable in '{}' '{"oauth:tokenCacheV2":""}'; do
+  printf '%s' "$readable" > "$d/config.json"
+  check "add on config '$readable' goes ahead" 0 "$(exit_code cda add badread-new --no-relaunch)"
+  check "and quits Desktop" 1 "$(grep -c '^osascript' "$tmp/calls")"
+  check "doctor calls it ok" 1 "$(cda doctor | grep -c '^ok: config: ')"
+  : > "$tmp/calls"
+done
+cp "$tmp/config-before-bad-read" "$d/config.json"
 printf '#!/bin/sh\nexit 1\n' > "$tmp/bin/pgrep"
 
 # the dotfiles-era store moves into the default location once, backups too

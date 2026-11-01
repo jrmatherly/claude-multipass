@@ -330,6 +330,10 @@ ${bold}Cautions${reset}
     menu bar app.
   - One save, switch, add, sync, rename or remove runs at a time; a second
     one exits 1 naming the first run's pid, before it quits Desktop.
+  - Every command but --version, --help and doctor exits 1 without a working
+    jq, before it quits Desktop.
+  - save, switch and add exit 1 before they quit Desktop on a config.json jq
+    cannot read as an object. --force does not lift it.
 EOF
 }
 
@@ -671,14 +675,7 @@ desktop_launch() {
   open -a Claude
 }
 
-# jq -e exits 1 for false. Any other failure is an unread config, never "signed out",
-# which would skip add's unsaved-login refusal.
-signed_in() {
-  local rc=0
-  jq -e '.["oauth:tokenCacheV2"] | type == "string" and length > 0' "$config" > /dev/null || rc=$?
-  ((rc < 2)) || fail "Could not read $config with jq (exit $rc)"
-  return "$rc"
-}
+signed_in() { jq -e '.["oauth:tokenCacheV2"] | type == "string" and length > 0' "$config" > /dev/null; }
 
 live_account() {
   signed_in || return 0
@@ -1067,12 +1064,18 @@ usage_object() {
 # One line per check, in a fixed order, no Keychain and no network. Exits 1
 # when any fail: line was printed.
 doctor_report() {
-  local status=0 tool mode meta dir name file logins set_aside legacy unchecked=''
-  if [[ -f $config ]]; then echo "ok: config: $config"; else
+  local status=0 tool mode meta dir name file logins set_aside legacy unchecked='' jq_works=''
+  jq -n 1 > /dev/null 2>&1 && jq_works=1
+  if [[ ! -f $config ]]; then
     echo "fail: config: no $config (open Claude Desktop once first)"
     status=1
+  elif [[ -n $jq_works ]] && ! jq -e 'type == "object"' "$config" > /dev/null 2>&1; then
+    echo "fail: config: could not read $config as a JSON object"
+    status=1
+  else
+    echo "ok: config: $config"
   fi
-  if jq -n 1 > /dev/null 2>&1; then echo "ok: jq"; else
+  if [[ -n $jq_works ]]; then echo "ok: jq"; else
     echo "fail: jq: not on PATH or not working (https://jqlang.org/download/)"
     status=1
   fi
@@ -1100,7 +1103,7 @@ doctor_report() {
     elif [[ ! -f ${dir}config.json ]]; then
       echo "fail: $name: missing config.json (re-save it)"
       status=1
-    elif ! jq -n 1 > /dev/null 2>&1; then
+    elif [[ -z $jq_works ]]; then
       unchecked=1
     elif ! jq -e '.["oauth:tokenCacheV2"] | type == "string" and length > 0' "${dir}config.json" > /dev/null 2>&1; then
       echo "fail: $name: empty oauth:tokenCacheV2 (re-save it)"
@@ -1402,7 +1405,7 @@ main() {
     doctor_report
     return $?
   fi
-  command -v jq > /dev/null || fail "jq is not on PATH and claude-multipass needs it (https://jqlang.org/download/)"
+  jq -n 1 > /dev/null 2>&1 || fail "jq is missing or not working and claude-multipass needs it (https://jqlang.org/download/)"
   [[ -f $config ]] || fail "No $config: open Claude Desktop once first"
   migrate_store
   case $cmd in
@@ -1474,6 +1477,8 @@ main() {
       ;;
   esac
 
+  # signed_in reads an unreadable config as signed out, so switch and add get this far.
+  jq -e 'type == "object"' "$config" > /dev/null 2>&1 || fail "Could not read $config as a JSON object: nothing changed"
   # Everything past here needs the app quit. Relaunch from the trap so an
   # error midway still brings it back. Quitting Desktop from a shell it owns
   # would end that shell mid-switch, so refuse instead.
