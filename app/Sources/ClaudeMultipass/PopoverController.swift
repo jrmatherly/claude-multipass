@@ -9,6 +9,7 @@ final class PopoverController: NSObject, NSPopoverDelegate {
   private let appState: AppState
   private let popover = NSPopover()
   private let panel: AccountPanelController
+  private var noteAtOpen = 0
 
   init(appState: AppState, updates: UpdateController, openSettings: @escaping (SettingsPane?) -> Void) {
     self.appState = appState
@@ -32,6 +33,7 @@ final class PopoverController: NSObject, NSPopoverDelegate {
       popover.performClose(nil)
       return
     }
+    noteAtOpen = appState.noteSerial
     popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
     // The snapshot only: usage runs on its own timer, at most every 5 minutes.
     Task { await appState.refresh() }
@@ -39,5 +41,6 @@ final class PopoverController: NSObject, NSPopoverDelegate {
 
   func popoverWillClose(_ notification: Notification) {
     panel.dismiss()
+    appState.clearRowNote(seen: noteAtOpen)
   }
 }

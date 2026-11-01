@@ -24,7 +24,8 @@ public struct RowError: Equatable {
 }
 
 /// A warning the tool printed while a switch or save succeeded (for example
-/// "switched Desktop only"), shown under the row until the next action.
+/// "switched Desktop only"), shown under the row until the popover closes,
+/// a Refresh, a row tap or the next action.
 public struct RowNote: Equatable {
   public let name: String
   public let message: String
@@ -52,6 +53,8 @@ public final class AppState: ObservableObject {
   public var lastError: String? { snapshotError ?? usageError }
   @Published public private(set) var rowError: RowError?
   @Published public private(set) var rowNote: RowNote?
+  /// Counts the notes set, so a popover can tell its open's note from a newer one.
+  public private(set) var noteSerial = 0
   @Published public private(set) var cliStatus: CLIStatus = .unknown
   @Published public private(set) var cliLocation: String?
   @Published public private(set) var settings: AppSettings
@@ -191,6 +194,7 @@ public final class AppState: ObservableObject {
   /// timer and the usage toggle call `refreshUsage` directly, spaced on their
   /// own, so only a click can land within the floor of the last attempt.
   public func refreshAll() async {
+    clearRowNote()
     await refresh()
     if let last = usageAttemptedAt, now().timeIntervalSince(last) < AppSettings.usageRefreshFloor { return }
     await refreshUsage()
@@ -202,6 +206,16 @@ public final class AppState: ObservableObject {
 
   public func saveCurrent(as name: String) async {
     await act(name, phase: .saving(name), args: ["save", name])
+  }
+
+  /// A note describes the moment of its switch, so a Refresh drops it, and so
+  /// does a closing popover that opened on it (`seen` is `noteSerial` at the
+  /// open). Desktop's relaunch takes focus and closes the popover just after
+  /// a switch, so a note set while it was open waits for the next open. Never
+  /// while an act runs: it may have just set the note.
+  public func clearRowNote(seen: Int? = nil) {
+    guard phase == .idle, seen == nil || seen == noteSerial else { return }
+    rowNote = nil
   }
 
   public func dismissRowError() {
@@ -254,7 +268,10 @@ public final class AppState: ObservableObject {
     await usageFetch?.value
     do {
       let output = try await runner.runCapturing(args)
-      if !output.stderr.isEmpty { rowNote = RowNote(name: name, message: output.stderr) }
+      if !output.stderr.isEmpty {
+        rowNote = RowNote(name: name, message: output.stderr)
+        noteSerial += 1
+      }
     } catch CLIError.refused(let message) {
       rowError = RowError(name: name, message: message, refused: true)
       return
