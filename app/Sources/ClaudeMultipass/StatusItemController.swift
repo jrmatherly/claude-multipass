@@ -81,13 +81,15 @@ final class StatusItemController: NSObject {
   func makeMenu() -> NSMenu {
     let menu = NSMenu()
     if let offer = updates.state.offer {
-      menu.addItem(withTitle: "Update to \(offer.version)…", action: #selector(openAbout), keyEquivalent: "").target = self
+      menu.addItem(withTitle: updates.state.noticeOverride ?? "Update to \(offer.version)…", action: #selector(openAbout), keyEquivalent: "").target = self
       menu.addItem(.separator())
     }
     menu.addItem(withTitle: "Refresh", action: #selector(refresh), keyEquivalent: "r").target = self
     menu.addItem(withTitle: "Settings…", action: #selector(openSettingsFromMenu), keyEquivalent: ",").target = self
     menu.addItem(.separator())
-    menu.addItem(withTitle: "Quit Claude Multipass", action: #selector(quit), keyEquivalent: "q").target = self
+    // No action is what disables an item in a menu that autoenables.
+    let blocked = updates.state.blocksQuit
+    menu.addItem(withTitle: blocked ? "Quit (updating…)" : "Quit Claude Multipass", action: blocked ? nil : #selector(quit), keyEquivalent: "q").target = self
     return menu
   }
 

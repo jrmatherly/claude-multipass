@@ -140,6 +140,25 @@ private func addBrew(to prefix: URL) throws -> URL {
   #expect(InstallKind.detect(bundleURL: bundle, version: "0.9.0", prefixes: [prefix]) == .homebrewMissing)
 }
 
+// brew owns this install, so a click must not hand it to Sparkle because the bundle went away.
+@Test func aCaskInstallWhoseBundleIsGoneIsHomebrewMissing() throws {
+  let (prefix, bundle) = try installFixture()
+  try linkCask(in: prefix, to: bundle)
+  _ = try addBrew(to: prefix)
+  try FileManager.default.removeItem(at: bundle)
+  #expect(InstallKind.detect(bundleURL: bundle, version: "0.9.0", prefixes: [prefix]) == .homebrewMissing)
+}
+
+@Test func aGoneCopyBesideACaskInstallIsStillDirect() throws {
+  let (prefix, bundle) = try installFixture()
+  let other = bundle.deletingLastPathComponent().appendingPathComponent("Other/Claude Multipass.app")
+  try FileManager.default.createDirectory(at: other, withIntermediateDirectories: true)
+  try linkCask(in: prefix, to: other)
+  _ = try addBrew(to: prefix)
+  try FileManager.default.removeItem(at: bundle)
+  #expect(InstallKind.detect(bundleURL: bundle, version: "0.9.0", prefixes: [prefix]) == .direct)
+}
+
 @Test func noCaskroomIsDirect() throws {
   let (prefix, bundle) = try installFixture()
   _ = try addBrew(to: prefix)

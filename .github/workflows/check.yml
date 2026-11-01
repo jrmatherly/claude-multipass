@@ -17,7 +17,7 @@ jobs:
   check:
     # The tool targets macOS's /bin/bash 3.2, so the check runs there too
     runs-on: macos-26
-    # Runs take 2 to 6 minutes; a hung step should not hold a runner for 6 hours
+    # Runs take 2 to 6 minutes before the bundle build; a hung step should not hold a runner for 6 hours
     timeout-minutes: 20
     env:
       # The one place the CI ShellCheck version is set; bump the digest with it
@@ -42,3 +42,5 @@ jobs:
           echo "$PWD/shellcheck-v$SHELLCHECK_VERSION" >> "$GITHUB_PATH"
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
+      # Proves the bundle every PR. With no identity here it stays unsigned.
+      - run: bash scripts/build-app.sh

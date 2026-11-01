@@ -34,7 +34,13 @@ public enum InstallKind: Equatable {
     for prefix in prefixes {
       let cask = prefix.appendingPathComponent("Caskroom/claude-multipass-app")
       let versions = (try? fm.contentsOfDirectory(at: cask, includingPropertiesForKeys: nil)) ?? []
-      guard versions.contains(where: { $0.appendingPathComponent("Claude Multipass.app").resolvingSymlinksInPath().path == bundle }) else { continue }
+      let owned = versions.contains { version in
+        let link = version.appendingPathComponent("Claude Multipass.app")
+        // A link to a deleted bundle does not resolve, so what it says it points at counts too.
+        return link.resolvingSymlinksInPath().path == bundle || (try? fm.destinationOfSymbolicLink(atPath: link.path)) == bundleURL.path
+      }
+      guard owned else { continue }
+      guard fm.fileExists(atPath: bundleURL.path) else { return .homebrewMissing }
       let brew = prefix.appendingPathComponent("bin/brew")
       return fm.isExecutableFile(atPath: brew.path) ? .homebrew(brew: brew) : .homebrewMissing
     }
@@ -120,7 +126,11 @@ public struct UpdateProblem: Equatable {
   }
 }
 
-extension UpdateProblem: Error {}
+extension UpdateProblem: Error {
+  /// Sparkle says the offered release is gone: the offer goes too.
+  public static let noLongerOffered = UpdateProblem(message: "This update is no longer offered.", detail: nil, fallback: nil)
+  public static let brewMissing = UpdateProblem(message: "Homebrew installed this app, but brew was not found. Download the update instead.", detail: nil, fallback: .download(UpdateController.releasePage))
+}
 
 public enum UpdateState: Equatable {
   case idle, checking, upToDate(Date), available(UpdateOffer)
@@ -147,8 +157,7 @@ public protocol UpdateFeed: AnyObject {
 }
 
 public protocol Installer: AnyObject {
-  /// Returning means the process is about to relaunch, and an installer may instead
-  /// never return while the process exits. Throws UpdateProblem.
+  /// Returns once the relaunch has started (brew). Never returns on success when the installer's own quit ends the process (Sparkle). Throws UpdateProblem.
   @MainActor func install(_ offer: UpdateOffer, report: @escaping @MainActor (InstallStage) -> Void) async throws
 }
 
@@ -171,12 +180,20 @@ public final class BrewInstaller: Installer {
   private let appURL: URL
   private let diskVersion: (URL) -> String?
   private let relaunch: (URL) -> Void
+  private let log: (String) -> Void
 
-  public init(runner: CommandRunner, appURL: URL, diskVersion: @escaping (URL) -> String?, relaunch: @escaping (URL) -> Void) {
+  public init(
+    runner: CommandRunner,
+    appURL: URL,
+    diskVersion: @escaping (URL) -> String?,
+    relaunch: @escaping (URL) -> Void,
+    log: @escaping (String) -> Void = { NSLog("Claude Multipass: %@", $0) }
+  ) {
     self.runner = runner
     self.appURL = appURL
     self.diskVersion = diskVersion
     self.relaunch = relaunch
+    self.log = log
   }
 
   @MainActor
@@ -213,6 +230,7 @@ public final class BrewInstaller: Installer {
     guard landed(disk) else {
       throw UpdateProblem(message: Self.message(for: failure, detail: detail, disk: disk), detail: detail, fallback: .command(Self.command))
     }
+    if let failure { log("Homebrew reported a failure, but \(disk) landed: \(failure)") }
     report(.relaunching)
     relaunch(appURL)
   }
@@ -250,12 +268,14 @@ public final class UpdateController: ObservableObject {
 
   public static let releasePage = URL(string: "https://github.com/jrmatherly/claude-multipass/releases/latest")!
 
-  /// False for a development build: no update rows.
-  public var isAvailable: Bool { feed != nil && runningVersion != nil }
+  /// False for a development build: no update rows. True with a `startProblem`, so About can say updates are off.
+  public var isAvailable: Bool { (feed != nil || startProblem != nil) && runningVersion != nil }
   /// Read from disk each time: a menu bar app runs for weeks, and brew can appear under it.
   public var installKind: InstallKind { detect() }
 
   private let appState: AppState
+  /// Why the feed did not start, on an install that should have one.
+  public let startProblem: String?
   private let feed: UpdateFeed?
   private let detect: @MainActor () -> InstallKind
   private let installer: @MainActor (InstallKind) -> Installer?
@@ -263,13 +283,13 @@ public final class UpdateController: ObservableObject {
   private let checkInterval: TimeInterval
   private let now: () -> Date
   private var schedule: Task<Void, Never>?
-  /// The probe in flight. Sparkle has one continuation, and it ignores a check
-  /// during a session, so probes never overlap and an install waits for this.
+  /// The probe in flight. Sparkle runs one session at a time and ignores a check during one, so probes never overlap and an install waits for this.
   private var probing: Task<Void, Never>?
 
   public init(
     appState: AppState,
     feed: UpdateFeed?,
+    startProblem: String? = nil,
     detect: @escaping @MainActor () -> InstallKind,
     installer: @escaping @MainActor (InstallKind) -> Installer?,
     runningVersion: String?,
@@ -278,6 +298,7 @@ public final class UpdateController: ObservableObject {
   ) {
     self.appState = appState
     self.feed = feed
+    self.startProblem = startProblem
     self.detect = detect
     self.installer = installer
     self.runningVersion = runningVersion
@@ -316,6 +337,9 @@ public final class UpdateController: ObservableObject {
       defer { probing = nil }
       do {
         let item = try await feed.probe()
+        if let item, Version.components(item.version) == nil || Version.components(runningVersion) == nil {
+          throw UpdateProblem(message: "The feed offered \(item.version), which this app cannot read", detail: nil, fallback: nil)
+        }
         let checked = now()
         checkedAt = checked
         if let item, Version.isNewer(item.version, than: runningVersion) {
@@ -336,13 +360,14 @@ public final class UpdateController: ObservableObject {
     guard let offer = state.offer else { return }
     if case .installing = state { return }
     guard let installer = installer(detect()) else {
-      state = .failed(offer, UpdateProblem(message: "Homebrew installed this app, but brew was not found. Download the update instead.", detail: nil, fallback: .download(Self.releasePage)))
+      state = .failed(offer, .brewMissing)
       return
     }
+    let before = state
     // Before the lock, because beginUpdate can wait out a Keychain prompt and the UI must say so.
     state = .installing(offer, .preparing)
     guard await appState.beginUpdate() else {
-      state = .available(offer)
+      state = before
       return
     }
     do {
@@ -351,10 +376,11 @@ public final class UpdateController: ObservableObject {
         guard let self, case .installing(_, let shown) = self.state, shown != .relaunching else { return }
         self.state = .installing(offer, stage)
       }
-      // The phase stays held until the process exits.
+      // Only an installer that returns (brew) gets here; the phase stays held until the process exits.
       state = .installing(offer, .relaunching)
     } catch {
-      state = .failed(offer, Self.problem(from: error))
+      let problem = Self.problem(from: error)
+      state = .failed(problem == .noLongerOffered ? nil : offer, problem)
       await appState.endUpdate()
     }
   }

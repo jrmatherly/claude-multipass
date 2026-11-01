@@ -161,7 +161,11 @@ struct SettingsView: View {
         }
       }
       if let updates, updates.isAvailable {
-        UpdateSection(updates: updates, appState: appState, checksEnabled: binding(\.updateChecksEnabled))
+        if let problem = updates.startProblem {
+          UpdatesOffRow(problem: problem)
+        } else {
+          UpdateSection(updates: updates, appState: appState, checksEnabled: binding(\.updateChecksEnabled))
+        }
       }
       LabeledContent("Documentation") {
         Link(destination: Self.docs) {

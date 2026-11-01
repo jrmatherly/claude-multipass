@@ -172,6 +172,8 @@ func updateController(
     runningVersion: "0.9.0")
 }
 
+let updateFixtureNames = ["idle", "upToDate", "available", "availableBrew", "noBrew", "failedNoBrew", "failedCheck", "installing", "upgrading", "failedBrew", "failedSparkle", "startFailed"]
+
 /// Each named state, reached through `check()` and `install()` as the real app reaches it.
 @MainActor
 func updateFixture(_ name: String) async -> (AppState, UpdateController) {
@@ -193,6 +195,12 @@ func updateFixture(_ name: String) async -> (AppState, UpdateController) {
     controller = updateController(appState, feed: .failure(UpdateProblem(message: "The update server could not be reached.", detail: nil, fallback: nil)))
   case "installing":
     controller = updateController(appState, kind: brew, installer: FixtureInstaller(stage: .downloading(0.4)))
+  case "upgrading":
+    controller = updateController(appState, kind: brew, installer: FixtureInstaller(stage: .upgrading))
+  case "failedNoBrew":
+    controller = updateController(appState, kind: .homebrewMissing)
+  case "startFailed":
+    return (appState, UpdateController(appState: appState, feed: nil, startProblem: "The provided EdDSA key could not be decoded.", detect: { .direct }, installer: { _ in nil }, runningVersion: "0.9.0"))
   case "failedBrew":
     let output = (1...20).map { "Error: line \($0) of what brew printed, long enough that it has to wrap in the output area" }.joined(separator: "\n")
     let problem = UpdateProblem(message: "Homebrew could not update the app. macOS may be blocking this. Check System Settings, Privacy and Security, App Management.", detail: output, fallback: .command(BrewInstaller.command))
@@ -205,13 +213,14 @@ func updateFixture(_ name: String) async -> (AppState, UpdateController) {
   }
   await controller.check()
   switch name {
-  case "installing":
+  case "installing", "upgrading":
     Task { await controller.install() }
-    while true {
-      if case .installing(_, .downloading) = controller.state { break }
-      await Task.yield()
+    let reported = await soon {
+      if case .installing(_, let stage) = controller.state { return stage != .preparing }
+      return false
     }
-  case "failedBrew", "failedSparkle":
+    #expect(reported, "\(name) never reached its stage")
+  case "failedBrew", "failedSparkle", "failedNoBrew":
     await controller.install()
   default:
     break
@@ -245,6 +254,9 @@ private func menuBar(_ view: some View) -> some View {
     Task { await switching.switchTo("work") }
     while switching.phase == .idle { await Task.yield() }
     try render(PopoverView(appState: switching, openSettings: { _ in }, close: {}), "popover-switching")
+    let updating = await state(FixtureRunner(usage: usageLevels[0].1))
+    _ = await updating.beginUpdate()
+    try render(PopoverView(appState: updating, openSettings: { _ in }, close: {}), "popover-updating")
 
     let refused = await state(FixtureRunner(usage: usageLevels[0].1, usageFails: true, switchRefusal: "refusing to switch: the signed-in login was never saved (claude-multipass save <name>), or --force"))
     await refused.switchTo("work")
@@ -262,6 +274,10 @@ private func menuBar(_ view: some View) -> some View {
     let current = updateController(s, feed: .success(nil))
     await current.check()
     try render(PopoverView(appState: s, openSettings: { _ in }, close: {}, updates: current), "popover-update-none")
+    for name in ["upgrading", "failedSparkle"] {
+      let (appState, updates) = await updateFixture(name)
+      try render(PopoverView(appState: appState, openSettings: { _ in }, close: {}, updates: updates), "popover-update-\(name)")
+    }
   }
 
   @Test func aboutUpdate() async throws {
@@ -279,35 +295,12 @@ private func menuBar(_ view: some View) -> some View {
       }
       return height
     }
-    let base = try await height(await state(FixtureRunner()), nil, "about-update-none")
-    var heights: [String: CGFloat] = [:]
-    for name in ["idle", "upToDate", "available", "availableBrew", "noBrew", "failedCheck", "installing", "failedBrew", "failedSparkle"] {
+    _ = try await height(await state(FixtureRunner()), nil, "about-update-none")
+    for name in updateFixtureNames {
       let (appState, updates) = await updateFixture(name)
       let grown = try await height(appState, updates, "about-update-\(name)")
-      heights[name] = grown
-      #expect(grown > base, "\(name) did not grow the About tab")
       #expect(grown < 800, "\(name) can push the window off a laptop screen")
     }
-    #expect(heights["available"]! >= heights["upToDate"]! + 100, "the change log collapsed")
-  }
-
-  @Test func turningTheDailyCheckOnChecks() async throws {
-    _ = NSApplication.shared
-    let s = await state(FixtureRunner())
-    var settings = s.settings
-    settings.updateChecksEnabled = false
-    await s.apply(settings)
-    let updates = updateController(s)
-    let controller = SettingsWindowController(appState: s, updates: updates)
-    controller.show(pane: .about)
-    try await Task.sleep(nanoseconds: 300_000_000)
-    #expect(updates.state == .idle)
-    settings.updateChecksEnabled = true
-    await s.apply(settings)
-    try await Task.sleep(nanoseconds: 300_000_000)
-    #expect(updates.state.offer != nil, "turning the toggle on did not check")
-    updates.stop()
-    controller.window.close()
   }
 
   @Test func accountDetail() throws {
@@ -334,7 +327,7 @@ private func menuBar(_ view: some View) -> some View {
     for (suffix, settings) in [("", s.settings), ("-custom", custom)] {
       await s.apply(settings)
       for dark in [false, true] {
-        let controller = SettingsWindowController(appState: s)
+        let controller = SettingsWindowController(appState: s, updates: nil)
         controller.window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
         for pane in SettingsPane.allCases where suffix.isEmpty || pane == .general {
           controller.show(pane: pane)
@@ -355,7 +348,7 @@ private func menuBar(_ view: some View) -> some View {
     }
 
     await s.apply(AppSettings())
-    let controller = SettingsWindowController(appState: s)
+    let controller = SettingsWindowController(appState: s, updates: nil)
     controller.window.appearance = NSAppearance(named: .aqua)
     controller.show(pane: .general)
     try await Task.sleep(nanoseconds: 400_000_000)

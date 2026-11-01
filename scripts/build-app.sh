@@ -18,6 +18,11 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+die() {
+  echo "build-app: $1" >&2
+  exit 1
+}
+
 dmg=''
 for arg in "$@"; do
   case $arg in
@@ -52,6 +57,15 @@ ditto app/.build/release/Sparkle.framework "$sparkle"
 # The XPC services only serve a sandboxed app, and this one is not sandboxed.
 rm -rf "$sparkle/Versions/B/XPCServices" "$sparkle/XPCServices"
 cp app/.build/artifacts/sparkle/Sparkle/LICENSE "$app/Contents/Resources/Sparkle-LICENSE"
+# Before signing, which changes none of this, so a bad bundle never reaches notarization.
+# Here-strings, because pipefail would turn otool's SIGPIPE from grep -q into a failure.
+plist="$app/Contents/Info.plist"
+binary="$app/Contents/MacOS/ClaudeMultipass"
+[[ $(plutil -extract SUPublicEDKey raw -o - "$plist" | base64 -D | wc -c | tr -d ' ') == 32 ]] || die "SUPublicEDKey is not a base64 32-byte key"
+if grep -Eq '@[A-Z_]*@' "$plist"; then die "a placeholder is left in Info.plist"; fi
+grep -q '@executable_path/../Frameworks' <<< "$(otool -l "$binary")" || die "the binary has no rpath to Contents/Frameworks"
+grep -q '@rpath/Sparkle.framework' <<< "$(otool -L "$binary")" || die "the binary does not link @rpath/Sparkle.framework"
+[[ -d $sparkle ]] || die "$sparkle is missing"
 MACOS_SIGN_ENTITLEMENTS="$PWD/app/ClaudeMultipass.entitlements" bash scripts/sign-mac-app.sh sign-app "$app"
 echo "build-app: $app ($version)"
 

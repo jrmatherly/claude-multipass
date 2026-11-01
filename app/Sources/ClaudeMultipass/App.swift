@@ -33,7 +33,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-    updates?.state.blocksQuit == true ? .terminateCancel : .terminateNow
+    Self.terminateReply(for: updates?.state)
+  }
+
+  static func terminateReply(for state: UpdateState?) -> NSApplication.TerminateReply {
+    state?.blocksQuit == true ? .terminateCancel : .terminateNow
   }
 
   func applicationWillTerminate(_ notification: Notification) {
@@ -47,16 +51,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
     let detect = { InstallKind.detect(bundleURL: bundleURL, version: version) }
     var sparkle: SparkleUpdater?
+    var startProblem: String?
     if detect() != .development {
       do {
         sparkle = try SparkleUpdater(bundle: .main)
       } catch {
         NSLog("Claude Multipass: Sparkle did not start, so updates are off: %@", "\(error)")
+        startProblem = error.localizedDescription
       }
     }
     return UpdateController(
       appState: appState,
       feed: sparkle,
+      startProblem: startProblem,
       detect: detect,
       installer: { [sparkle] kind in
         switch kind {
@@ -80,16 +87,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     NSDictionary(contentsOf: app.appendingPathComponent("Contents/Info.plist"))?["CFBundleShortVersionString"] as? String
   }
 
+  /// `$0` is the app and `$1` the pid to outlive.
+  static let relaunchScript = #"while kill -0 "$1" 2>/dev/null; do sleep 0.2; done; open "$0""#
+
+  static func relaunchArguments(app: URL, pid: Int32) -> [String] {
+    ["-c", relaunchScript, app.path, String(pid)]
+  }
+
   /// Waits for this process to exit, because an `open` while it lives only reactivates it.
   /// The new version is on disk by now, so a failed spawn still quits: the user reopens it,
   /// and the phase is never left held in a live process.
   private static func relaunch(_ app: URL) {
     let waiter = Process()
     waiter.executableURL = URL(fileURLWithPath: "/bin/sh")
-    waiter.arguments = [
-      "-c", #"while kill -0 "$1" 2>/dev/null; do sleep 0.2; done; open "$0""#,
-      app.path, String(ProcessInfo.processInfo.processIdentifier),
-    ]
+    waiter.arguments = relaunchArguments(app: app, pid: ProcessInfo.processInfo.processIdentifier)
     do {
       try waiter.run()
     } catch {

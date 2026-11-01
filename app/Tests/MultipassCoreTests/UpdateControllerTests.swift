@@ -75,7 +75,9 @@ private func fixture(
   feed: UpdateFeed?,
   usesInstaller: Bool = true,
   kind: InstallKind = .direct,
-  checkInterval: TimeInterval = 86_400
+  checkInterval: TimeInterval = 86_400,
+  startProblem: String? = nil,
+  runningVersion: String = "0.9.0"
 ) async -> Fixture {
   let suite = "net.matherly.claude-multipass.tests.update-controller"
   let defaults = UserDefaults(suiteName: suite)!
@@ -90,9 +92,10 @@ private func fixture(
   let controller = UpdateController(
     appState: appState,
     feed: feed,
+    startProblem: startProblem,
     detect: { kind },
     installer: { _ in usesInstaller ? installer : nil },
-    runningVersion: "0.9.0",
+    runningVersion: runningVersion,
     checkInterval: checkInterval,
     now: { clock }
   )
@@ -527,6 +530,80 @@ private func fixture(
   f.controller.stop()
   #expect(f.controller.state == .idle)
   #expect(f.controller.checkedAt == nil)
+}
+
+@Test @MainActor func aSparkleThatDidNotStartStaysVisibleAndChecksNothing() async {
+  let f = await fixture(feed: nil, startProblem: "bad key")
+  #expect(f.controller.isAvailable)
+  #expect(f.controller.startProblem == "bad key")
+  await f.controller.check()
+  #expect(f.controller.state == .idle)
+}
+
+@Test @MainActor func aFeedVersionThatCannotBeReadIsAFailureNotUpToDate() async {
+  let f = await fixture(feed: FakeFeed([.success(FeedItem(version: "1.0-beta", changelog: ""))]))
+  await f.controller.check()
+  guard case .failed(nil, let problem) = f.controller.state else {
+    Issue.record("state is \(f.controller.state)")
+    return
+  }
+  #expect(problem.message == "The feed offered 1.0-beta, which this app cannot read")
+  #expect(f.controller.checkedAt == nil)
+}
+
+@Test @MainActor func aRunningVersionThatCannotBeReadIsAFailureToo() async {
+  let f = await fixture(feed: FakeFeed([.success(newer)]), runningVersion: "dev")
+  await f.controller.check()
+  guard case .failed(nil, _) = f.controller.state else {
+    Issue.record("state is \(f.controller.state)")
+    return
+  }
+}
+
+@Test @MainActor func aScheduledCheckStaysSilentAboutAnUnreadableVersion() async {
+  let feed = FakeFeed([.success(FeedItem(version: "1.0-beta", changelog: ""))])
+  let f = await fixture(feed: feed, checkInterval: 0.001)
+  f.controller.start()
+  await untilSlept { feed.calls > 1 }
+  f.controller.stop()
+  #expect(f.controller.state == .idle)
+}
+
+@Test @MainActor func aWithdrawnOfferGoesWithTheBadgeAndTheButton() async {
+  let f = await fixture(feed: FakeFeed([.success(newer)]))
+  await f.controller.check()
+  f.installer.error = UpdateProblem.noLongerOffered
+  await f.controller.install()
+  #expect(f.controller.state == .failed(nil, .noLongerOffered))
+  #expect(f.controller.state.offer == nil)
+  #expect(f.appState.phase == .idle)
+}
+
+@Test @MainActor func aRefusedLockLeavesAShownFailureUp() async {
+  let f = await fixture(feed: FakeFeed([.success(newer)]))
+  await f.controller.check()
+  let problem = UpdateProblem(message: "no", detail: nil, fallback: nil)
+  f.installer.error = problem
+  await f.controller.install()
+  #expect(await f.appState.beginUpdate())
+  await f.controller.install()
+  #expect(f.controller.state == .failed(offer, problem))
+}
+
+@Test @MainActor func aRefusedLockLeavesAnOfferOffered() async {
+  let f = await fixture(feed: FakeFeed([.success(newer)]))
+  await f.controller.check()
+  #expect(await f.appState.beginUpdate())
+  await f.controller.install()
+  #expect(f.controller.state == .available(offer))
+  #expect(f.installer.calls == 0)
+}
+
+@Test @MainActor func aMissingBrewNamesItsOwnProblem() async {
+  let f = await fixture(feed: FakeFeed([.success(newer)]), usesInstaller: false)
+  await f.controller.check()
+  await f.controller.install()
+  #expect(f.controller.state == .failed(offer, .brewMissing))
 }
 
 @Test @MainActor func anInstalledBuildHasUpdatesAndReadsItsKindFromDisk() async {

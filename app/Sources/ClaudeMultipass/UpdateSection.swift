@@ -22,6 +22,39 @@ extension InstallStage {
   }
 }
 
+extension UpdateState {
+  /// What the popover and the menu say in place of the offer once it is not just on offer.
+  /// A failed check has no fallback and leaves the offer standing, so it changes nothing here.
+  var noticeOverride: String? {
+    switch self {
+    case .installing: return "Updating…"
+    case .failed(_, let problem): return problem.fallback == nil ? nil : "Update failed"
+    case .idle, .checking, .upToDate, .available: return nil
+    }
+  }
+
+  /// A Check now result for VoiceOver. Only Check now passes through `.checking`, and a scheduled
+  /// result stays quiet, since a settings window keeps running its views after it closes.
+  /// An install and a failure announce from their own rows.
+  func spoken(after old: UpdateState) -> String? {
+    guard old == .checking else { return nil }
+    switch self {
+    case .upToDate: return "Up to date"
+    case .available(let offer): return "Version \(offer.version) available"
+    case .idle, .checking, .installing, .failed: return nil
+    }
+  }
+}
+
+/// One change log line. The feed is untrusted, so only an https link stays clickable.
+func releaseNoteText(_ line: String) -> AttributedString {
+  var text = (try? AttributedString(markdown: line, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(line)
+  for run in text.runs where run.link != nil && run.link?.scheme?.lowercased() != "https" {
+    text[run.range].link = nil
+  }
+  return text
+}
+
 /// Beside the version in About, while an offer stands.
 struct UpdateBadge: View {
   @ObservedObject var updates: UpdateController
@@ -40,14 +73,29 @@ struct UpdateBadge: View {
   }
 }
 
+/// In place of `UpdateSection` when the feed did not start, so a bad key is not mistaken for a development build.
+struct UpdatesOffRow: View {
+  let problem: String
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 4) {
+      Text(verbatim: "Updates are off: \(problem)")
+        .textSelection(.enabled)
+        .fixedSize(horizontal: false, vertical: true)
+      Link("Download the latest release", destination: UpdateController.releasePage)
+    }
+  }
+}
+
 /// The popover's footer line, while an offer stands.
 struct UpdateNotice: View {
   @ObservedObject var updates: UpdateController
   let open: () -> Void
+  var title: String { updates.state.noticeOverride ?? "Update available" }
 
   var body: some View {
     if let offer = updates.state.offer {
-      Button("Update available", action: open)
+      Button(title, action: open)
         .buttonStyle(.borderless)
         .accessibilityHint("Version \(offer.version). Opens Settings, About.")
     }
@@ -65,7 +113,7 @@ private struct ReleaseNotes: View, Equatable {
         VStack(alignment: .leading, spacing: 3) {
           Text("\(note.version) (\(note.date))").fontWeight(.semibold)
           ForEach(Array(note.lines.enumerated()), id: \.offset) { _, line in
-            Text((try? AttributedString(markdown: line, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(line))
+            Text(releaseNoteText(line))
               .foregroundStyle(.secondary)
               .fixedSize(horizontal: false, vertical: true)
           }
@@ -97,7 +145,8 @@ struct UpdateSection: View {
     case .failed(let offer, let problem):
       if let offer {
         whatsNew(offer)
-        updateRow(offer)
+        // The problem row says the same as the brew-missing row, and it announces.
+        if problem != .brewMissing { updateRow(offer) }
       }
       problemRow(problem)
     }
@@ -108,6 +157,9 @@ struct UpdateSection: View {
         Button("Check now") { Task { await updates.check() } }
           .disabled(updates.state == .checking || appState.phase != .idle)
       }
+    }
+    .onChange(of: updates.state) { old, new in
+      if let spoken = new.spoken(after: old) { AccessibilityNotification.Announcement(spoken).post() }
     }
     Toggle("Check for updates once a day", isOn: $checksEnabled)
       // The schedule reads the setting only after its daily sleep.
@@ -197,6 +249,11 @@ struct UpdateSection: View {
     .task(id: problem.message) { AccessibilityNotification.Announcement(problem.message).post() }
   }
 
+  static func copy(_ command: String, to pasteboard: NSPasteboard = .general) {
+    pasteboard.clearContents()
+    pasteboard.setString(command, forType: .string)
+  }
+
   @ViewBuilder private func fallbackRow(_ fallback: UpdateProblem.Fallback?) -> some View {
     switch fallback {
     case .command(let command):
@@ -207,10 +264,7 @@ struct UpdateSection: View {
           .fixedSize(horizontal: false, vertical: true)
           .frame(maxWidth: .infinity, alignment: .leading)
           .accessibilityLabel("Command to run in Terminal: \(command)")
-        Button("Copy") {
-          NSPasteboard.general.clearContents()
-          NSPasteboard.general.setString(command, forType: .string)
-        }
+        Button("Copy") { Self.copy(command) }
         .accessibilityLabel("Copy command")
       }
     case .download(let url):

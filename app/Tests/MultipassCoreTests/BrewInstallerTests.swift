@@ -12,11 +12,13 @@ private final class Harness {
   var disk: [String?]
   var relaunched: URL?
   var stages: [InstallStage] = []
+  var logged: [String] = []
   lazy var installer = BrewInstaller(
     runner: runner,
     appURL: appURL,
     diskVersion: { [unowned self] _ in self.disk.count > 1 ? self.disk.removeFirst() : self.disk[0] },
-    relaunch: { [unowned self] in self.relaunched = $0 }
+    relaunch: { [unowned self] in self.relaunched = $0 },
+    log: { [unowned self] in self.logged.append($0) }
   )
 
   init(disk: [String?]) {
@@ -78,6 +80,21 @@ private final class Harness {
   #expect(problem.detail == lines.suffix(20).joined(separator: "\n"))
   #expect(problem.fallback == .command(BrewInstaller.command))
   #expect(h.relaunched == nil)
+}
+
+@Test @MainActor func aFailureBesideALandedBundleIsLoggedBeforeTheRelaunch() async throws {
+  let h = Harness(disk: ["0.10.0", "0.11.0"])
+  h.runner.fail("upgrade", .failed(status: 1, stderr: "a late error from brew"))
+  try await h.install()
+  #expect(h.relaunched == appURL)
+  #expect(h.logged.count == 1)
+  #expect(h.logged.first?.contains("a late error from brew") == true)
+}
+
+@Test @MainActor func aCleanUpgradeLogsNothing() async throws {
+  let h = Harness(disk: ["0.10.0", "0.11.0"])
+  try await h.install()
+  #expect(h.logged.isEmpty)
 }
 
 @Test @MainActor func aFailedBrewUpdateStillTriesTheUpgrade() async throws {
