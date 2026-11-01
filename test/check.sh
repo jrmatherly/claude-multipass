@@ -32,6 +32,8 @@ prettier --log-level warn --ignore-unknown --check "**/*.{js,cjs,ts,md,json,sh}"
 bash test/claude-multipass.sh > /dev/null
 # scripts/make-appcast.sh and scripts/verify-appcast.sh
 bash test/appcast.sh > /dev/null
+# the codesign retry in scripts/sign-mac-app.sh
+bash test/sign-mac-app.sh > /dev/null
 # make-appcast.sh refuses this, and a tag would find out only after notarizing
 if grep -qF ']]>' CHANGELOG.md; then
   echo "check: CHANGELOG.md contains ]]>, which would end the appcast's CDATA section" >&2

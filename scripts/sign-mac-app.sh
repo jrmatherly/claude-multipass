@@ -93,6 +93,22 @@ notarize_file() {
   fi
 }
 
+# Apple's timestamp service can fail and then pass with nothing changed, twice in a
+# row on 2026-11-01. Any other failure stops at once. --force makes a retry safe.
+sign_part() {
+  local attempt err
+  for attempt in 1 2 3 4; do
+    if err=$(codesign --force --timestamp "$@" 2>&1); then
+      echo "$err" >&2
+      return 0
+    fi
+    echo "$err" >&2
+    [[ $err == *'A timestamp was expected but was not found'* ]] || exit 1
+    [ "$attempt" = 4 ] || sleep 15
+  done
+  exit 1
+}
+
 case "$mode" in
   sign-app)
     entitlements=()
@@ -102,10 +118,10 @@ case "$mode" in
     sparkle="$target/Contents/Frameworks/Sparkle.framework"
     if [ -d "$sparkle" ]; then
       for part in "$sparkle/Versions/B/Autoupdate" "$sparkle/Versions/B/Updater.app" "$sparkle"; do
-        codesign --force --options runtime --timestamp --sign "$identity" "$part"
+        sign_part --options runtime --sign "$identity" "$part"
       done
     fi
-    codesign --force --options runtime --timestamp ${entitlements[@]+"${entitlements[@]}"} --sign "$identity" "$target"
+    sign_part --options runtime ${entitlements[@]+"${entitlements[@]}"} --sign "$identity" "$target"
     codesign --verify --deep --strict --verbose=2 "$target"
     if [ "$notarize" = 1 ]; then
       # notarytool takes a zip, not a bundle; the ticket is stapled to the app itself
@@ -116,7 +132,7 @@ case "$mode" in
     fi
     ;;
   sign-dmg)
-    codesign --force --timestamp --sign "$identity" "$target"
+    sign_part --sign "$identity" "$target"
     codesign --verify --verbose=2 "$target"
     if [ "$notarize" = 1 ]; then
       notarize_file "$target"

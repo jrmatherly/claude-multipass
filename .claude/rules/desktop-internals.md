@@ -67,7 +67,7 @@ Measured 2026-11-01 with `scripts/rehearse-update.sh` (**M**), on Darwin 27.2, a
 - `--stop-feed`: Check now said `The update could not be reached. Check your connection.` The screenshot came after the click, so the silent launch was not recorded separately.
 - `--from-dmg`: Check now said `Move Claude Multipass to Applications to update.`
 - An agent cannot click this app's status item here: computer use does not list the app, the app reports no `AXExtrasMenuBar` (`-25212`), and no window belongs to its pid. A person opens About.
-- `codesign --timestamp` failed twice in a row on `Autoupdate` (`A timestamp was expected but was not found`), then passed with no change. Cause not established. `sign-mac-app.sh` does not retry, so a tag could fail the same way.
+- `codesign --timestamp` failed twice in a row on `Autoupdate` (`A timestamp was expected but was not found`), then passed with no change. Cause not established. `sign-mac-app.sh` tries each signature up to four times, 15 s apart, on that error only. The count and the wait are a guess; no run has exercised the retry against the real service.
 
 Not covered: the cask route, a notarized quarantined app, App Management. The first real pair settles them (`docs/superpowers/plans/2026-10-31-in-app-updates.md`, last section).
 
