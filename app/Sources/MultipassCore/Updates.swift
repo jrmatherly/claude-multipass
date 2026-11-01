@@ -147,7 +147,8 @@ public protocol UpdateFeed: AnyObject {
 }
 
 public protocol Installer: AnyObject {
-  /// Returning means the process is about to relaunch. Throws UpdateProblem.
+  /// Returning means the process is about to relaunch, and an installer may instead
+  /// never return while the process exits. Throws UpdateProblem.
   @MainActor func install(_ offer: UpdateOffer, report: @escaping @MainActor (InstallStage) -> Void) async throws
 }
 

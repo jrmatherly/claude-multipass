@@ -4,11 +4,32 @@ import Testing
 
 @testable import ClaudeMultipass
 
-private let offer = UpdateOffer(version: "0.11.0", notes: [])
-private let item = FeedItem(version: "0.11.0", changelog: "## 0.11.0 (2026-11-02)")
+private let changelog = "## 0.11.0 (2026-11-02)"
+private let offer = UpdateOffer(version: "0.11.0", notes: [ReleaseNote(version: "0.11.0", date: "2026-11-02", lines: [])])
+private let item = FeedItem(version: "0.11.0", changelog: changelog)
 
 private func sparkleError(_ code: Int) -> NSError {
   NSError(domain: "SUSparkleErrorDomain", code: code, userInfo: [NSLocalizedDescriptionKey: "raw \(code)"])
+}
+
+/// A Sparkle object built by class name and typed by inference, because only
+/// SparkleUpdater.swift may import Sparkle, and some of these have no public init.
+private func sparkle<T>(_ name: String, _ fields: [String: Any] = [:]) -> T {
+  let object = class_createInstance(NSClassFromString(name), 0) as! NSObject
+  object.setValuesForKeys(fields)
+  return object as! T
+}
+
+/// A missing resume must fail its test in seconds, not hang the job to its timeout.
+@MainActor
+private func soon(_ done: () -> Bool) async -> Bool {
+  let clock = ContinuousClock()
+  let deadline = clock.now + .seconds(5)
+  while clock.now < deadline {
+    if done() { return true }
+    try? await Task.sleep(for: .milliseconds(2))
+  }
+  return false
 }
 
 /// A driver with its Sparkle calls replaced, driven the way Sparkle's callbacks drive it.
@@ -17,82 +38,114 @@ private final class Harness {
   var canCheck = true
   var probes = 0
   var installs = 0
-  var quits = 0
   var stages: [InstallStage] = []
   var returned = false
   var problem: UpdateProblem?
+  var probeResult: Result<FeedItem?, UpdateProblem>?
   lazy var updater = SparkleUpdater(
     calls: .init(
       canCheck: { [unowned self] in self.canCheck },
       probe: { [unowned self] in self.probes += 1 },
-      install: { [unowned self] in self.installs += 1 },
-      quit: { [unowned self] in self.quits += 1 }))
+      install: { [unowned self] in self.installs += 1 }))
 
-  func startInstall() async -> Task<Void, Never> {
-    let task = Task { @MainActor in
+  func startInstall() async {
+    Task { @MainActor in
       do {
-        try await updater.install(offer) { [unowned self] in self.stages.append($0) }
+        try await updater.install(offer) { self.stages.append($0) }
         returned = true
       } catch {
         problem = error as? UpdateProblem
       }
     }
-    while installs == 0 { await Task.yield() }
-    return task
+    #expect(await soon { installs > 0 })
   }
 
-  func startProbe() async -> Task<Result<FeedItem?, UpdateProblem>, Never> {
-    let task = Task { @MainActor () -> Result<FeedItem?, UpdateProblem> in
+  func startProbe() async {
+    let before = probes
+    probeResult = nil
+    Task { @MainActor in
       do {
-        return .success(try await updater.probe())
+        probeResult = .success(try await updater.probe())
       } catch {
-        return .failure(error as! UpdateProblem)
+        probeResult = .failure(error as! UpdateProblem)
       }
     }
-    while probes == 0 { await Task.yield() }
-    return task
+    #expect(await soon { probes > before })
+  }
+
+  func thrown() async -> UpdateProblem? {
+    _ = await soon { problem != nil }
+    return problem
+  }
+
+  func probed() async -> Result<FeedItem?, UpdateProblem>? {
+    _ = await soon { probeResult != nil }
+    return probeResult
+  }
+
+  func find() {
+    updater.updater(sparkle("SPUUpdater"), didFindValidUpdate: sparkle("SUAppcastItem", ["displayVersionString": item.version, "itemDescription": item.changelog]))
+  }
+
+  func finishCycle(error: Error? = nil) {
+    updater.updater(sparkle("SPUUpdater"), didFinishUpdateCycleFor: .updates, error: error)
+  }
+
+  func installingUpdate() {
+    updater.showInstallingUpdate(withApplicationTerminated: false, retryTerminatingApplication: {})
   }
 }
 
 @Test @MainActor func aFoundItemIsTheProbesAnswer() async {
   let h = Harness()
-  let probe = await h.startProbe()
-  h.updater.found = item
-  h.updater.finishCycle(error: nil)
-  #expect(await probe.value == .success(item))
+  await h.startProbe()
+  h.find()
+  h.finishCycle()
+  #expect(await h.probed() == .success(item))
+}
+
+@Test @MainActor func aLaterProbeThatFindsNothingForgetsTheEarlierItem() async {
+  let h = Harness()
+  await h.startProbe()
+  h.find()
+  h.finishCycle()
+  #expect(await h.probed() == .success(item))
+  await h.startProbe()
+  h.finishCycle()
+  #expect(await h.probed() == .success(nil))
 }
 
 // Sparkle reports "nothing newer" as an error, and a rollback arrives this way.
 @Test @MainActor func nothingNewerIsNilAndNotAnError() async {
   let h = Harness()
-  let probe = await h.startProbe()
-  h.updater.finishCycle(error: sparkleError(1001))
-  #expect(await probe.value == .success(nil))
+  await h.startProbe()
+  h.finishCycle(error: sparkleError(1001))
+  #expect(await h.probed() == .success(nil))
 }
 
 // Review focus 7
 @Test @MainActor func aReadOnlyVolumeSaysToMoveTheApp() async throws {
   let h = Harness()
-  let probe = await h.startProbe()
-  h.updater.finishCycle(error: sparkleError(1003))
-  guard case .failure(let problem) = await probe.value else { throw CancellationError() }
+  await h.startProbe()
+  h.finishCycle(error: sparkleError(1003))
+  guard case .failure(let problem) = await h.probed() else { throw CancellationError() }
   #expect(problem.message == "Move Claude Multipass to Applications to update.")
 }
 
 @Test @MainActor func anUnreachableFeedIsAFailure() async throws {
   let h = Harness()
-  let probe = await h.startProbe()
-  h.updater.finishCycle(error: sparkleError(2001))
-  guard case .failure(let problem) = await probe.value else { throw CancellationError() }
+  await h.startProbe()
+  h.finishCycle(error: sparkleError(2001))
+  guard case .failure(let problem) = await h.probed() else { throw CancellationError() }
   #expect(problem.message.contains("could not be reached"))
 }
 
 @Test @MainActor func aSecondEndOfAProbeIsHarmless() async {
   let h = Harness()
-  let probe = await h.startProbe()
-  h.updater.finishCycle(error: nil)
-  h.updater.finishCycle(error: sparkleError(2001))
-  #expect(await probe.value == .success(nil))
+  await h.startProbe()
+  h.finishCycle()
+  h.finishCycle(error: sparkleError(2001))
+  #expect(await h.probed() == .success(nil))
 }
 
 @Test @MainActor func aSessionInProgressFailsRatherThanHangs() async {
@@ -103,111 +156,160 @@ private final class Harness {
   #expect(h.probes == 0 && h.installs == 0)
 }
 
-@Test @MainActor func stagesFollowTheDriverAndInstallReturnsAtRelaunch() async {
+@Test @MainActor func stagesFollowTheDriverAndInstallNeverReturns() async {
   let h = Harness()
-  let install = await h.startInstall()
+  await h.startInstall()
   h.updater.showDownloadInitiated(cancellation: {})
   h.updater.showDownloadDidReceiveExpectedContentLength(100)
   h.updater.showDownloadDidReceiveData(ofLength: 40)
   h.updater.showDownloadDidStartExtractingUpdate()
   var replied = false
-  h.updater.showReady(toInstallAndRelaunch: { _ in replied = true })
+  h.updater.showReady(toInstallAndRelaunch: { replied = $0 == .install })
   #expect(replied)
-  h.updater.showInstallingUpdate(withApplicationTerminated: false, retryTerminatingApplication: {})
-  await install.value
+  h.installingUpdate()
+  try? await Task.sleep(for: .milliseconds(50))
   #expect(h.stages == [.downloading(nil), .downloading(0), .downloading(0.4), .extracting, .installing, .relaunching])
-  #expect(h.returned)
-}
-
-// A double resume of a checked continuation traps, so reaching the end proves once.
-@Test @MainActor func callbacksAfterTheInstallResumedReportNothing() async {
-  let h = Harness()
-  let install = await h.startInstall()
-  h.updater.showInstallingUpdate(withApplicationTerminated: false, retryTerminatingApplication: {})
-  await install.value
-  let settled = h.stages
-  var acknowledged = false
-  h.updater.showDownloadDidStartExtractingUpdate()
-  h.updater.showUpdaterError(sparkleError(4005), acknowledgement: { acknowledged = true })
-  h.updater.showInstallingUpdate(withApplicationTerminated: true, retryTerminatingApplication: {})
-  h.updater.dismissUpdateInstallation()
-  #expect(acknowledged)
-  #expect(h.stages == settled)
-  #expect(h.returned)
+  #expect(!h.returned)
   #expect(h.problem == nil)
 }
 
-// The controller holds the phase once install returned, so a live process must not stay.
-@Test @MainActor func aFailureAfterInstallReturnedQuits() async {
+// A double resume of a checked continuation traps, so reaching the end proves once.
+@Test @MainActor func aLateErrorThrowsAndNothingReportsAfterIt() async {
   let h = Harness()
-  let install = await h.startInstall()
-  h.updater.showInstallingUpdate(withApplicationTerminated: false, retryTerminatingApplication: {})
-  await install.value
-  #expect(h.quits == 0)
-  h.updater.showUpdaterError(sparkleError(4005), acknowledgement: {})
-  #expect(h.quits == 1)
+  await h.startInstall()
+  h.installingUpdate()
+  var acknowledged = 0
+  h.updater.showUpdaterError(sparkleError(4005), acknowledgement: { acknowledged += 1 })
+  let problem = await h.thrown()
+  #expect(problem?.message == "raw 4005")
+  #expect(problem?.fallback == .download(UpdateController.releasePage))
+  let settled = h.stages
+  h.updater.showDownloadDidStartExtractingUpdate()
+  h.installingUpdate()
+  h.updater.showUpdaterError(sparkleError(4005), acknowledgement: { acknowledged += 1 })
+  h.updater.dismissUpdateInstallation()
+  #expect(acknowledged == 2)
+  #expect(h.stages == settled)
+  #expect(!h.returned)
 }
 
-@Test @MainActor func aFailureBeforeInstallReturnedNeverQuits() async {
+@Test @MainActor func aDismissAfterInstallingThrows() async {
   let h = Harness()
-  let install = await h.startInstall()
-  h.updater.showUpdaterError(sparkleError(4005), acknowledgement: {})
+  await h.startInstall()
+  h.installingUpdate()
   h.updater.dismissUpdateInstallation()
-  await install.value
-  #expect(h.quits == 0)
-  #expect(h.problem != nil)
+  #expect(await h.thrown()?.fallback == .download(UpdateController.releasePage))
+  #expect(!h.returned)
+}
+
+// The bug this design fixes: the app used to quit with no word and keep the old version.
+@Test @MainActor func aLateFailureReachesTheUserWithTheAppIdle() async {
+  let suite = "net.matherly.claude-multipass.tests.sparkle-updater"
+  let defaults = UserDefaults(suiteName: suite)!
+  defer { defaults.removePersistentDomain(forName: suite) }
+  let appState = AppState(makeRunner: { _ in nil }, store: SettingsStore(defaults: defaults))
+  let h = Harness()
+  let updater = h.updater
+  let controller = UpdateController(appState: appState, feed: updater, detect: { .direct }, installer: { _ in updater }, runningVersion: "0.9.0")
+
+  Task { await controller.check() }
+  #expect(await soon { h.probes > 0 })
+  h.find()
+  h.finishCycle()
+  #expect(await soon { controller.state == .available(offer) })
+
+  Task { await controller.install() }
+  #expect(await soon { h.installs > 0 })
+  h.installingUpdate()
+  #expect(await soon { controller.state == .installing(offer, .relaunching) })
+  #expect(appState.phase == .updating)
+  #expect(!controller.state.blocksQuit)
+
+  h.updater.showUpdaterError(sparkleError(4005), acknowledgement: {})
+  let failed = UpdateState.failed(offer, UpdateProblem(message: "raw 4005", detail: nil, fallback: .download(UpdateController.releasePage)))
+  #expect(await soon { controller.state == failed })
+  #expect(await soon { appState.phase == .idle })
 }
 
 @Test @MainActor func aSecondCallWhileOneWaitsFailsAndLeavesTheFirst() async {
   let h = Harness()
-  let probe = await h.startProbe()
+  await h.startProbe()
   await #expect(throws: UpdateProblem.self) { try await h.updater.probe() }
-  h.updater.finishCycle(error: nil)
-  #expect(await probe.value == .success(nil))
-  let install = await h.startInstall()
+  h.finishCycle()
+  #expect(await h.probed() == .success(nil))
+  await h.startInstall()
   await #expect(throws: UpdateProblem.self) { try await h.updater.install(offer) { _ in } }
-  h.updater.showInstallingUpdate(withApplicationTerminated: false, retryTerminatingApplication: {})
-  await install.value
-  #expect(h.returned)
+  h.updater.showUpdaterError(sparkleError(4005), acknowledgement: {})
+  #expect(await h.thrown()?.message == "raw 4005")
 }
 
 @Test @MainActor func anUpdaterErrorThrowsWithTheDownloadLinkAndStopsStages() async {
   let h = Harness()
-  let install = await h.startInstall()
+  await h.startInstall()
   var acknowledged = false
   h.updater.showUpdaterError(sparkleError(4005), acknowledgement: { acknowledged = true })
   h.updater.dismissUpdateInstallation()
-  await install.value
+  let problem = await h.thrown()
   #expect(acknowledged)
-  #expect(h.problem?.message == "raw 4005")
-  #expect(h.problem?.fallback == .download(UpdateController.releasePage))
+  #expect(problem?.message == "raw 4005")
+  #expect(problem?.fallback == .download(UpdateController.releasePage))
   h.updater.showDownloadDidStartExtractingUpdate()
   #expect(h.stages.isEmpty)
 }
 
 @Test @MainActor func aReleaseGoneAtTheClickSaysSo() async {
   let h = Harness()
-  let install = await h.startInstall()
+  await h.startInstall()
   var acknowledged = false
   h.updater.showUpdateNotFoundWithError(sparkleError(1001), acknowledgement: { acknowledged = true })
-  await install.value
+  let problem = await h.thrown()
   #expect(acknowledged)
-  #expect(h.problem?.message == "This update is no longer offered.")
+  #expect(problem?.message == "This update is no longer offered.")
+  #expect(problem?.fallback == nil)
 }
 
 // The phase must never stay held by a session Sparkle ended without an error.
 @Test @MainActor func aDismissedInstallReleases() async {
   let h = Harness()
-  let install = await h.startInstall()
+  await h.startInstall()
   h.updater.dismissUpdateInstallation()
-  await install.value
-  #expect(h.problem != nil)
+  #expect(await h.thrown() != nil)
 }
 
 // Nothing installs without a click: a stray session is answered no.
 @Test @MainActor func withNoInstallWaitingTheReadyReplyIsDismiss() {
   let h = Harness()
-  var install = false
-  h.updater.showReady(toInstallAndRelaunch: { install = $0 == .install })
-  #expect(!install)
+  var dismissed = false
+  h.updater.showReady(toInstallAndRelaunch: { dismissed = $0 == .dismiss })
+  #expect(dismissed)
+}
+
+@Test @MainActor func aFoundUpdateIsAnsweredByWhetherAnInstallWaits() async {
+  let h = Harness()
+  var replies = 0
+  var dismissed = false
+  h.updater.showUpdateFound(with: sparkle("SUAppcastItem"), state: sparkle("SPUUserUpdateState")) {
+    replies += 1
+    dismissed = $0 == .dismiss
+  }
+  #expect(replies == 1 && dismissed)
+  await h.startInstall()
+  var installs = false
+  h.updater.showUpdateFound(with: sparkle("SUAppcastItem"), state: sparkle("SPUUserUpdateState")) {
+    replies += 1
+    installs = $0 == .install
+  }
+  #expect(replies == 2 && installs)
+}
+
+// Automatic checks stay ours, behind the toggle, and no profile leaves the Mac.
+@Test @MainActor func thePermissionRequestTurnsOnNothing() {
+  let h = Harness()
+  var replied = false
+  h.updater.show(.init(systemProfile: [])) {
+    replied = true
+    #expect(!$0.automaticUpdateChecks)
+    #expect(!$0.sendSystemProfile)
+  }
+  #expect(replied)
 }
