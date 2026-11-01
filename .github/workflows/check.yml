@@ -41,6 +41,9 @@ jobs:
           tar -xJf "$tarball"
           echo "$PWD/shellcheck-v$SHELLCHECK_VERSION" >> "$GITHUB_PATH"
       - run: pnpm install --frozen-lockfile
+      # The gate as release.yml runs it, so a PR fails where the tag would
       - run: pnpm check
+        env:
+          MACOS_SIGN_REQUIRED: 1
       # Proves the bundle every PR. With no identity here it stays unsigned.
       - run: bash scripts/build-app.sh

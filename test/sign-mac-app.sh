@@ -37,7 +37,7 @@ STUB
 chmod +x "$tmp/bin/codesign" "$tmp/bin/sleep"
 
 export STUB_DIR=$tmp PATH="$tmp/bin:$PATH" MACOS_SIGN_IDENTITY=fixture
-# release.yml sets MACOS_SIGN_REQUIRED and check.yml does not, so each case states its own
+# CI sets MACOS_SIGN_REQUIRED and a local run does not, so each case states its own
 unset APPLE_API_KEY_ID APPLE_API_ISSUER_ID APPLE_API_KEY_P8 MACOS_SIGN_ENTITLEMENTS MACOS_SIGN_REQUIRED
 timestamp_error="$tmp/x: A timestamp was expected but was not found."
 
