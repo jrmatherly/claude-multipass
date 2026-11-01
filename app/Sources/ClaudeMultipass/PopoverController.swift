@@ -10,7 +10,7 @@ final class PopoverController: NSObject, NSPopoverDelegate {
   private let popover = NSPopover()
   private let panel: AccountPanelController
 
-  init(appState: AppState, openSettings: @escaping (SettingsPane?) -> Void) {
+  init(appState: AppState, updates: UpdateController, openSettings: @escaping (SettingsPane?) -> Void) {
     self.appState = appState
     panel = AccountPanelController(appState: appState)
     super.init()
@@ -18,7 +18,7 @@ final class PopoverController: NSObject, NSPopoverDelegate {
     popover.behavior = .transient
     popover.animates = false
     let hosting = NSHostingController(
-      rootView: PopoverView(appState: appState, openSettings: openSettings, close: { [popover] in popover.performClose(nil) }, panel: panel))
+      rootView: PopoverView(appState: appState, openSettings: openSettings, close: { [popover] in popover.performClose(nil) }, panel: panel, updates: updates))
     // The popover sizes itself from preferredContentSize; without this it
     // keeps the 320x320 default, lays out for that height and then shrinks
     // from the top, leaving a gap under the status item.

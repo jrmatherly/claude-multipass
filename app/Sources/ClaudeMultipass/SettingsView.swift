@@ -31,6 +31,7 @@ enum SettingsPane: Int, CaseIterable {
 struct SettingsView: View {
   @ObservedObject var appState: AppState
   let pane: SettingsPane
+  let updates: UpdateController?
   @State private var draft: AppSettings
   @State private var customLocation: Bool
   @State private var launchAtLogin = SettingsView.loginItemOn
@@ -50,9 +51,10 @@ struct SettingsView: View {
 
   private static let docs = URL(string: "https://github.com/jrmatherly/claude-multipass/blob/main/docs/claude-multipass.md")!
 
-  init(appState: AppState, pane: SettingsPane) {
+  init(appState: AppState, pane: SettingsPane, updates: UpdateController? = nil) {
     self.appState = appState
     self.pane = pane
+    self.updates = updates
     _draft = State(initialValue: appState.settings)
     _customLocation = State(initialValue: appState.settings.cliPathOverride != nil)
   }
@@ -152,7 +154,19 @@ struct SettingsView: View {
 
   @ViewBuilder private var about: some View {
     Section {
-      LabeledContent("Claude Multipass", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "development build")
+      LabeledContent("Claude Multipass") {
+        HStack(spacing: 6) {
+          Text(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "development build")
+          if let updates { UpdateBadge(updates: updates) }
+        }
+      }
+      if let updates, updates.isAvailable {
+        if let problem = updates.startProblem {
+          UpdatesOffRow(problem: problem)
+        } else {
+          UpdateSection(updates: updates, appState: appState, checksEnabled: binding(\.updateChecksEnabled))
+        }
+      }
       LabeledContent("Documentation") {
         Link(destination: Self.docs) {
           HStack(spacing: 3) {

@@ -126,6 +126,109 @@ private func render(_ view: some View, _ name: String, background: NSColor = .wi
 }
 
 @MainActor
+final class FixtureFeed: UpdateFeed {
+  private let result: Result<FeedItem?, Error>
+  init(_ result: Result<FeedItem?, Error>) { self.result = result }
+  func probe() async throws -> FeedItem? { try result.get() }
+}
+
+/// Reports `stage` and then never finishes, or throws `error`.
+@MainActor
+final class FixtureInstaller: Installer {
+  private let stage: InstallStage?
+  private let error: Error?
+  init(stage: InstallStage? = nil, error: Error? = nil) {
+    self.stage = stage
+    self.error = error
+  }
+
+  func install(_ offer: UpdateOffer, report: @escaping @MainActor (InstallStage) -> Void) async throws {
+    if let stage {
+      report(stage)
+      try await Task.sleep(nanoseconds: 3_600_000_000_000)
+    }
+    if let error { throw error }
+  }
+}
+
+/// Far more than fits the change log's fixed height, with the inline Markdown the file uses.
+let fixtureChangelog = (0..<9).map { i in
+  "## 0.\(19 - i).0 (2026-11-\(10 + i))\n\n- The menu bar app shows **a long line** that has to wrap, with `some code` in it, and a [link](https://example.com).\n- A short line.\n"
+}.joined(separator: "\n")
+
+@MainActor
+func updateController(
+  _ appState: AppState,
+  feed: Result<FeedItem?, Error> = .success(FeedItem(version: "0.19.0", changelog: fixtureChangelog)),
+  kind: InstallKind = .direct,
+  installer: FixtureInstaller? = nil
+) -> UpdateController {
+  let installer = installer ?? FixtureInstaller()
+  return UpdateController(
+    appState: appState,
+    feed: FixtureFeed(feed),
+    detect: { kind },
+    installer: { kind in kind == .homebrewMissing ? nil : installer },
+    runningVersion: "0.9.0")
+}
+
+let updateFixtureNames = ["idle", "upToDate", "available", "availableBrew", "noBrew", "failedNoBrew", "failedCheck", "installing", "upgrading", "failedBrew", "failedSparkle", "startFailed"]
+
+/// Each named state, reached through `check()` and `install()` as the real app reaches it.
+@MainActor
+func updateFixture(_ name: String) async -> (AppState, UpdateController) {
+  let appState = await state(FixtureRunner())
+  let brew = InstallKind.homebrew(brew: URL(fileURLWithPath: "/opt/homebrew/bin/brew"))
+  let controller: UpdateController
+  switch name {
+  case "idle":
+    return (appState, updateController(appState))
+  case "upToDate":
+    controller = updateController(appState, feed: .success(nil))
+  case "available":
+    controller = updateController(appState)
+  case "availableBrew":
+    controller = updateController(appState, kind: brew)
+  case "noBrew":
+    controller = updateController(appState, kind: .homebrewMissing)
+  case "failedCheck":
+    controller = updateController(appState, feed: .failure(UpdateProblem(message: "The update server could not be reached.", detail: nil, fallback: nil)))
+  case "installing":
+    controller = updateController(appState, kind: brew, installer: FixtureInstaller(stage: .downloading(0.4)))
+  case "upgrading":
+    controller = updateController(appState, kind: brew, installer: FixtureInstaller(stage: .upgrading))
+  case "failedNoBrew":
+    controller = updateController(appState, kind: .homebrewMissing)
+  case "startFailed":
+    return (appState, UpdateController(appState: appState, feed: nil, startProblem: "The provided EdDSA key could not be decoded.", detect: { .direct }, installer: { _ in nil }, runningVersion: "0.9.0"))
+  case "failedBrew":
+    let output = (1...20).map { "Error: line \($0) of what brew printed, long enough that it has to wrap in the output area" }.joined(separator: "\n")
+    let problem = UpdateProblem(message: "Homebrew could not update the app. macOS may be blocking this. Check System Settings, Privacy and Security, App Management.", detail: output, fallback: .command(BrewInstaller.command))
+    controller = updateController(appState, kind: brew, installer: FixtureInstaller(error: problem))
+  case "failedSparkle":
+    let problem = UpdateProblem(message: "The update could not be installed.", detail: nil, fallback: .download(UpdateController.releasePage))
+    controller = updateController(appState, installer: FixtureInstaller(error: problem))
+  default:
+    preconditionFailure("no update fixture named \(name)")
+  }
+  await controller.check()
+  switch name {
+  case "installing", "upgrading":
+    Task { await controller.install() }
+    let reported = await soon {
+      if case .installing(_, let stage) = controller.state { return stage != .preparing }
+      return false
+    }
+    #expect(reported, "\(name) never reached its stage")
+  case "failedBrew", "failedSparkle", "failedNoBrew":
+    await controller.install()
+  default:
+    break
+  }
+  return (appState, controller)
+}
+
+@MainActor
 private func menuBar(_ view: some View) -> some View {
   view.padding(.horizontal, 10).padding(.vertical, 3).background(Color(nsColor: .controlBackgroundColor).opacity(0.6))
 }
@@ -151,6 +254,9 @@ private func menuBar(_ view: some View) -> some View {
     Task { await switching.switchTo("work") }
     while switching.phase == .idle { await Task.yield() }
     try render(PopoverView(appState: switching, openSettings: { _ in }, close: {}), "popover-switching")
+    let updating = await state(FixtureRunner(usage: usageLevels[0].1))
+    _ = await updating.beginUpdate()
+    try render(PopoverView(appState: updating, openSettings: { _ in }, close: {}), "popover-updating")
 
     let refused = await state(FixtureRunner(usage: usageLevels[0].1, usageFails: true, switchRefusal: "refusing to switch: the signed-in login was never saved (claude-multipass save <name>), or --force"))
     await refused.switchTo("work")
@@ -158,6 +264,43 @@ private func menuBar(_ view: some View) -> some View {
 
     try render(PopoverView(appState: await state(nil), openSettings: { _ in }, close: {}), "popover-cli-missing")
     try render(PopoverView(appState: await state(FixtureRunner(versionFails: true)), openSettings: { _ in }, close: {}), "popover-cli-failed")
+  }
+
+  @Test func popoverUpdate() async throws {
+    let s = await state(FixtureRunner(usage: usageLevels[0].1))
+    let available = updateController(s)
+    await available.check()
+    try render(PopoverView(appState: s, openSettings: { _ in }, close: {}, updates: available), "popover-update-available")
+    let current = updateController(s, feed: .success(nil))
+    await current.check()
+    try render(PopoverView(appState: s, openSettings: { _ in }, close: {}, updates: current), "popover-update-none")
+    for name in ["upgrading", "failedSparkle"] {
+      let (appState, updates) = await updateFixture(name)
+      try render(PopoverView(appState: appState, openSettings: { _ in }, close: {}, updates: updates), "popover-update-\(name)")
+    }
+  }
+
+  @Test func aboutUpdate() async throws {
+    _ = NSApplication.shared
+    let height = { (appState: AppState, updates: UpdateController?, name: String) async throws -> CGFloat in
+      var height: CGFloat = 0
+      for dark in [false, true] {
+        let controller = SettingsWindowController(appState: appState, updates: updates)
+        controller.window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+        controller.show(pane: .about)
+        try await Task.sleep(nanoseconds: 500_000_000)
+        try write(try #require(controller.window.contentView?.superview), "\(name)-\(dark ? "dark" : "light")")
+        height = controller.window.frame.height
+        controller.window.close()
+      }
+      return height
+    }
+    _ = try await height(await state(FixtureRunner()), nil, "about-update-none")
+    for name in updateFixtureNames {
+      let (appState, updates) = await updateFixture(name)
+      let grown = try await height(appState, updates, "about-update-\(name)")
+      #expect(grown < 800, "\(name) can push the window off a laptop screen")
+    }
   }
 
   @Test func accountDetail() throws {
@@ -184,7 +327,7 @@ private func menuBar(_ view: some View) -> some View {
     for (suffix, settings) in [("", s.settings), ("-custom", custom)] {
       await s.apply(settings)
       for dark in [false, true] {
-        let controller = SettingsWindowController(appState: s)
+        let controller = SettingsWindowController(appState: s, updates: nil)
         controller.window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
         for pane in SettingsPane.allCases where suffix.isEmpty || pane == .general {
           controller.show(pane: pane)
@@ -205,7 +348,7 @@ private func menuBar(_ view: some View) -> some View {
     }
 
     await s.apply(AppSettings())
-    let controller = SettingsWindowController(appState: s)
+    let controller = SettingsWindowController(appState: s, updates: nil)
     controller.window.appearance = NSAppearance(named: .aqua)
     controller.show(pane: .general)
     try await Task.sleep(nanoseconds: 400_000_000)

@@ -253,7 +253,7 @@ public enum UpdateState: Equatable {
 }
 public protocol UpdateFeed: AnyObject { @MainActor func probe() async throws -> FeedItem? }
 public protocol Installer: AnyObject {
-  /// Returning means the process is about to relaunch. Throws UpdateProblem.
+  /// Returns once the relaunch has started (brew). Never returns on success when the installer's own quit ends the process (Sparkle). Throws UpdateProblem.
   @MainActor func install(_ offer: UpdateOffer, report: @escaping @MainActor (InstallStage) -> Void) async throws
 }
 extension UpdateProblem: Error {}

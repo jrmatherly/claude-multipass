@@ -22,7 +22,7 @@ private func sparkle<T>(_ name: String, _ fields: [String: Any] = [:]) -> T {
 
 /// A missing resume must fail its test in seconds, not hang the job to its timeout.
 @MainActor
-private func soon(_ done: () -> Bool) async -> Bool {
+func soon(_ done: () -> Bool) async -> Bool {
   let clock = ContinuousClock()
   let deadline = clock.now + .seconds(5)
   while clock.now < deadline {
@@ -123,7 +123,6 @@ private final class Harness {
   #expect(await h.probed() == .success(nil))
 }
 
-// Review focus 7
 @Test @MainActor func aReadOnlyVolumeSaysToMoveTheApp() async throws {
   let h = Harness()
   await h.startProbe()
@@ -132,12 +131,51 @@ private final class Harness {
   #expect(problem.message == "Move Claude Multipass to Applications to update.")
 }
 
-@Test @MainActor func anUnreachableFeedIsAFailure() async throws {
+private func chain(_ errors: NSError...) -> NSError {
+  errors.reversed().reduce(nil as NSError?) { under, error in
+    var info = error.userInfo
+    info[NSUnderlyingErrorKey] = under
+    return NSError(domain: error.domain, code: error.code, userInfo: info)
+  }!
+}
+
+private func described(_ domain: String, _ code: Int, _ text: String) -> NSError {
+  NSError(domain: domain, code: code, userInfo: [NSLocalizedDescriptionKey: text])
+}
+
+private let generic = [
+  described("SUSparkleErrorDomain", 2001, "An error occurred in retrieving update information. Please try again later."),
+  described("SUSparkleErrorDomain", 2001, "An error occurred while downloading the update. Please try again later."),
+]
+
+// The chains Sparkle 2.10.1 gave a real SPUUpdater, measured against a local server on 2026-11-01.
+@Test @MainActor func aFeedThatIsNotThereSaysNotFoundAndNotConnection() async throws {
   let h = Harness()
   await h.startProbe()
-  h.finishCycle(error: sparkleError(2001))
+  let notFound = described("SUSparkleErrorDomain", 2001, "A network error occurred while downloading https://example.com/appcast.xml. not found (404)")
+  h.finishCycle(error: chain(generic[0], generic[1], notFound))
   guard case .failure(let problem) = await h.probed() else { throw CancellationError() }
-  #expect(problem.message.contains("could not be reached"))
+  #expect(problem.message == "The update could not be downloaded.")
+  #expect(problem.detail == notFound.localizedDescription)
+}
+
+@Test @MainActor func aNetworkCauseKeepsTheConnectionAdvice() async throws {
+  let h = Harness()
+  await h.startProbe()
+  let url = described(NSURLErrorDomain, -1004, "Could not connect to the server.")
+  h.finishCycle(error: chain(generic[0], generic[1], described("SUSparkleErrorDomain", 2001, "Failed to download temporary data."), url, described("kCFErrorDomainCFNetwork", -1004, "noise")))
+  guard case .failure(let problem) = await h.probed() else { throw CancellationError() }
+  #expect(problem.message == "The update could not be reached. Check your connection.")
+  #expect(problem.detail == url.localizedDescription)
+}
+
+@Test @MainActor func anInstallFailureCarriesItsCauseToo() async {
+  let h = Harness()
+  await h.startInstall()
+  h.updater.showUpdaterError(chain(generic[1], described("SUSparkleErrorDomain", 2001, "not found (404)")), acknowledgement: {})
+  let problem = await h.thrown()
+  #expect(problem?.detail == "not found (404)")
+  #expect(problem?.fallback == .download(UpdateController.releasePage))
 }
 
 @Test @MainActor func aSecondEndOfAProbeIsHarmless() async {
@@ -202,7 +240,7 @@ private final class Harness {
   #expect(!h.returned)
 }
 
-// The bug this design fixes: the app used to quit with no word and keep the old version.
+// A failure that arrives after Sparkle's quit begins must still reach the user, with the phase released.
 @Test @MainActor func aLateFailureReachesTheUserWithTheAppIdle() async {
   let suite = "net.matherly.claude-multipass.tests.sparkle-updater"
   let defaults = UserDefaults(suiteName: suite)!
@@ -264,8 +302,19 @@ private final class Harness {
   h.updater.showUpdateNotFoundWithError(sparkleError(1001), acknowledgement: { acknowledged = true })
   let problem = await h.thrown()
   #expect(acknowledged)
-  #expect(problem?.message == "This update is no longer offered.")
-  #expect(problem?.fallback == nil)
+  #expect(problem == .noLongerOffered)
+}
+
+// Sparkle may tear the session down from inside the acknowledgement, and the real problem must win.
+@Test @MainActor func aTeardownInsideTheAcknowledgementDoesNotHideTheProblem() async {
+  let gone = Harness()
+  await gone.startInstall()
+  gone.updater.showUpdateNotFoundWithError(sparkleError(1001), acknowledgement: { gone.updater.dismissUpdateInstallation() })
+  #expect(await gone.thrown() == .noLongerOffered)
+  let failed = Harness()
+  await failed.startInstall()
+  failed.updater.showUpdaterError(sparkleError(4005), acknowledgement: { failed.updater.dismissUpdateInstallation() })
+  #expect(await failed.thrown()?.message == "raw 4005")
 }
 
 // The phase must never stay held by a session Sparkle ended without an error.

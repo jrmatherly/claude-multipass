@@ -1,8 +1,7 @@
 import MultipassCore
 import Sparkle
 
-/// The feed and the installer for a DMG install, through a driver with no
-/// windows of its own. The only file that imports Sparkle.
+/// The update feed for every real install and the installer for a DMG install, through a driver with no windows of its own. The only file that imports Sparkle.
 @MainActor
 final class SparkleUpdater: NSObject, SPUUserDriver, SPUUpdaterDelegate, UpdateFeed, Installer {
   /// Sparkle's entry points, apart so a test can drive the callbacks with no network.
@@ -16,7 +15,7 @@ final class SparkleUpdater: NSObject, SPUUserDriver, SPUUpdaterDelegate, UpdateF
   /// Stored only: `didFindValidUpdate` also fires during an install.
   private var found: FeedItem?
   private var probeWaiter: CheckedContinuation<FeedItem?, Error>?
-  /// Nil once the install has resumed, which is what stops any later callback reporting a stage.
+  /// Nil once the install has failed, which stops any later callback reporting a stage.
   private var installing: (waiter: CheckedContinuation<Void, Error>, report: @MainActor (InstallStage) -> Void)?
   private var expectedBytes: UInt64 = 0
   private var receivedBytes: UInt64 = 0
@@ -57,7 +56,7 @@ final class SparkleUpdater: NSObject, SPUUserDriver, SPUUpdaterDelegate, UpdateF
     guard let waiter = probeWaiter else { return }
     probeWaiter = nil
     if let error, (error as NSError).code != Int(SUError.noUpdateError.rawValue) {
-      waiter.resume(throwing: UpdateProblem(message: Self.message(for: error), detail: nil, fallback: nil))
+      waiter.resume(throwing: Self.problem(for: error, fallback: nil))
     } else {
       waiter.resume(returning: found)
     }
@@ -75,10 +74,10 @@ final class SparkleUpdater: NSObject, SPUUserDriver, SPUUpdaterDelegate, UpdateF
     }
   }
 
-  private func failInstall(_ message: String, fallback: UpdateProblem.Fallback? = .download(UpdateController.releasePage)) {
+  private func failInstall(_ problem: UpdateProblem) {
     guard let waiter = installing?.waiter else { return }
     installing = nil
-    waiter.resume(throwing: UpdateProblem(message: message, detail: nil, fallback: fallback))
+    waiter.resume(throwing: problem)
   }
 
   /// Nothing installs without a click, so with no install waiting the answer is no.
@@ -123,28 +122,35 @@ final class SparkleUpdater: NSObject, SPUUserDriver, SPUUpdaterDelegate, UpdateF
   }
 
   func showUpdaterError(_ error: Error, acknowledgement: @escaping () -> Void) {
+    failInstall(Self.problem(for: error, fallback: .download(UpdateController.releasePage)))
     acknowledgement()
-    failInstall(Self.message(for: error))
   }
 
   func showUpdateNotFoundWithError(_ error: Error, acknowledgement: @escaping () -> Void) {
+    failInstall(.noLongerOffered)
     acknowledgement()
-    failInstall("This update is no longer offered.", fallback: nil)
   }
 
   /// Sparkle's teardown: an install it ends with no error must still release the phase.
   func dismissUpdateInstallation() {
-    failInstall("The update stopped before it finished.")
+    failInstall(UpdateProblem(message: "The update stopped before it finished.", detail: nil, fallback: .download(UpdateController.releasePage)))
   }
 
   private static let busy = UpdateProblem(message: "An update check is still running. Try again in a moment.", detail: nil, fallback: nil)
 
-  private static func message(for error: Error) -> String {
-    switch (error as NSError).code {
-    case Int(SUError.runningFromDiskImageError.rawValue): return "Move Claude Multipass to Applications to update."
-    case Int(SUError.downloadError.rawValue): return "The update could not be reached. Check your connection."
-    default: return error.localizedDescription
+  /// Sparkle wraps the cause in generic errors two levels deep, and CFNetwork adds a useless one under a URL error.
+  private static func problem(for error: Error, fallback: UpdateProblem.Fallback?) -> UpdateProblem {
+    var chain = [error as NSError]
+    while let under = chain.last?.userInfo[NSUnderlyingErrorKey] as? NSError { chain.append(under) }
+    let network = chain.first { $0.domain == NSURLErrorDomain }
+    let message: String
+    switch chain[0].code {
+    case Int(SUError.runningFromDiskImageError.rawValue): message = "Move Claude Multipass to Applications to update."
+    case Int(SUError.downloadError.rawValue): message = network == nil ? "The update could not be downloaded." : "The update could not be reached. Check your connection."
+    default: message = error.localizedDescription
     }
+    let cause = chain.count > 1 ? network ?? chain.last : nil
+    return UpdateProblem(message: message, detail: cause?.localizedDescription, fallback: fallback)
   }
 
   // MARK: Driver methods with nothing to do

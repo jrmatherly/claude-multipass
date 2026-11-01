@@ -154,7 +154,7 @@ Installs at 0.9.0 or older have no updater. They reach 0.10.0 by `brew upgrade` 
 | Launch journal, stderr classifier, relaunch watchdog | Each handles a failure a disk read or Sparkle's own error already reports |
 | Cancel button | Killing brew between removing and placing a bundle is the one way to lose the app |
 | Bundled `jq` | A second signed binary with its own update duty, for one OS version |
-| Signed feed (`SURequireSignedFeed`) | The update itself is already EdDSA-signed. Without it, someone controlling the tap could only change the offer's text and version, and that person already controls what brew installs |
+| Signed feed (`SURequireSignedFeed`) | The update itself is already EdDSA-signed. Without it, someone controlling the tap could only change the offer's text and version, and that person already controls what brew installs. Links in that text are limited to https |
 | Newest of the two tools wins | The tool would change under a terminal user with no action of theirs |
 
 ## Out of scope
