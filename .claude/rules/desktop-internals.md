@@ -58,6 +58,19 @@ Measured 2026-10-30 against Desktop 4.4212.0, Claude Code 2.1.309 and 2.1.314, a
 
 - A bash fork keeps its parent's argv, so `ps` and `pgrep -f` list every subshell and command substitution as another `claude-multipass ...` row: one run of a script that backgrounds three subshells, each with a `$(...)`, showed 7 rows (M, 2026-10-28). `usage` backgrounds one subshell per profile, so a `ps` count of `usage --json` is not a run count. Count a side effect that happens once per run instead: one `security` call per `usage` run. A `ps` poll cannot see it either, since a `security` process lives about 10 ms (M, 2026-10-28); a pass-through `security` in `~/.local/bin`, which the app's runner puts ahead of `/usr/bin`, logging the subcommand and `-s` service and exec'ing the real binary, counts exactly. Measured that way on 2026-10-28 with 0.5.1: one Safe Storage read on relaunch and one per Refresh click, nine seconds apart, so the app runs `usage` once per poll and the earlier figure of about 40 was the subshell overcount (M).
 
+## In-app update rehearsal
+
+Measured 2026-11-01 with `scripts/rehearse-update.sh` (**M**), on Darwin 27.2, a Developer ID signed but not notarized build, under `net.matherly.mp-rehearsal`, from a temp folder. Jason clicked; the script read the disk and launchd.
+
+- Happy path: About showed the badge, the change log and the button. 0.0.1 became 0.0.2 and relaunched. launchd showed `<bundle id>-sparkle-progress` during the install (polled once a second, `-sparkle-updater` not caught), and no job or LaunchAgents file stayed.
+- `--bad-signature`: a failed state with the Download the update link and Sparkle's EdDSA text. The disk stayed at 0.0.1.
+- `--stop-feed`: Check now said `The update could not be reached. Check your connection.` The screenshot came after the click, so the silent launch was not recorded separately.
+- `--from-dmg`: Check now said `Move Claude Multipass to Applications to update.`
+- An agent cannot click this app's status item here: computer use does not list the app, the app reports no `AXExtrasMenuBar` (`-25212`), and no window belongs to its pid. A person opens About.
+- `codesign --timestamp` failed twice in a row on `Autoupdate` (`A timestamp was expected but was not found`), then passed with no change. Cause not established. `sign-mac-app.sh` does not retry, so a tag could fail the same way.
+
+Not covered: the cask route, a notarized quarantined app, App Management. The first real pair settles them (`docs/superpowers/plans/2026-10-31-in-app-updates.md`, last section).
+
 ## Open tests
 
 Untested or unverified claims, from the digest. Settle one before building on it.
