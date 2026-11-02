@@ -44,9 +44,9 @@ public struct Profile: Decodable, Equatable, Identifiable {
   public var sessions: Int
   /// Whether the profile holds the terminal's claude login (tool 0.3.0+).
   public var cliSaved: Bool
-  /// "llmr" for a profile that runs Desktop through llm-router (tools after 0.10.2); nil for a claude.ai account.
+  /// "llmr" for a profile that runs Desktop through LLMR (tools after 0.10.2); nil for a claude.ai account.
   public var kind: String?
-  /// The llm-router profile an LLMR profile launches.
+  /// The LLMR profile an LLMR profile launches.
   public var llmrProfile: String?
   public var id: String { name }
   public var isLLMR: Bool { kind == "llmr" }

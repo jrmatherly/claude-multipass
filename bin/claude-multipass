@@ -22,7 +22,7 @@
 #
 # `claude-multipass switch {{name}}`
 #
-# - Save an LLM Router profile under a name; switching to it runs `llmr {{llmr_profile}} app` (no quit, no Keychain):
+# - Save an LLM Router profile under a name (no quit, no Keychain); switching to it quits Claude and runs `llmr {{llmr_profile}} app`:
 #
 # `claude-multipass save {{name}} --llmr {{llmr_profile}}`
 #
@@ -85,8 +85,9 @@
 # account. Switching to it saves the outgoing login, quits Desktop and runs
 # `llmr <profile> app`, which launches Desktop on LLMR's own data folder; the
 # claude.ai login in the Desktop folder stays as it was. active-llmr beside
-# profiles/ names the LLMR profile while that instance runs. llmr is found
-# through CLAUDE_MULTIPASS_LLMR, then PATH, then ~/.llm-router/bin/llmr.
+# profiles/ holds the saved name of the LLMR profile while that instance runs.
+# llmr is found through CLAUDE_MULTIPASS_LLMR, then PATH, then
+# ~/.llm-router/bin/llmr.
 #
 # Profiles: ${CLAUDE_MULTIPASS_DIR:-${XDG_CONFIG_HOME:-~/.config}/claude-multipass}/profiles/<name>/
 # (config.json, Cookies, Cookies-journal, meta.json, cli.json). The Claude Code
@@ -113,12 +114,14 @@
 # key in that Mac's login Keychain ("Claude Safe Storage"), so a profile
 # copied to another Mac won't decrypt. Save each account once per Mac.
 # macOS only (osascript, open, security, Application Support paths); needs jq,
-# fzf for the picker, curl and the system python3 and openssl for usage.
+# fzf for the picker, curl and the system python3 and openssl for usage, and
+# curl for the LLMR gateway probe in current and list.
 #
 # Bare invocation on a terminal with fzf runs `pick`; `pick` and `current`
 # are also commands, for scripts and the self-check. The self-check stubs
-# security (stateful) and curl on PATH, so the CLI login paths and `usage` run
-# without the Keychain or network.
+# security (stateful), curl and pgrep on PATH and points CLAUDE_MULTIPASS_LLMR
+# at an llmr stub, so the CLI login paths, `usage` and LLMR switches run
+# without the Keychain, the network or llm-router.
 #
 # config.json.journal is left alone: it is the app's write-ahead copy, headed
 # by the sha256 of the config.json it was taken from, and the app discards it
@@ -223,7 +226,8 @@ ${bold}Commands${reset}
                        marked * while Desktop runs it, with "(gateway not
                        running)" when LLMR does not answer.
   show <name>          Prints one saved account in detail, including its Code
-                       session count per organization. The picker shows this
+                       session count per organization, or an LLMR profile's
+                       llmr profile and terminal hint. The picker shows this
                        as its preview.
   save <name>          Stores the login Desktop currently has under <name>, so
                        you can switch back to it later without an email code.
@@ -234,21 +238,29 @@ ${bold}Commands${reset}
                        already holds a different account, or another name
                        already holds this one, save stops; add --force to
                        replace that profile (it is kept in the backups
-                       folder, newest ten).
+                       folder, newest ten). While Desktop runs an LLMR
+                       profile, save stores the claude.ai login the Desktop
+                       folder holds and relaunches Desktop on it.
   save <name> --llmr <llmr-profile>
                        Saves an LLM Router (LLMR) profile under <name>. It
                        writes only meta.json: Desktop keeps running and the
                        Keychain is not read. Switching to <name> saves the
                        login you leave as switch does, quits Desktop and
                        runs llmr <llmr-profile> app instead of relaunching.
-                       The terminal's claude login stays as it is; run
-                       llmr <llmr-profile> for a terminal on LLMR. If llmr
-                       fails, Desktop relaunches on the claude.ai login and
-                       switch exits 1. Switching away quits LLMR's Desktop
-                       and relaunches the claude.ai login, also when the
-                       target is the account it already holds. An existing
-                       claude.ai profile under <name> stops it; add --force
-                       to replace that profile.
+                       The terminal's claude login stays as it is. llmr
+                       <llmr-profile> uses your ~/.claude when that LLMR
+                       profile has "Use my ~/.claude in the terminal" on (in
+                       llm-router after v7.1.1); otherwise it uses a blank
+                       Claude home. If llmr fails, or no LLMR Desktop
+                       appears within 10 s, Desktop relaunches on the
+                       claude.ai login and switch exits 1. Switching away
+                       quits Desktop (that this ends LLMR's instance is not
+                       yet checked against a real llmr launch) and
+                       relaunches the claude.ai login, also when the target
+                       is the account the Desktop folder still holds. An
+                       existing claude.ai profile under <name> stops it; add
+                       --force to replace that profile, which moves it to
+                       the backups folder and deletes its CLI login item.
   add <name>           Prepares Desktop for signing in to another account: the
                        current login is saved (if it has a name), Desktop
                        relaunches at its sign-in screen, and you sign in with
@@ -301,8 +313,8 @@ ${bold}Commands${reset}
   current              Prints the name of the saved account Desktop is signed
                        in as, "not saved" if the current login has no name, or
                        "signed out". For scripts and the Raycast commands.
-                       While Desktop runs an LLMR profile, prints that
-                       profile, with a warning when LLMR's gateway does not
+                       While Desktop runs an LLMR profile, prints its saved
+                       name, with a warning when LLMR's gateway does not
                        answer.
   pick                 Opens the fzf picker, the same as running the command
                        with no arguments.
@@ -319,7 +331,7 @@ ${bold}Commands${reset}
 
 ${bold}Options${reset}
   --no-relaunch        Leave Desktop quit after save, switch, add or pick,
-                       instead of relaunching it.
+                       instead of relaunching it (not for an LLMR profile).
   --force              save: replace a profile that holds a different account,
                        or another name for this one. switch, add: proceed
                        even though the current login was never saved. sync:
@@ -726,40 +738,59 @@ desktop_launch() {
 # A profile's LLMR profile name, or nothing for a claude.ai profile.
 llmr_of() { jq -r 'select(.kind == "llmr") | .llmrProfile | strings' "$store/$1/meta.json" 2> /dev/null || true; }
 
-llmr_bin() {
+# Prints the llmr path it tried; status 1 when that is not executable.
+llmr_find() {
   local bin=${CLAUDE_MULTIPASS_LLMR:-}
   [[ -n $bin ]] || bin=$(command -v llmr) || bin=$HOME/.llm-router/bin/llmr
-  [[ -x $bin ]] || fail "llmr not found at $bin (install llm-router, or set CLAUDE_MULTIPASS_LLMR)"
+  printf %s "$bin"
+  [[ -x $bin ]]
+}
+
+llmr_bin() {
+  local bin
+  bin=$(llmr_find) || fail "llmr not found at $bin (install llm-router, or set CLAUDE_MULTIPASS_LLMR)"
   printf %s "$bin"
 }
 
-# The marker's LLMR profile while a Desktop launched on an LLMR data folder
-# runs; status 1 otherwise, a stale marker included.
+# A Desktop launched on an LLMR data folder. -a for the reason desktop_running
+# gives.
 # shortcut: any LLMR-launched Desktop counts, not only the marker's profile,
 # because LLMR names the folder after its profile id, which can differ from the
 # name given to save --llmr; match the id once llmr reports it.
+llmr_desktop_running() { pgrep -aqf -- '--user-data-dir=.*/claude-app-user-data/'; }
+
+# llmr <p> app returns once it has spawned open -W -n, so its exit 0 does not
+# prove Desktop started.
+llmr_wait_up() {
+  local i
+  for ((i = 0; i < 20; i++)); do
+    llmr_desktop_running && return 0
+    sleep 0.5
+  done
+  llmr_desktop_running
+}
+
+# The marker's saved name while an LLMR-launched Desktop runs; status 1
+# otherwise, a stale marker included.
 llmr_running() {
   local p
   p=$(cat "$llmr_marker" 2> /dev/null) || return 1
-  [[ -n $p ]] && pgrep -qf -- '--user-data-dir=.*/claude-app-user-data/' || return 1
+  [[ -n $p ]] && llmr_desktop_running || return 1
   printf %s "$p"
 }
 
 # The saved name of the LLMR profile Desktop runs now, or nothing.
 llmr_current() {
-  local p meta
+  local p
   p=$(llmr_running) || return 0
-  for meta in "$store"/*/meta.json; do
-    [[ -f $meta && $(llmr_of "$(basename "${meta%/meta.json}")") == "$p" ]] || continue
-    basename "${meta%/meta.json}"
-    return 0
-  done
+  [[ -z $(llmr_of "$p") ]] || printf '%s\n' "$p"
 }
 
-# LLMR's gateway health route on its default port: no credential goes out and
-# the body (status and core endpoint) is dropped. -f counts its 503 (runtime
-# disabled) as down.
-llmr_gateway_up() { curl -fsS -o /dev/null --max-time 2 http://127.0.0.1:3456/health > /dev/null 2>&1; }
+# LLMR's gateway health route: no credential goes out and the body is
+# dropped. -q skips a ~/.curlrc, --noproxy keeps it local, and -f counts its
+# 503 (runtime disabled) as down.
+# shortcut: assumes LLMR's default port 3456; read it from llmr once it reports one.
+llmr_gateway_up() { curl -q -fs --noproxy '*' -o /dev/null --max-time 2 http://127.0.0.1:3456/health; }
 
 # An LLMR profile is only its meta.json; nothing of Desktop's is read.
 llmr_save() {
@@ -1203,6 +1234,7 @@ doctor_report() {
     done
     if [[ -n $(llmr_of "$name") ]]; then
       echo "ok: $name (LLMR profile $(llmr_of "$name"))"
+      llmr_find > /dev/null || echo "warn: $name: llmr not found (install llm-router, or set CLAUDE_MULTIPASS_LLMR)"
       continue
     elif [[ ! -f ${dir}meta.json ]]; then
       echo "fail: $name: missing meta.json"
@@ -1391,6 +1423,7 @@ profile_rename() {
   mv "$store/$1" "$store/$2"
   # An LLMR profile has no CLI login item.
   if [[ -n $(llmr_of "$2") ]]; then
+    [[ $(cat "$llmr_marker" 2> /dev/null) != "$1" ]] || printf '%s\n' "$2" > "$llmr_marker"
     echo "Renamed $1 to $2"
     return 0
   fi
@@ -1453,6 +1486,7 @@ pick_profile() {
 profile_remove() {
   require_profile "$1"
   profile_set_aside "$1"
+  [[ $(cat "$llmr_marker" 2> /dev/null) != "$1" ]] || rm -f "$llmr_marker"
   echo "Moved $1 to $backups (Desktop's current login is untouched)"
 }
 
@@ -1659,7 +1693,8 @@ main() {
   # The trap goes in before the quit, so a signal or a failed quit relaunches.
   if [[ -n $relaunch ]]; then trap 'cli_unlock; [[ -n $llmr_launched ]] || desktop_launch; run_unlock' EXIT; else trap 'cli_unlock; run_unlock' EXIT; fi
   desktop_quit
-  # The quit ended LLMR's instance too; a switch to an LLMR profile writes it again.
+  # Assumed, not yet checked against a real llmr launch: the quit ended LLMR's
+  # instance too. A switch to an LLMR profile writes the marker again.
   rm -f "$llmr_marker"
   # The CLI's own locks guard its login while a save reads it or a switch
   # writes it. They are taken only when claude.json exists, because
@@ -1675,16 +1710,16 @@ main() {
     save) profile_save "$name" ;;
     switch)
       if [[ -n $target_llmr ]]; then
-        # LLMR's instance keeps its own data folder, so the claude.ai login in
-        # the Desktop folder stays in place for the switch back, and the Code
-        # tab sync and the CLI login have nothing to do.
+        # LLMR's instance keeps its own data folder, so nothing merges into
+        # config.json: the claude.ai login there stays for the switch back. The
+        # Code tab sync and the CLI login have nothing to do.
         [[ -z $active ]] || profile_save "$active"
-        backup_login
         cli_unlock
         info "Launching Claude through LLMR profile $target_llmr"
         "$llmr" "$target_llmr" app < /dev/null || fail "llmr $target_llmr app exited $?; relaunching the claude.ai login"
+        llmr_wait_up || fail "Claude did not start through llmr $target_llmr within 10 s; relaunching the claude.ai login"
         llmr_launched=1
-        printf '%s\n' "$target_llmr" > "$llmr_marker"
+        printf '%s\n' "$name" > "$llmr_marker"
         echo "Switched to $name (terminal: run llmr $target_llmr)"
       elif [[ $active == "$name" ]]; then
         echo "$name is already signed in"
@@ -1693,12 +1728,13 @@ main() {
         # repairs too, backing up only when it writes.
         [[ -f $cookies/Cookies ]] || copy_cookies "$store/$name" "$cookies"
         cli_restore "$name"
+        index_sync
       else
         # Re-save first so token refreshes since the last save aren't lost.
         [[ -z $active ]] || profile_save "$active"
         profile_restore "$name"
+        index_sync
       fi
-      index_sync
       ;;
     add)
       if [[ -n $active ]]; then

@@ -20,7 +20,6 @@ struct AccountRow: View {
   /// A confirm, or a running switch or save, has the row's attention; the panel stays out of it.
   /// An LLMR profile has no usage figures to detail.
   var offersDetail: Bool { isIdle && !isExpanded && !profile.isLLMR }
-  /// What the row says under the name.
   var subtitle: String {
     if profile.isLLMR { return "terminal: run llmr \(profile.llmrProfile ?? profile.name)" }
     return profile.cliSaved ? "Desktop and terminal login" : "Desktop login only"
@@ -102,9 +101,10 @@ struct AccountRow: View {
     }
   }
 
-  private var confirmText: String {
-    if let llmr = profile.llmrProfile, profile.isLLMR {
-      return "Switch to \(profile.name)? Claude Desktop quits and llm-router relaunches it on LLMR profile \(llmr). "
+  var confirmText: String {
+    if profile.isLLMR {
+      let llmr = profile.llmrProfile ?? profile.name
+      return "Switch to \(profile.name)? Claude Desktop quits and LLMR launches its own instance on profile \(llmr). "
         + "The terminal's claude login stays as it is; run llmr \(llmr) for a terminal on LLMR."
     }
     return "Switch to \(profile.name)? Claude Desktop quits and relaunches signed in as \(profile.name). Its Code tab will list every saved account's sessions. "

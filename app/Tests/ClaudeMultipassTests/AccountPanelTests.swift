@@ -282,6 +282,8 @@ import Testing
     #expect(row.subtitle == "terminal: run llmr router-p")
     #expect(!row.showsUsage)
     #expect(!row.offersDetail)
+    #expect(row.confirmText.contains("Claude Desktop quits and LLMR launches its own instance on profile router-p."))
+    #expect(row.confirmText.contains("run llmr router-p for a terminal on LLMR."))
     let work = try #require(s.snapshot?.profiles.first { $0.name == "work" })
     #expect(AccountRow(appState: s, profile: work, isExpanded: false, onTap: {}, onCancel: {}, onSwitch: { _ in }).showsUsage)
   }

@@ -35,7 +35,7 @@ struct PopoverView: View {
         }
       case .ready:
         header
-        usage
+        if showsUsage { usage }
         if let snapshot = appState.snapshot, snapshot.signedIn, snapshot.current == nil {
           SaveRow(appState: appState)
         }
@@ -74,8 +74,11 @@ struct PopoverView: View {
     appState.snapshot?.profiles.first { $0.name == appState.snapshot?.current }
   }
 
+  /// An LLMR profile has no claude.ai usage to show.
+  var showsUsage: Bool { current?.isLLMR != true }
+
   var planLine: String? {
-    appState.settings.usageEnabled ? appState.currentUsage?.planLine(now: Date()) : nil
+    showsUsage && appState.settings.usageEnabled ? appState.currentUsage?.planLine(now: Date()) : nil
   }
 
   private var header: some View {
