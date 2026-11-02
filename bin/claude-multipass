@@ -66,6 +66,10 @@
 #
 # `claude-multipass switch {{name}} --no-relaunch`
 #
+# - Log timings and process lists to debug.log, and watch the CLI login for 30 s after a switch (save, switch, add, pick; CLAUDE_MULTIPASS_DEBUG=1 does the same without the timestamped stderr lines):
+#
+# `claude-multipass switch {{name}} --debug`
+#
 # - Sync while Claude runs, or switch or add away from a login that was never saved:
 #
 # `claude-multipass sync --force`
@@ -96,6 +100,16 @@
 # of the tool's own (service claude-multipass, account <name>) and the identity
 # into cli.json, when the CLI is signed in as the same account as Desktop. The
 # token goes to security as hex, never to a file.
+# A running Hindsight memory daemon (hindsight-api) with its claude-code LLM
+# provider starts a claude per call on that same login, and a call that loaded
+# the old login can write it back after a swap. So save, switch and add wait
+# for those children with the daemon running, SIGSTOP it for the CLI part and
+# SIGCONT it before Desktop relaunches, from the EXIT trap on a failure.
+# With --debug or CLAUDE_MULTIPASS_DEBUG, save, switch and add log to debug.log
+# beside profiles/ (mode 0600, no token from the Keychain and no token hash, with
+# claude command lines cut at 160 characters), and a switch compares a hash of the
+# live refresh token, in memory, and the CLI's identity every 2 s for 30 s after
+# the switch.
 # The backups/ folder beside it keeps the login (config.json and cookies) each
 # switch or add replaced, newest ten, plus any profile `save --force` replaced
 # or moved aside as a second name for the same account and any `remove` set
@@ -162,6 +176,12 @@ llmr_marker="$root/active-llmr"
 cli_service='Claude Code-credentials'
 cli_account=${USER:-$(id -un)}
 mp_service=claude-multipass
+# A global, set here and not in main: pick calls main again for its switch.
+debug=${CLAUDE_MULTIPASS_DEBUG:+1}
+# Only --debug streams the timestamped lines to stderr: the app sets the variable
+# and shows a switch's whole stderr to the user as a warning. The watch's warnings
+# go to stderr either way, on purpose, so the app shows them as a row note.
+debug_stderr=''
 
 bold=$(tput bold 2> /dev/null || true)
 yellow=$(tput setaf 3 2> /dev/null || true)
@@ -191,7 +211,7 @@ ${bold}Usage${reset}
   claude-multipass                    open a picker of saved accounts
   claude-multipass list
   claude-multipass show <name>
-  claude-multipass save|switch|add <name> [--no-relaunch] [--force]
+  claude-multipass save|switch|add <name> [--no-relaunch] [--force] [--debug]
   claude-multipass save <name> --llmr <llmr-profile> [--force]
   claude-multipass remove <name>
   claude-multipass rename <old> <new>
@@ -341,6 +361,12 @@ ${bold}Options${reset}
   --json               list, usage: print JSON instead of text, for scripts and
                        the menu bar app.
   --llmr <profile>     save: save an LLMR profile instead of the Desktop login.
+  --debug              save, switch, add, pick: log timings and process lists to
+                       $root/debug.log and stderr, and watch the CLI login for
+                       30 s after a switch, holding the run lock. Other
+                       commands ignore it. CLAUDE_MULTIPASS_DEBUG=1 does the
+                       same without the timestamped stderr lines; a warning
+                       that the login changed still goes to stderr.
 
 ${bold}Folders${reset}
   Profiles   $store/<name>/
@@ -384,6 +410,13 @@ ${bold}Cautions${reset}
     jq, before it quits Desktop.
   - save, switch and add exit 1 before they quit Desktop on a config.json jq
     cannot read as one object. --force does not lift it.
+  - save, switch and add pause a running Hindsight memory daemon
+    (hindsight-api) while they read or write the CLI login, because a claude
+    it started on the old login can write that login back after the swap. They
+    wait up to 60 s for that claude with the daemon running, stop the daemon,
+    and resume it before Desktop relaunches. After a SIGKILL of the run the
+    daemon stays stopped until the next save, switch or add that gets past its
+    refusals. doctor warns while it is stopped.
 EOF
 }
 
@@ -444,6 +477,42 @@ keychain_exit() {
   esac
 }
 
+# Under bash 3.2 a write that failed stays in the builtin's buffer, and the next
+# $(...) in this process would capture it (run_unlock's readlink did, measured).
+# Any later builtin write flushes it; this one goes nowhere.
+flush_failed_write() { echo > /dev/null; }
+
+# Runs inside the EXIT trap too, so a log that cannot be written fails nothing.
+# The first call of a run rewrites the log, which also puts its mode back to 0600.
+dbg_trimmed=''
+dbg() {
+  [[ -n $debug ]] || return 0
+  local log="$root/debug.log"
+  [[ -z $debug_stderr ]] || echo "debug: $(date +%H:%M:%S) $*" >&2 || flush_failed_write
+  if [[ -z $dbg_trimmed ]]; then
+    dbg_trimmed=1
+    (umask 077 && tail -n 2000 "$log" > "$log.tmp" && mv "$log.tmp" "$log") 2> /dev/null || rm -f "$log.tmp" 2> /dev/null || true
+  fi
+  (umask 077 && printf '%s %s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$$" "$*" >> "$log") 2> /dev/null || true
+}
+
+# A claude's command line can hold anything, so the log keeps only its start.
+# -a because plain pgrep hides this run's ancestors, and a claude that started the
+# run is one of the processes the log is for.
+dbg_claude_procs() {
+  [[ -n $debug ]] || return 0
+  local pid ppid command
+  for pid in $(pgrep -ax claude 2> /dev/null || true); do
+    read -r ppid command < <(ps -o ppid= -o command= -p "$pid" 2> /dev/null) || continue
+    dbg "claude pid=$pid ppid=$ppid ${command:0:160}"
+  done
+}
+
+dbg_warning() {
+  warning "debug: $*" || flush_failed_write
+  dbg "$*"
+}
+
 # The account uuid the CLI is signed in as, or nothing when signed out. It is
 # the same claude.ai account id Desktop stores as lastKnownAccountUuid, so
 # equality with the live Desktop account is the fingerprint that proves the
@@ -460,6 +529,69 @@ cli_live_read() {
   cli_live=$(keychain_get "$cli_service" "$cli_account") || rc=$?
   [[ $rc -ne 0 && $rc -ne 44 ]] || cli_live_rc=$rc
   return "$rc"
+}
+
+# The sha256 of the live item's refresh token, for the debug watch, through pipes
+# only and never kept beyond a comparison. An absent item or token hashes like any
+# other value, so a deletion reads as a change. It fails on a read that tells
+# nothing: another security status, or an item that is not JSON. The cache is
+# cleared because the watch exists to see what changed since the last read.
+cli_token_hash() {
+  local rc=0
+  cli_live_rc=''
+  cli_live_read || rc=$?
+  ((rc == 0 || rc == 44)) || return 1
+  printf '%s' "$cli_live" | jq -r '.claudeAiOauth.refreshToken // empty' 2> /dev/null | shasum -a 256 | cut -c1-64
+}
+
+# "<refresh token hash> <CLI identity>", the login the watch compares against.
+cli_watch_pair=''
+# The last step of a switch, with the CLI part done and Hindsight still stopped.
+debug_arm() {
+  [[ -n $debug ]] || return 0
+  local name=$1 why hash now want
+  why=$(cli_blocker)
+  if [[ -n $why ]]; then
+    dbg "no watch: ${why//$'\n'/; }"
+    return 0
+  fi
+  if ! hash=$(cli_token_hash); then
+    dbg_warning "could not read the CLI login; no watch"
+    return 0
+  fi
+  now=$(cli_signed_in_as)
+  want=$(jq -r '.account // empty' "$store/$name/meta.json" 2> /dev/null || true)
+  [[ $now == "$want" ]] || dbg_warning "the CLI login is on ${now:-unknown}, not $name"
+  cli_watch_pair="$hash $now"
+}
+
+# Called from the EXIT trap as `debug_watch || true`, so no failure in here can
+# end the trap early or change the exit code. It never stops early: an ordinary
+# refresh at 2 s must not hide a write-back at 17 s, as measured. A token-only
+# change counts too, since the identity file can lag the item by a minute (measured).
+debug_watch() {
+  [[ -n $debug && -n $cli_watch_pair ]] || return 0
+  local i hash now failed=0 changed=''
+  for ((i = 0; i < 15; i++)); do
+    sleep 2
+    if ! hash=$(cli_token_hash); then
+      failed=$((failed + 1))
+      continue
+    fi
+    now=$(cli_signed_in_as)
+    [[ "$hash $now" != "$cli_watch_pair" ]] || continue
+    cli_watch_pair="$hash $now"
+    changed=1
+    dbg_warning "CLI login changed after the switch (now ${now:-unknown}); see $root/debug.log"
+    dbg_claude_procs
+  done
+  if ((failed == 15)); then
+    dbg_warning "could not read the CLI login in any of the 15 polls; nothing was checked"
+  elif ((failed > 0)); then
+    dbg_warning "could not read the CLI login in $failed of 15 polls; see $root/debug.log"
+  elif [[ -z $changed ]]; then
+    dbg "CLI login unchanged for 30 s"
+  fi
 }
 
 # The CLI is skipped for this run (a held lock on save or add).
@@ -590,8 +722,82 @@ cli_unlock() {
 # on refresh (open test in desktop-internals.md); the warning is cheap.
 cli_running_warning() {
   local pid
+  dbg_claude_procs
   pid=$(pgrep -x claude 2> /dev/null | head -1) || true
   [[ -z $pid ]] || warning "Claude Code is running (pid $pid); quit it first, or its next token refresh can overwrite the switched login; it also serves its cached login for up to 30 s after a switch"
+}
+
+# Hindsight's claude-code LLM provider spawns a claude per call on the shared
+# login, and a call that loaded the old login can write its rotated pair back
+# after the swap (the rewrite measured 2026-11-02). The daemon reads each child's
+# output through a pipe, so it stops only once no child is left. Signals go to
+# the pids found at pause time and nothing else, and none of them kills.
+hindsight_paused=()
+# Anchored, or a shell whose text holds that path would get the SIGSTOP (reproduced).
+hindsight_daemon_pids() { pgrep -f '^([^ ]*/python[^ ]* )?[^ ]*/bin/hindsight-api( |$)' 2> /dev/null || true; }
+hindsight_stopped() { [[ $(ps -o state= -p "$1" 2> /dev/null) == T* ]]; }
+
+hindsight_children() {
+  local pid
+  for pid in "$@"; do pgrep -P "$pid" -x claude 2> /dev/null || true; done
+}
+
+hindsight_stop() {
+  local pid
+  for pid in "$@"; do
+    kill -0 "$pid" 2> /dev/null || continue
+    # Recorded first, so a signal between the two lines still resumes it from the trap.
+    hindsight_paused+=("$pid")
+    kill -STOP "$pid" 2> /dev/null || true
+  done
+}
+
+# Runs from the EXIT trap too, so a pid that is gone by now is not a failure.
+hindsight_resume() {
+  local pid
+  for pid in ${hindsight_paused[@]+"${hindsight_paused[@]}"}; do kill -CONT "$pid" 2> /dev/null || true; done
+  [[ ${#hindsight_paused[@]} -eq 0 ]] || dbg "hindsight resumed pid ${hindsight_paused[*]}"
+  hindsight_paused=()
+}
+
+hindsight_pause() {
+  local pids pid children waited='' i=0
+  pids=$(hindsight_daemon_pids)
+  [[ -n $pids ]] || return 0
+  # shortcut: a SIGKILL runs no trap, and the app's watchdog sends it to the whole
+  # process group, so a background resumer dies too. The daemon stays stopped
+  # until this line in the next save, switch or add that gets past its refusals;
+  # add a resumer outside the group if a stuck daemon is ever seen.
+  for pid in $pids; do
+    ! hindsight_stopped "$pid" || info "Resumed Hindsight's memory daemon, left stopped by a killed run"
+    kill -CONT "$pid" 2> /dev/null || true
+  done
+  # A blocked CLI part moves no login, so there is nothing to protect.
+  [[ -z $(cli_blocker) ]] || return 0
+  while :; do
+    children=$(hindsight_children $pids)
+    if [[ -z $waited && -n $children ]]; then
+      waited=$children
+      info "Waiting up to 60 s for Hindsight's claude (pid ${children//$'\n'/ }) to finish"
+      dbg "waiting up to 60 s for Hindsight's claude (pid ${children//$'\n'/ })"
+    fi
+    if [[ -z $children ]]; then
+      hindsight_stop $pids
+      children=$(hindsight_children $pids)
+      [[ -n $children ]] || break
+      hindsight_resume
+    fi
+    if ((++i >= 120)); then
+      hindsight_stop $pids
+      warning "Hindsight's claude (pid ${children//$'\n'/ }) was still running after 60 s; it may write back the login it loaded"
+      break
+    fi
+    sleep 0.5
+  done
+  if [[ ${#hindsight_paused[@]} -gt 0 ]]; then
+    info "Paused Hindsight's memory daemon during the CLI login swap"
+    dbg "hindsight stopped pid ${hindsight_paused[*]}; waited $((i / 2)) s for children: ${waited:-none}"
+  fi
 }
 
 # The live CLI item's account part and identity, kept under the name of this
@@ -659,6 +865,7 @@ cli_restore() {
   if ((rc == 0)) && [[ $(cli_signed_in_as) == "$(jq -r .account "$dir/meta.json")" ]] \
     && printf '%s' "$cli_live" | jq -e '.claudeAiOauth != null' > /dev/null 2>&1 && ! cli_cleared "$cli_live"; then
     cli_capture "$name"
+    dbg "cli restore already on $(cli_signed_in_as)"
     return 0
   fi
   if ((rc == 44)); then live=''; elif ((rc != 0)); then
@@ -700,6 +907,7 @@ cli_restore() {
     fi
     return 0
   fi
+  dbg "cli restore wrote $(cli_signed_in_as)"
   # claude-swap reports the CLI takes these locks on refresh (unverified here),
   # so they are released before claude is asked.
   cli_unlock
@@ -731,7 +939,9 @@ desktop_quit() {
 }
 
 desktop_launch() {
-  info "Launching Claude"
+  # A closed stdout must not cost the relaunch: set -e holds in the EXIT trap.
+  info "Launching Claude" 2> /dev/null || flush_failed_write
+  dbg "launching Claude"
   open -a Claude
 }
 
@@ -1197,7 +1407,7 @@ usage_object() {
 # One line per check, in a fixed order, no Keychain and no network. Exits 1
 # when any fail: line was printed.
 doctor_report() {
-  local status=0 tool mode meta dir name file logins set_aside legacy unchecked='' jq_works=''
+  local status=0 tool mode meta dir name file logins set_aside legacy pid unchecked='' jq_works=''
   jq -n 1 > /dev/null 2>&1 && jq_works=1
   if [[ ! -f $config ]]; then
     echo "fail: config: no $config (open Claude Desktop once first)"
@@ -1267,6 +1477,9 @@ doctor_report() {
   # usage makes no profile call without a writable plans folder, so no plan names show.
   [[ ! -d $root/plans || -w $root/plans ]] || echo "warn: plans: $root/plans is not writable; usage stops refreshing plan names (chmod 700 \"$root/plans\")"
   if desktop_running; then echo "ok: desktop: running"; else echo "ok: desktop: not running"; fi
+  for pid in $(hindsight_daemon_pids); do
+    ! hindsight_stopped "$pid" || echo "warn: hindsight: its daemon is stopped, as a killed run leaves it (kill -CONT $pid, or the next save, switch or add resumes it)"
+  done
   legacy="$config_home/dotfiles/claude-desktop-accounts"
   [[ ! -d $legacy ]] || echo "warn: legacy store: $legacy still exists (it moves on the first run without CLAUDE_MULTIPASS_DIR)"
   return $status
@@ -1546,6 +1759,7 @@ main() {
       --no-relaunch) relaunch= ;;
       --force) force=1 ;;
       --json) json=1 ;;
+      --debug) debug=1 debug_stderr=1 ;;
       --llmr)
         [[ $# -ge 2 ]] || fail "--llmr needs an LLMR profile name"
         valid_name "$2"
@@ -1690,8 +1904,18 @@ main() {
   ! inside_desktop || fail "This shell runs inside Claude Desktop; quitting it would end this session. Run $cmd from Terminal or the menu bar app"
   # relaunch is main's local, so the trap text is chosen now, not at exit.
   # The run lock goes last, so no other run quits Desktop before it relaunches.
-  # The trap goes in before the quit, so a signal or a failed quit relaunches.
-  if [[ -n $relaunch ]]; then trap 'cli_unlock; [[ -n $llmr_launched ]] || desktop_launch; run_unlock' EXIT; else trap 'cli_unlock; run_unlock' EXIT; fi
+  # The trap goes in before the quit, so a signal or a failed quit relaunches, and
+  # before the first debug line, which a closed stderr turns into a SIGPIPE. That
+  # signal is ignored inside the trap, where a second one would end it before the
+  # relaunch.
+  if [[ -n $relaunch ]]; then trap 'trap "" PIPE; flush_failed_write; hindsight_resume; cli_unlock; [[ -n $llmr_launched ]] || desktop_launch; debug_watch || true; run_unlock' EXIT; else trap 'trap "" PIPE; flush_failed_write; hindsight_resume; cli_unlock; debug_watch || true; run_unlock' EXIT; fi
+  [[ -z $debug ]] || dbg "$cmd $name: claude-multipass $version, Claude $(defaults read /Applications/Claude.app/Contents/Info.plist CFBundleShortVersionString 2> /dev/null || echo unknown)"
+  dbg "quitting Claude"
+  desktop_quit
+  dbg "quit done"
+  # Before the locks, since a child may need them to finish.
+  hindsight_pause
+  # That wait can take 60 s, and Desktop may have been reopened in it.
   desktop_quit
   # Assumed, not yet checked against a real llmr launch: the quit ended LLMR's
   # instance too. A switch to an LLMR profile writes the marker again.
@@ -1714,6 +1938,7 @@ main() {
         # config.json: the claude.ai login there stays for the switch back. The
         # Code tab sync and the CLI login have nothing to do.
         [[ -z $active ]] || profile_save "$active"
+        hindsight_resume
         cli_unlock
         info "Launching Claude through LLMR profile $target_llmr"
         "$llmr" "$target_llmr" app < /dev/null || fail "llmr $target_llmr app exited $?; relaunching the claude.ai login"
@@ -1748,6 +1973,8 @@ main() {
       info "Sign in with the new account (email code), then claude auth login for the terminal, then run: claude-multipass save $name"
       ;;
   esac
+  # Only a switch: the watch's Keychain reads stay inside it, and an LLMR switch moves no CLI login.
+  [[ $cmd != switch || -n $target_llmr ]] || debug_arm "$name"
 }
 
 main "$@"

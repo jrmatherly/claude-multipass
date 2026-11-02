@@ -24,7 +24,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         CLI.locate(
           override: settings.cliPathOverride,
           bundled: CLI.bundledTool(in: .main)
-        ).map { CLI(executable: $0) }
+        ).map {
+          CLI(executable: $0, extraEnvironment: settings.cliEnvironment)
+        }
       },
       store: SettingsStore(defaults: .standard))
     appState.start()

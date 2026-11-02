@@ -12,15 +12,21 @@ public struct AppSettings: Equatable, Codable {
   public var stripStyle = StripStyle.ringAndName
   public var cliPathOverride: String? = nil
   public var updateChecksEnabled = true
+  public var debugSwitches = false
 
   public static let snapshotInterval: TimeInterval = 30
   /// A Refresh click runs `usage` at once; a burst of clicks costs one run.
   public static let usageRefreshFloor: TimeInterval = 30
   public static let allowedIntervals = [5, 15, 30, 60]
 
+  /// Added to the environment of every run of the tool.
+  public var cliEnvironment: [String: String] {
+    debugSwitches ? ["CLAUDE_MULTIPASS_DEBUG": "1"] : [:]
+  }
+
   public init() {}
 
-  private enum Keys: String, CodingKey { case usageEnabled, usageIntervalMinutes, stripStyle, enabledModules, cliPathOverride, updateChecksEnabled }
+  private enum Keys: String, CodingKey { case usageEnabled, usageIntervalMinutes, stripStyle, enabledModules, cliPathOverride, updateChecksEnabled, debugSwitches }
 
   /// Every key optional, so a partial blob seeded with `defaults write` loads.
   public init(from decoder: Decoder) throws {
@@ -37,6 +43,7 @@ public struct AppSettings: Equatable, Codable {
     }
     cliPathOverride = try c.decodeIfPresent(String.self, forKey: .cliPathOverride)
     updateChecksEnabled = try c.decodeIfPresent(Bool.self, forKey: .updateChecksEnabled) ?? updateChecksEnabled
+    debugSwitches = try c.decodeIfPresent(Bool.self, forKey: .debugSwitches) ?? debugSwitches
   }
 
   public func encode(to encoder: Encoder) throws {
@@ -46,6 +53,7 @@ public struct AppSettings: Equatable, Codable {
     try c.encode(stripStyle, forKey: .stripStyle)
     try c.encodeIfPresent(cliPathOverride, forKey: .cliPathOverride)
     try c.encode(updateChecksEnabled, forKey: .updateChecksEnabled)
+    try c.encode(debugSwitches, forKey: .debugSwitches)
   }
 
   private static let oldUsageModules: Set<String> = ["sessionBar", "weeklyBar", "sessionReset", "weeklyReset"]

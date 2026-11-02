@@ -90,7 +90,7 @@ public final class AppState: ObservableObject {
     let old = settings
     settings = new
     store.save(new)
-    if old.cliPathOverride != new.cliPathOverride {
+    if old.cliPathOverride != new.cliPathOverride || old.debugSwitches != new.debugSwitches {
       await relocate()
     }
     switch (old.usageEnabled, new.usageEnabled) {
