@@ -222,9 +222,14 @@ check_true "save warns when the CLI is signed out" grep -q 'signed in as a diffe
 check "a signed-out save keeps the saved item" at-alpha "$(kc_get claude-multipass alpha | jq -r .claudeAiOauth.accessToken)"
 # Claude Code 2.1.316 clears a dead login in place: empty tokens, expiresAt 0. That is a sign-out, not a login to save
 kc_put "Claude Code-credentials" "$USER" '{"claudeAiOauth":{"accessToken":"","refreshToken":"","expiresAt":0,"scopes":[]},"mcpOAuth":{"srv":"shared"}}'
-check_true "save warns when Claude Code cleared its login" grep -q 'alpha: Claude Code cleared its login; run claude auth login, then save alpha' <<< "$(cda save alpha --no-relaunch 2>&1 > /dev/null)"
+check_true "save warns when Claude Code cleared its login" grep -q 'alpha: Claude Code cleared its login; switch to alpha, run claude auth login, then save alpha' <<< "$(cda save alpha --no-relaunch 2>&1 > /dev/null)"
 check "a cleared save keeps the saved item" at-alpha "$(kc_get claude-multipass alpha | jq -r .claudeAiOauth.accessToken)"
+# Only that exact shape: an item that still holds a refresh token is a login
+kc_put "Claude Code-credentials" "$USER" '{"claudeAiOauth":{"accessToken":"","refreshToken":"rt-live","expiresAt":0}}'
+cda save alpha --no-relaunch > /dev/null 2>&1
+check "an item with a refresh token is saved" rt-live "$(kc_get claude-multipass alpha | jq -r .claudeAiOauth.refreshToken)"
 kc_put "Claude Code-credentials" "$USER" "$live_item"
+cda save alpha --no-relaunch > /dev/null 2>&1
 err=$(SECURITY_FAIL_ADD=1 cda save alpha --no-relaunch 2>&1 > /dev/null)
 check_true "a refused Keychain write on save warns" grep -q 'alpha: security exited 1 saving the CLI login; saved the Desktop login only' <<< "$err"
 check "and keeps the earlier saved item" at-alpha "$(kc_get claude-multipass alpha | jq -r .claudeAiOauth.accessToken)"
@@ -356,6 +361,15 @@ check_true "a foreign CLI login warns on the way out" grep -q 'signed in as a di
 check "and leaves the outgoing profile's CLI login alone" at-beta-fresh "$(kc_get claude-multipass beta | jq -r .claudeAiOauth.accessToken)"
 check "and still restores the target's CLI login" at-alpha "$(kc_get "Claude Code-credentials" "$USER" | jq -r .claudeAiOauth.accessToken)"
 check "and its identity" aaaaaaaa-1111 "$(jq -r .oauthAccount.accountUuid "$tmp/claude.json")"
+
+# A cleared CLI login on the way out: the outgoing profile keeps its saved login, the target is still restored
+kc_put "Claude Code-credentials" "$USER" '{"claudeAiOauth":{"accessToken":"","refreshToken":"","expiresAt":0},"mcpOAuth":{"srv":"shared"}}'
+err=$(cda switch beta --no-relaunch 2>&1 > /dev/null)
+check_true "a cleared outgoing CLI login warns by profile name" grep -q 'alpha: Claude Code cleared its login; switch to alpha, run claude auth login, then save alpha' <<< "$err"
+check "and leaves the outgoing profile's CLI login alone" at-alpha "$(kc_get claude-multipass alpha | jq -r .claudeAiOauth.accessToken)"
+check "and still restores the target's CLI login" at-beta-fresh "$(kc_get "Claude Code-credentials" "$USER" | jq -r .claudeAiOauth.accessToken)"
+check "and keeps the shared MCP keys" '{"srv":"shared"}' "$(kc_get "Claude Code-credentials" "$USER" | jq -c .mcpOAuth)"
+cda switch alpha --no-relaunch > /dev/null 2>&1
 
 # A live item larger than a real one (20 KB of MCP logins) moves whole: too
 # long for a security -i line, its hex goes on security's argv, as Claude

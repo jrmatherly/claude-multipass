@@ -464,7 +464,7 @@ cli_capture() {
     return 0
   fi
   if cli_cleared "$live"; then
-    warning "$name: Claude Code cleared its login; run claude auth login, then save $name"
+    warning "$name: Claude Code cleared its login; switch to $name, run claude auth login, then save $name"
     return 0
   fi
   if ! part=$(printf '%s' "$live" | cli_account_part 2> /dev/null); then

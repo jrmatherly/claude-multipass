@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- A Claude Code login that Claude Code itself cleared (both tokens empty, which it does to a login the server rejected) counts as signed out. `save` and the re-save on a switch warn `Claude Code cleared its login; run claude auth login, then save <name>` and keep the profile's saved CLI login, and a `switch` to the same account restores the saved login instead of keeping the cleared one.
+- A Claude Code login that Claude Code itself cleared (both tokens empty, which it does to a login the server rejected) counts as signed out. `save` and the re-save on a switch warn `Claude Code cleared its login; switch to <name>, run claude auth login, then save <name>` and keep the profile's saved CLI login, and a `switch` to the same account restores the saved login instead of keeping the cleared one.
 
 ## 0.10.2 (2026-11-01)
 
