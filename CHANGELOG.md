@@ -4,6 +4,7 @@
 
 - `save`, `switch` and `add` pause a running Hindsight memory daemon (`hindsight-api`) while they read or write the terminal's Claude Code login, so a background `claude` it started on the old login cannot write that login back over the switched one. They wait up to 60 s for its running `claude` to finish, stop the daemon, and resume it before Desktop relaunches. A run killed with SIGKILL leaves the daemon stopped until the next `save`, `switch` or `add`.
 - `--debug`, or a non-empty `CLAUDE_MULTIPASS_DEBUG`, logs a `save`, `switch`, `add` or `pick` to `debug.log` (mode 0600, no token), and `--debug` also to stderr: timings, the Hindsight pause and each running `claude`. A `switch` also watches the Claude Code login for 30 s after the relaunch and warns `CLI login changed after the switch` when something rewrites it.
+- Settings, General has a "Debug log for switches" toggle, off by default. It turns on the same `debug.log` and the 30 s watch for the app's own runs, with no relaunch. A switch takes up to 30 s longer while it is on.
 
 ## 0.11.0 (2026-11-02)
 

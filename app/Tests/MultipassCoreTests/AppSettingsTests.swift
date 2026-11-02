@@ -82,6 +82,15 @@ private func decode(_ json: String) throws -> AppSettings {
   #expect(try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(s)) == s)
 }
 
+@Test func debugSwitchesDefaultsOffDecodesAndRoundTrips() throws {
+  #expect(AppSettings().debugSwitches == false)
+  #expect(try decode(#"{"usageEnabled":true}"#).debugSwitches == false)
+  #expect(try decode(#"{"debugSwitches":true}"#).debugSwitches)
+  var s = AppSettings()
+  s.debugSwitches = true
+  #expect(try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(s)).debugSwitches)
+}
+
 @Test func stringWrittenByDefaultsCommandLoads() throws {
   let suite = "net.matherly.claude-multipass.tests.defaults-command"
   let defaults = try #require(UserDefaults(suiteName: suite))
