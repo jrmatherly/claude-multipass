@@ -96,6 +96,11 @@
 # of the tool's own (service claude-multipass, account <name>) and the identity
 # into cli.json, when the CLI is signed in as the same account as Desktop. The
 # token goes to security as hex, never to a file.
+# A running Hindsight memory daemon (hindsight-api) with its claude-code LLM
+# provider starts a claude per call on that same login, and a call that loaded
+# the old login can write it back after a swap. So save, switch and add wait
+# for those children with the daemon running, SIGSTOP it for the CLI part and
+# SIGCONT it before Desktop relaunches, from the EXIT trap on a failure.
 # The backups/ folder beside it keeps the login (config.json and cookies) each
 # switch or add replaced, newest ten, plus any profile `save --force` replaced
 # or moved aside as a second name for the same account and any `remove` set
@@ -384,6 +389,12 @@ ${bold}Cautions${reset}
     jq, before it quits Desktop.
   - save, switch and add exit 1 before they quit Desktop on a config.json jq
     cannot read as one object. --force does not lift it.
+  - save, switch and add pause a running Hindsight memory daemon
+    (hindsight-api) while they read or write the CLI login, because a claude
+    it started on the old login can write that login back after the swap. They
+    wait up to 60 s for that claude with the daemon running, stop the daemon,
+    and resume it before Desktop relaunches. After a SIGKILL of the run the
+    daemon stays stopped until the next save, switch or add.
 EOF
 }
 
@@ -592,6 +603,63 @@ cli_running_warning() {
   local pid
   pid=$(pgrep -x claude 2> /dev/null | head -1) || true
   [[ -z $pid ]] || warning "Claude Code is running (pid $pid); quit it first, or its next token refresh can overwrite the switched login; it also serves its cached login for up to 30 s after a switch"
+}
+
+# Hindsight's claude-code LLM provider spawns a claude per call on the shared
+# login, and a call that loaded the old login can write its rotated pair back
+# after the swap (the rewrite measured 2026-11-02). The daemon reads each child's
+# output through a pipe, so it stops only once no child is left. Signals go to
+# the pids found at pause time and nothing else, and none of them kills.
+hindsight_paused=()
+hindsight_daemon_pids() { pgrep -f '/bin/hindsight-api( |$)' 2> /dev/null || true; }
+
+hindsight_children() {
+  local pid
+  for pid in "$@"; do pgrep -P "$pid" -x claude 2> /dev/null || true; done
+}
+
+hindsight_stop() {
+  local pid
+  for pid in "$@"; do
+    kill -0 "$pid" 2> /dev/null || continue
+    # Recorded first, so a signal between the two lines still resumes it from the trap.
+    hindsight_paused+=("$pid")
+    kill -STOP "$pid" 2> /dev/null || true
+  done
+}
+
+# Runs from the EXIT trap too, so a pid that is gone by now is not a failure.
+hindsight_resume() {
+  local pid
+  for pid in ${hindsight_paused[@]+"${hindsight_paused[@]}"}; do kill -CONT "$pid" 2> /dev/null || true; done
+  hindsight_paused=()
+}
+
+hindsight_pause() {
+  local pids pid children i=0
+  pids=$(hindsight_daemon_pids)
+  [[ -n $pids ]] || return 0
+  # shortcut: a SIGKILL runs no trap, and the app's watchdog sends it to the whole
+  # process group, so a background resumer dies too. The daemon stays stopped
+  # until this line in the next save, switch or add; add a resumer outside the
+  # group if a stuck daemon is ever seen.
+  for pid in $pids; do kill -CONT "$pid" 2> /dev/null || true; done
+  while :; do
+    children=$(hindsight_children $pids)
+    if [[ -z $children ]]; then
+      hindsight_stop $pids
+      children=$(hindsight_children $pids)
+      [[ -n $children ]] || break
+      hindsight_resume
+    fi
+    if ((++i >= 120)); then
+      hindsight_stop $pids
+      warning "Hindsight's claude (pid ${children//$'\n'/ }) was still running after 60 s; it may write back the login it loaded"
+      break
+    fi
+    sleep 0.5
+  done
+  [[ ${#hindsight_paused[@]} -eq 0 ]] || info "Paused Hindsight's memory daemon during the CLI login swap"
 }
 
 # The live CLI item's account part and identity, kept under the name of this
@@ -1691,8 +1759,11 @@ main() {
   # relaunch is main's local, so the trap text is chosen now, not at exit.
   # The run lock goes last, so no other run quits Desktop before it relaunches.
   # The trap goes in before the quit, so a signal or a failed quit relaunches.
-  if [[ -n $relaunch ]]; then trap 'cli_unlock; [[ -n $llmr_launched ]] || desktop_launch; run_unlock' EXIT; else trap 'cli_unlock; run_unlock' EXIT; fi
+  if [[ -n $relaunch ]]; then trap 'hindsight_resume; cli_unlock; [[ -n $llmr_launched ]] || desktop_launch; run_unlock' EXIT; else trap 'hindsight_resume; cli_unlock; run_unlock' EXIT; fi
   desktop_quit
+  # Before the locks, since a child may need them to finish. A blocked CLI part
+  # moves no login, so there is nothing to protect.
+  [[ -n $(cli_blocker) ]] || hindsight_pause
   # Assumed, not yet checked against a real llmr launch: the quit ended LLMR's
   # instance too. A switch to an LLMR profile writes the marker again.
   rm -f "$llmr_marker"
@@ -1714,6 +1785,7 @@ main() {
         # config.json: the claude.ai login there stays for the switch back. The
         # Code tab sync and the CLI login have nothing to do.
         [[ -z $active ]] || profile_save "$active"
+        hindsight_resume
         cli_unlock
         info "Launching Claude through LLMR profile $target_llmr"
         "$llmr" "$target_llmr" app < /dev/null || fail "llmr $target_llmr app exited $?; relaunching the claude.ai login"
