@@ -27,6 +27,7 @@ Isolation, so no case can touch the real Desktop:
 - The `usage` case encrypts a fixture token cache the way the app does (`v10` + AES-128-CBC with the PBKDF2 key of the stub password, IV 16 spaces, base64) and asserts the token never appears in `curl`'s argv or in the output.
 - The migration case runs with `CLAUDE_MULTIPASS_DIR` unset and `XDG_CONFIG_HOME` pointed at a temp home, not `HOME`: tools on PATH (jq, fzf, python3) read their own config from `HOME`, and changing it would change their behaviour mid-test.
 - A real terminal for the bare invocation comes from `script -q /dev/null`.
+- The debug cases stub `pgrep -x claude` to name a real background process whose command holds a token past 160 characters, `open` to run `$tmp/dbg-at-open` (a late writer of the CLI item), and `sleep` to count and skip the watch's 2 s polls. A `$tmp/security-find-fail` file makes a read of the CLI item exit 36, for a failure after the arm, which `SECURITY_FAIL_FIND` cannot time.
 - The Raycast cases run `raycast/*.sh`, which put Homebrew's bin first on PATH and run `$CLAUDE_MULTIPASS_BIN`, else `claude-multipass` by name. The fixture exports `CLAUDE_MULTIPASS_BIN` as the checkout's script, and the Raycast switch case asserts its CLI write reached the `security` stub. Without it an installed tool would run against the fixture environment and, with a version that reaches the Keychain some other way, the real Keychain.
 
 Rules:

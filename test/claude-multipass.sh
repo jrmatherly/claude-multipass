@@ -60,6 +60,7 @@ run() {
   [[ -z ${SECURITY_FAIL_ADD:-} || $cmd != add-generic-password ]] || return 1
   [[ -z ${SECURITY_FAIL_DELETE:-} || $cmd != delete-generic-password ]] || return 1
   [[ -z ${SECURITY_FAIL_FIND:-} || $cmd != find-generic-password || $s != 'Claude Code-credentials' ]] || return "$SECURITY_FAIL_FIND"
+  [[ ! -e ${kc%/*}/security-find-fail || $cmd != find-generic-password || $s != 'Claude Code-credentials' ]] || return 36
   case $cmd in
     add-generic-password)
       mkdir -p "$kc/$s"
@@ -1681,6 +1682,12 @@ hs_start
 hs_run save beta --no-relaunch
 check_true "save stops Hindsight while it reads the CLI login" grep -q '^T' "$hs_file-states"
 check "and leaves it running" no "$(hs_stopped "$fake_daemon")"
+hs_start
+rm -f "$CLAUDE_MULTIPASS_DIR/debug.log"
+hs_run save beta --no-relaunch --debug
+check_true "debug logs the Hindsight pause" grep -q "hindsight stopped pid $fake_daemon; waited 0 s for children: none" "$CLAUDE_MULTIPASS_DIR/debug.log"
+check_true "and the resume" grep -q "hindsight resumed pid $fake_daemon" "$CLAUDE_MULTIPASS_DIR/debug.log"
+rm -f "$CLAUDE_MULTIPASS_DIR/debug.log"
 cp "$d/config.json" "$tmp/config-before-hs-add"
 hs_start
 hs_run add hsnew --no-relaunch
@@ -1812,6 +1819,235 @@ hs_end
 rm -rf "$p/hsother"
 printf '#!/bin/sh\nexit 1\n' > "$tmp/bin/pgrep"
 printf '#!/bin/sh\necho "open $*" >> "%s/calls"\n' "$tmp" > "$tmp/bin/open"
+rm -f "$tmp/calls"
+
+# Debug mode. pgrep names a real background process as a running claude, with a
+# token past the 160 characters of its command the log keeps. The open stub runs
+# $tmp/dbg-at-open, a late writer of the CLI item. The sleep stub counts the
+# watch's 2 s polls and skips them.
+dbg_log=$CLAUDE_MULTIPASS_DIR/debug.log
+mkdir -p "$p/dbother"
+printf '{"oauth:tokenCache":"enc-D1","oauth:tokenCacheV2":"enc-D2","lastKnownAccountUuid":"dddddddd-7777"}' > "$p/dbother/config.json"
+printf '{"account":"dddddddd-7777","savedAt":"2026-01-01T00:00:00Z"}' > "$p/dbother/meta.json"
+printf cookie-D > "$p/dbother/Cookies"
+printf '{"oauthAccount":{"accountUuid":"dddddddd-7777","emailAddress":"d@example.com","organizationUuid":"org-other"}}' > "$p/dbother/cli.json"
+kc_put claude-multipass dbother '{"claudeAiOauth":{"accessToken":"at-dbother","refreshToken":"rt-dbother","expiresAt":2}}'
+cda switch beta --force --no-relaunch > /dev/null 2>&1
+cat > "$tmp/bin/pgrep" << EOF
+#!/bin/sh
+case "\$*" in
+  "-x claude") [ -f "$tmp/dbg-claude" ] && cat "$tmp/dbg-claude" || exit 1 ;;
+  "-aqf -- --user-data-dir=.*/claude-app-user-data/") test -e "$tmp/llmr-up" ;;
+  *) exit 1 ;;
+esac
+EOF
+printf '#!/bin/sh\necho "open $*" >> "%s/calls"\n[ ! -f "%s/dbg-at-open" ] || . "%s/dbg-at-open"\n' "$tmp" "$tmp" "$tmp" > "$tmp/bin/open"
+printf '#!/bin/sh\ncase "$1" in 2) [ ! -e "%s/dbg-sleep-fail" ] || exit 1; echo poll >> "%s/dbg-polls"; exit 0 ;; 0.5 | 1) exit 0 ;; esac\nexec /bin/sleep "$@"\n' "$tmp" "$tmp" > "$tmp/bin/sleep"
+chmod +x "$tmp/bin/sleep"
+hs_background /bin/sh -c 'while :; do /bin/sleep 1; done' "$(printf 'a%.0s' {1..200})rt-argv-leak"
+fake_claude=$hs_last
+echo "$fake_claude" > "$tmp/dbg-claude"
+# Every run's log and stderr pile up for the no-token check at the end.
+dbg_run() {
+  rm -f "$dbg_log"
+  : > "$tmp/dbg-polls"
+  hs_run "$@"
+  [[ ! -f $dbg_log ]] || cat "$dbg_log" >> "$tmp/dbg-all"
+  printf '%s\n' "$hs_err" >> "$tmp/dbg-all"
+}
+dbg_at_open() { printf '%s\n' "$1" > "$tmp/dbg-at-open"; }
+dbg_put_item() { dbg_at_open "security add-generic-password -U -a \"\$USER\" -s 'Claude Code-credentials' -X $(printf %s "$1" | xxd -p | tr -d '\n')"; }
+dbg_polls() { wc -l < "$tmp/dbg-polls" | tr -d ' '; }
+dbg_logged() { grep -q -- "$1" "$dbg_log" && echo yes || echo no; }
+
+# Read commands log nothing and read no Keychain item, with the app's variable or the flag.
+rm -f "$dbg_log"
+: > "$tmp/security-calls"
+for c in list 'list --json' 'show beta' current doctor; do
+  CLAUDE_MULTIPASS_DEBUG=1 cda $c > /dev/null 2>&1 || true
+  cda $c --debug > /dev/null 2>&1 || true
+done
+check "--debug is accepted by list" 0 "$(exit_code cda list --debug)"
+check "--debug is accepted by doctor" 0 "$(exit_code cda doctor --debug)"
+check "list, show, current and doctor under debug write no debug.log" absent "$([[ -e $dbg_log ]] && echo present || echo absent)"
+check "and read no Keychain item" 0 "$(wc -l < "$tmp/security-calls" | tr -d ' ')"
+cda sync --force --debug > /dev/null 2>&1
+check "sync under debug writes no debug.log" absent "$([[ -e $dbg_log ]] && echo present || echo absent)"
+cda save dbllmr --llmr router-p --debug > /dev/null
+check "an LLMR save under debug writes no debug.log" absent "$([[ -e $dbg_log ]] && echo present || echo absent)"
+
+dbg_run switch dbother
+check "without debug no debug.log is written" absent "$([[ -e $dbg_log ]] && echo present || echo absent)"
+check "and no watch runs" 0 "$(dbg_polls)"
+cda switch beta --no-relaunch > /dev/null 2>&1
+CLAUDE_MULTIPASS_DEBUG='' dbg_run switch dbother --no-relaunch
+check "an empty CLAUDE_MULTIPASS_DEBUG stays off" absent "$([[ -e $dbg_log ]] && echo present || echo absent)"
+cda switch beta --no-relaunch > /dev/null 2>&1
+
+# A stable login
+dbg_run switch dbother --debug
+check "a switch under debug succeeds" 0 "$hs_rc"
+check "debug.log is created 0600" 600 "$(stat -f %Lp "$dbg_log")"
+check "debug logs the run" yes "$(dbg_logged "switch dbother: claude-multipass $pkg_version, Claude ")"
+check "debug logs the quit with Desktop not running" yes "$(dbg_logged 'quit done')"
+check "debug logs the swap" yes "$(dbg_logged 'cli restore wrote dddddddd-7777')"
+check "debug logs the relaunch" yes "$(dbg_logged 'launching Claude')"
+check "debug lists running claude processes at the swap" yes "$(dbg_logged "claude pid=$fake_claude ppid=[0-9]* /bin/sh -c while")"
+check "debug watch reports a stable login" yes "$(dbg_logged 'CLI login unchanged for 30 s')"
+check "after 15 polls of 2 s" 15 "$(dbg_polls)"
+check "a process line is cut at 160 characters of its command" 160 "$(grep 'claude pid=' "$dbg_log" | sed -E 's/.* ppid=[0-9]+ //' | head -1 | tr -d '\n' | wc -c | tr -d ' ')"
+check "each log line is a UTC time, the pid and the message" 0 "$(grep -Ecv '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z [0-9]+ ' "$dbg_log" || true)"
+check_true "stderr carries the same lines with a local time" grep -Eq '^debug: [0-9:]{8} quit done$' <<< "$hs_err"
+
+dbg_run switch dbother --debug --no-relaunch
+check "debug logs the re-save on the already-on-target path" yes "$(dbg_logged 'cli restore already on dddddddd-7777')"
+check "debug watches a re-save switch too, under --no-relaunch" yes "$(dbg_logged 'CLI login unchanged for 30 s')"
+
+# A trim keeps the last lines and the mode, and a log that cannot be written fails nothing.
+seq 3000 > "$dbg_log"
+chmod 644 "$dbg_log"
+cda save dbother --debug > /dev/null 2>&1
+check "debug.log is trimmed to its last 2000 lines" yes "$( (($(wc -l < "$dbg_log") <= 2100)) && ! grep -qx 1 "$dbg_log" && grep -qx 1001 "$dbg_log" && echo yes)"
+check "the trim leaves it 0600" 600 "$(stat -f %Lp "$dbg_log")"
+check "and no temp file" absent "$([[ -e $dbg_log.tmp ]] && echo present || echo absent)"
+chmod 000 "$dbg_log"
+check "a debug.log that cannot be written fails nothing" 0 "$(exit_code cda save dbother --debug)"
+rm -f "$dbg_log"
+
+# A late writer of the CLI item. Without the cache reset the watch sees none of them.
+cda switch beta --no-relaunch > /dev/null 2>&1
+dbg_put_item '{"claudeAiOauth":{"accessToken":"at-rotated","refreshToken":"rt-rotated","expiresAt":3}}'
+dbg_run switch dbother --debug
+check "a write-back does not change the exit code" 0 "$hs_rc"
+check_true "debug watch reports a write-back" grep -q "debug: CLI login changed after the switch (now dddddddd-7777); see $dbg_log" <<< "$hs_err"
+check "and stops at the first change" 1 "$(dbg_polls)"
+check "and names the processes then" 2 "$(grep -c 'claude pid=' "$dbg_log")"
+check "and logs the change" yes "$(dbg_logged 'CLI login changed after the switch')"
+check "and does not call it stable" no "$(dbg_logged 'CLI login unchanged')"
+
+cda switch beta --no-relaunch > /dev/null 2>&1
+dbg_put_item '{"claudeAiOauth":{"accessToken":"at-rotated","refreshToken":"rt-rotated-2","expiresAt":3}}'
+CLAUDE_MULTIPASS_DEBUG=1 dbg_run switch dbother
+check "CLAUDE_MULTIPASS_DEBUG=1 turns it on for a switch" yes "$(dbg_logged 'quit done')"
+check "and keeps its lines off stderr, which the app shows as a warning" "" "$(grep -E '^debug: [0-9:]{8} ' <<< "$hs_err" || true)"
+check "the watch with it" 1 "$(dbg_polls)"
+rm "$tmp/dbg-at-open"
+
+cda switch beta --no-relaunch > /dev/null 2>&1
+dbg_at_open 'security delete-generic-password -a "$USER" -s "Claude Code-credentials"'
+dbg_run switch dbother --debug
+check "a deleted item counts as a change" 1 "$(dbg_polls)"
+check_true "and is reported" grep -q 'CLI login changed after the switch' <<< "$hs_err"
+rm "$tmp/dbg-at-open"
+
+cda switch beta --no-relaunch > /dev/null 2>&1
+dbg_put_item '{"claudeAiOauth":{"accessToken":"","refreshToken":"","expiresAt":0}}'
+dbg_run switch dbother --debug
+check "an emptied refresh token counts as a change" 1 "$(dbg_polls)"
+rm "$tmp/dbg-at-open"
+
+# Reads that tell nothing skip their poll: an item that is not JSON, a failed read.
+cda switch beta --no-relaunch > /dev/null 2>&1
+dbg_put_item 'not json'
+dbg_run switch dbother --debug
+check "an item that is not JSON does not change the exit code" 0 "$hs_rc"
+check "and skips each poll" 15 "$(dbg_polls)"
+check "and the log says so" yes "$(dbg_logged 'CLI login unchanged in the 0 of 15 reads that worked')"
+check "and does not call it unchanged for 30 s" no "$(dbg_logged 'CLI login unchanged for 30 s')"
+rm "$tmp/dbg-at-open"
+kc_put "Claude Code-credentials" "$USER" '{"claudeAiOauth":{"accessToken":"at-dbother","refreshToken":"rt-dbother","expiresAt":2}}'
+
+cda switch beta --no-relaunch > /dev/null 2>&1
+dbg_at_open "touch '$tmp/security-find-fail'"
+dbg_run switch dbother --debug
+rm "$tmp/security-find-fail" "$tmp/dbg-at-open"
+check "a read that fails does not change the exit code" 0 "$hs_rc"
+check "and skips each poll" yes "$(dbg_logged 'CLI login unchanged in the 0 of 15 reads that worked')"
+
+# The trap runs under set -e, so a failure inside the watch must not end it.
+touch "$tmp/dbg-sleep-fail"
+dbg_run switch dbother --debug
+rm "$tmp/dbg-sleep-fail"
+check "a failure inside the watch keeps the exit code" 0 "$hs_rc"
+check "and the rest of the trap runs" absent "$([[ -L $CLAUDE_MULTIPASS_DIR/.run.lock ]] && echo present || echo absent)"
+
+# A failed run reached no arm, so its watch does nothing.
+cda switch beta --no-relaunch > /dev/null 2>&1
+mkdir "$tmp/claude-home/.oauth_refresh.lock"
+: > "$tmp/security-calls"
+dbg_run switch dbother --debug
+rmdir "$tmp/claude-home/.oauth_refresh.lock"
+check "a switch that fails under debug still exits 1" 1 "$hs_rc"
+check "and watches nothing" 0 "$(dbg_polls)"
+check "and logs no watch line" no "$(dbg_logged 'CLI login')"
+check "but logs the run" yes "$(dbg_logged 'quit done')"
+check "and reads no Keychain item" 0 "$(wc -l < "$tmp/security-calls" | tr -d ' ')"
+
+# No CLI part, no watch
+CLAUDE_CONFIG_DIR=$tmp/dbg-config dbg_run switch dbother --debug --no-relaunch
+check "a blocked CLI part arms no watch" 0 "$(dbg_polls)"
+check "and logs no watch line" no "$(dbg_logged 'CLI login')"
+cda switch beta --no-relaunch --force > /dev/null 2>&1
+
+# save and add log, and watch nothing, and read the Keychain as often as without debug.
+: > "$tmp/security-calls"
+dbg_run save beta
+save_calls=$(wc -l < "$tmp/security-calls")
+: > "$tmp/security-calls"
+dbg_run save beta --debug
+check "save under debug logs" yes "$(dbg_logged 'quit done')"
+check "and watches nothing" 0 "$(dbg_polls)"
+check "and logs no watch line" no "$(dbg_logged 'CLI login')"
+check "and adds no Keychain call" "$save_calls" "$(wc -l < "$tmp/security-calls")"
+cp "$d/config.json" "$tmp/config-before-dbg-add"
+: > "$tmp/security-calls"
+dbg_run add dbnew
+add_calls=$(wc -l < "$tmp/security-calls")
+cp "$tmp/config-before-dbg-add" "$d/config.json"
+printf cookie-B > "$d/Cookies"
+: > "$tmp/security-calls"
+dbg_run add dbnew --debug
+check "add under debug logs" yes "$(dbg_logged 'quit done')"
+check "and watches nothing" 0 "$(dbg_polls)"
+check "and logs no watch line" no "$(dbg_logged 'CLI login')"
+check "and adds no Keychain call" "$add_calls" "$(wc -l < "$tmp/security-calls")"
+cp "$tmp/config-before-dbg-add" "$d/config.json"
+printf cookie-B > "$d/Cookies"
+
+# An LLMR switch moves no CLI login.
+dbg_run switch dbllmr --debug
+check "an LLMR switch under debug succeeds" 0 "$hs_rc"
+check "and logs" yes "$(dbg_logged 'quit done')"
+check "and watches nothing" 0 "$(dbg_polls)"
+rm -rf "$p/dbllmr" "$CLAUDE_MULTIPASS_DIR/active-llmr" "$tmp/llmr-up" "$tmp/claude-up"
+
+# pick re-enters main for its switch, and pick itself logs nothing.
+printf '#!/bin/sh\ngrep "^dbother "\n' > "$tmp/bin/fzf"
+chmod +x "$tmp/bin/fzf"
+dbg_put_item '{"claudeAiOauth":{"accessToken":"at-rotated","refreshToken":"rt-rotated-3","expiresAt":3}}'
+dbg_run pick --debug
+rm "$tmp/dbg-at-open"
+check "pick --debug succeeds" 0 "$hs_rc"
+check "and its switch logs" yes "$(dbg_logged 'switch dbother: claude-multipass')"
+check "and watches" 1 "$(dbg_polls)"
+check "and pick itself logs nothing" no "$(dbg_logged ' pick')"
+printf '#!/bin/sh\nexit 130\n' > "$tmp/bin/fzf"
+chmod +x "$tmp/bin/fzf"
+dbg_run pick --debug
+check "a cancelled pick --debug writes no debug.log" absent "$([[ -e $dbg_log ]] && echo present || echo absent)"
+
+# With jq -r's newline, as the watch hashes it.
+token_hash=$(printf 'rt-dbother\n' | shasum -a 256 | cut -c1-64)
+rotated_hash=$(printf 'rt-rotated\n' | shasum -a 256 | cut -c1-64)
+check "no token or token hash in any debug.log or stderr" 0 "$(grep -cE "at-dbother|rt-dbother|at-beta|rt-beta|at-rotated|rt-rotated|at-alpha|rt-alpha|rt-argv-leak|$token_hash|$rotated_hash" "$tmp/dbg-all" || true)"
+check_true "--help names the option" grep -q -- '--debug .*CLAUDE_MULTIPASS_DEBUG=1' <<< "$(cda --help | tr -s ' \n' ' ')"
+check_true "the tldr names it" grep -q 'claude-multipass switch {{name}} --debug' "$script"
+
+hs_end
+rm -rf "$p/dbother" "$tmp/dbg-claude" "$dbg_log" "$tmp/bin/sleep"
+printf '#!/bin/sh\nexit 1\n' > "$tmp/bin/pgrep"
+printf '#!/bin/sh\necho "open $*" >> "%s/calls"\n' "$tmp" > "$tmp/bin/open"
+printf '#!/bin/sh\ngrep "^beta "\n' > "$tmp/bin/fzf"
 rm -f "$tmp/calls"
 
 # the dotfiles-era store moves into the default location once, backups too

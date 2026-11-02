@@ -48,7 +48,7 @@ Desktop quits, relaunches signed in as that account, and the Code tab lists both
 | `doctor` | One `ok:`, `warn:` or `fail:` line per check (config, tools, store and profile modes, each profile's token, backups, Desktop running, the pre-0.1 store, profiles without a CLI login, `claude` missing from PATH, `CLAUDE_CONFIG_DIR` or `CLAUDE_SECURESTORAGE_CONFIG_DIR`, and `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`, which override the terminal login). Without a working `jq` it skips the config and token checks and says so. Exits 1 on any `fail:`. No Keychain, no network |
 | `--version` | Print the version |
 
-`--no-relaunch` leaves Desktop quit after `save`, `switch`, `add` or `pick`.
+`--no-relaunch` leaves Desktop quit after `save`, `switch`, `add` or `pick`. `--debug` logs a `save`, `switch`, `add` or `pick` (see [Debugging a switch](#debugging-a-switch)).
 
 ## What carries over, and what does not
 
@@ -115,6 +115,7 @@ This is the one part of the tool that uses a subscription token outside Anthropi
 | `~/.config/claude-multipass/backups/login-*/` | The login each `switch` or `add` replaced, newest ten |
 | `~/.config/claude-multipass/backups/profile-*/` | Profiles that `remove` or a forced `save` set aside, newest ten |
 | `~/.config/claude-multipass/active-llmr` | The saved name of the LLMR profile whose Desktop runs now, beside `profiles/`. A `switch` to it writes it once that Desktop appears; any switch away, and `remove` of that profile, deletes it. No secret |
+| `~/.config/claude-multipass/debug.log` | What `--debug` logged, newest 2000 lines. Mode 0600. No token |
 | `~/.config/claude-multipass/plans/<account id>` | The account's plan name from the OAuth profile, for `usage`. Mode 0600. No secret |
 | `~/Library/Application Support/Claude/` | Desktop's data: `config.json`, the cookie files, `claude-code-sessions/<account>/<org>/local_*.json` (the Code tab's list) |
 | `~/.claude.json` and the login Keychain | The CLI's data: `oauthAccount` in the file, the tokens in the Keychain item `Claude Code-credentials` (account: your macOS user name). The tool's own items are service `claude-multipass`, one per profile and one per `login-*` backup folder whose switch wrote the CLI item. A backup's item holds the account part only, as a profile's does. `CLAUDE_CLI_CONFIG` and `CLAUDE_CLI_HOME` point at another file and CLI home (the self-check uses them) |
@@ -146,6 +147,24 @@ A `security find-generic-password -s claude-multipass` that prints nothing after
 - The previous CLI login is in the backup folder `switch` named: `oauthAccount` in its `cli.json`, the tokens in the Keychain item `claude-multipass` / `login-<timestamp>-<pid>`. A removed profile's CLI token is not recoverable from `backups/profile-*`; its Desktop login is.
 - A second Claude Desktop data folder, `~/Library/Application Support/Claude-3p`, exists when a third-party gateway (an LLM router with a Desktop profile) has configured Desktop in its own mode. The tool reads only the `Claude` folder and quits and relaunches the app by its name, so a switch with that gateway active can relaunch the gateway's instance instead of the account you picked. Close the gateway, or turn its Desktop profile off, before a switch. An LLM Router profile saved with `save <name> --llmr <llmr-profile>` avoids this: `llmr <llmr-profile> app` launches Desktop on that profile's own data folder and leaves `Claude` and `Claude-3p` alone. While it runs, `current` and `list` name it (from `active-llmr` beside `profiles/`, checked against a running Desktop launched with LLMR's `--user-data-dir`) and say `gateway not running` when LLMR's `http://127.0.0.1:3456/health` does not answer. A failed `llmr` launch, or one whose Desktop does not appear within 10 s, relaunches the claude.ai login and exits 1. Any switch away, even to the account the Desktop folder still holds, quits and relaunches Desktop. That this quit also ends LLMR's instance is not yet checked against a real `llmr` launch. That instance's Code tab sessions belong to LLMR (its own `CLAUDE_CONFIG_DIR`) and are not synced.
 - The Code tab does not list the other account's sessions: quit Desktop and run `sync`, then reopen. Sessions deleted in any account stay deleted.
+
+## Debugging a switch
+
+`save`, `switch`, `add` and `pick` take `--debug`. A non-empty `CLAUDE_MULTIPASS_DEBUG` does the same without the stderr lines, because the menu bar app shows a switch's stderr as a warning. Every other command accepts the flag and writes nothing.
+
+Each line goes to `debug.log` beside `profiles/` as `<UTC time> <pid> <message>`, and under `--debug` to stderr as `debug: <local time> <message>`. The log is mode 0600, and a run trims it to its last 2000 lines before it adds to it. It holds:
+
+- The command, the tool's version and Desktop's version.
+- The start and end of the quit (`quit done`) and the relaunch.
+- The Hindsight daemon: the pids stopped, the seconds waited, the children waited for, and the resume.
+- Every running `claude` at the swap: `claude pid=<pid> ppid=<ppid> <command>`, with the command cut at 160 characters.
+- `cli restore wrote <account id>`, or `cli restore already on <account id>` when the CLI was on that account.
+
+It holds no token and no token hash. It does hold those 160 characters of each `claude` command line, so a secret you pass early on a `claude` command line lands in the log.
+
+After the relaunch, a `switch` to a claude.ai profile watches the CLI login: it reads `Claude Code-credentials` every 2 s for 30 s and compares a hash of the refresh token in memory. The first change prints `debug: CLI login changed after the switch (now <account id or unknown>); see <the log>`, lists the running `claude` again and ends the watch. A deleted item counts as a change. A change that still names the target account can be an ordinary token refresh. A change that names the old account is a write-back. With no change the log says `CLI login unchanged for 30 s`. A read that fails is skipped, and the log then says `CLI login unchanged in the <N> of 15 reads that worked`.
+
+The watch adds up to 30 s to the run and holds the run lock, so another `save`, `switch`, `add`, `sync`, `rename` or `remove` in that time exits 1. It does not run for `save`, `add`, an LLMR profile, a failed switch, or a run that could not move the CLI login (such as one under `CLAUDE_CONFIG_DIR`). It never changes the exit code.
 
 ## Safety rails
 
