@@ -50,6 +50,7 @@ Claude Code transcripts live in `~/.claude/projects`, shared by every account, s
 - Sign in with the email code, not Google, so the browser hand-back lands in the right window.
 - Profiles are per Mac: the app's Keychain key encrypts them. Save each account once on every Mac.
 - A third-party gateway that configures Desktop in its own mode (a `Claude-3p` data folder beside `Claude`) is not seen by the tool; a switch with it active can relaunch the gateway's instance. Close it first. Uninstall steps are in `docs/claude-multipass.md`.
+- LLM Router (LLMR) can be a saved profile instead: `save <name> --llmr <llmr-profile>` writes only that profile's `meta.json`. `switch <name>` re-saves the login you leave, quits Desktop and runs `llmr <llmr-profile> app`, which launches Desktop on LLMR's own data folder, so the claude.ai login stays in place for the switch back. LLMR's own service must already run. The terminal's `claude` keeps its login; run `llmr <llmr-profile>` for a terminal on LLMR. Sessions in that instance's Code tab are LLMR's and are not synced. `usage` skips the profile, and the menu bar shows it with no usage meter.
 - Whether to run several accounts, and `usage`, is your call under Anthropic's terms. This tool keeps switching manual and never rotates accounts by itself.
 
 ## Raycast

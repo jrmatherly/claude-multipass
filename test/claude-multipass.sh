@@ -10,7 +10,8 @@
 # Never touches the real Claude Desktop folder: CLAUDE_DESKTOP_DIR and
 # CLAUDE_MULTIPASS_DIR point into a temp dir, and pgrep, osascript, pkill,
 # open, fzf, security, xcode-select and curl are stubbed on PATH so no app is
-# quit or launched and no Keychain or network is touched.
+# quit or launched and no Keychain or network is touched. CLAUDE_MULTIPASS_LLMR
+# points at an llmr stub, so the real llm-router never runs.
 #
 # License: MIT
 
@@ -122,6 +123,11 @@ kc_put() { printf 'add-generic-password -U -a "%s" -s "%s" -X %s\n' "$2" "$1" "$
 kc_delete() { security delete-generic-password -a "$2" -s "$1" > /dev/null 2>&1 || true; }
 chmod +x "$tmp"/bin/*
 export PATH="$tmp/bin:$PATH"
+# llmr logs its argv and exits with the status in llmr-fail, if any.
+mkdir -p "$tmp/llmr-bin"
+printf '#!/bin/sh\necho "llmr $*" >> "%s/llmr-calls"\n[ ! -f "%s/llmr-fail" ] || { echo "llmr: no such profile" >&2; exit "$(cat "%s/llmr-fail")"; }\n' "$tmp" "$tmp" "$tmp" > "$tmp/llmr-bin/llmr"
+chmod +x "$tmp/llmr-bin/llmr"
+export CLAUDE_MULTIPASS_LLMR="$tmp/llmr-bin/llmr"
 export CLAUDE_CLI_CONFIG="$tmp/claude.json" CLAUDE_CLI_HOME="$tmp/claude-home" CLAUDE_MULTIPASS_BIN="$script"
 mkdir -p "$tmp/claude-home"
 cda() { "$script" "$@"; }
@@ -1363,6 +1369,108 @@ for readable in '{}' '{"oauth:tokenCacheV2":""}'; do
 done
 cp "$tmp/config-before-bad-read" "$d/config.json"
 printf '#!/bin/sh\nexit 1\n' > "$tmp/bin/pgrep"
+
+# An LLMR profile: save --llmr writes meta.json only, without quitting Desktop or reading the Keychain
+acct=$(cda current)
+cp "$d/config.json" "$tmp/config-before-llmr"
+: > "$tmp/security-calls"
+rm -f "$tmp/calls"
+check "save --llmr succeeds" 0 "$(exit_code cda save router --llmr router-p)"
+check "save --llmr writes kind and llmrProfile" '{"kind":"llmr","llmrProfile":"router-p"}' "$(jq -c '{kind, llmrProfile}' "$p/router/meta.json")"
+check "and nothing but meta.json" meta.json "$(ls "$p/router")"
+check "and keeps it private" 600 "$(stat -f %Lp "$p/router/meta.json")"
+check "save --llmr neither quits nor launches Desktop" "" "$(cat "$tmp/calls" 2> /dev/null)"
+check "save --llmr never calls security" 0 "$(wc -l < "$tmp/security-calls" | tr -d ' ')"
+check "save --llmr never runs llmr" "" "$(cat "$tmp/llmr-calls" 2> /dev/null)"
+check "save --llmr over a claude.ai profile is refused" 3 "$(exit_code cda save "$acct" --llmr router-p)"
+check "a claude.ai save over an LLMR profile is refused" 3 "$(exit_code cda save router)"
+check "--llmr applies to save only" 1 "$(exit_code cda switch router --llmr router-p)"
+check "--llmr needs a value" 1 "$(exit_code cda save router --llmr)"
+check "--llmr takes a valid name" 1 "$(exit_code cda save router --llmr .bad)"
+mkdir -p "$p/forced"
+cp "$p/beta/config.json" "$p/forced/config.json"
+printf '{"account":"ffffffff-0000","savedAt":"2026-01-01T00:00:00Z"}' > "$p/forced/meta.json"
+check "save --llmr --force replaces a claude.ai profile" 0 "$(exit_code cda save forced --llmr router-p --force)"
+check "and sets the old one aside in backups" 1 "$(find "$b" -maxdepth 1 -name 'profile-forced-*' | wc -l | tr -d ' ')"
+rm -rf "$p/forced"
+check "list --json exposes kind and llmrProfile" '{"name":"router","account":"","kind":"llmr","llmrProfile":"router-p","sessions":0,"cliSaved":false}' "$(cda list --json | jq -c '.profiles[] | select(.name == "router") | del(.savedAt)')"
+check "list shows the LLMR row, unmarked while it does not run" 1 "$(cda list | grep -c '^  router           llmr router-p  ')"
+check "show names the LLMR profile and the terminal hint" "LLMR profile router-p|terminal: run llmr router-p" "$(cda show router | sed -n '2p;4p' | paste -sd '|' -)"
+check "doctor calls the LLMR profile ok" 1 "$(cda doctor | grep -c '^ok: router (LLMR profile router-p)$')"
+check "usage refuses an LLMR profile" 1 "$(exit_code cda usage router)"
+check "usage leaves LLMR profiles out" 0 "$(cda usage --json 2> /dev/null | jq '[.profiles[] | select(.name == "router")] | length')"
+
+# switch to it saves the outgoing login, quits Desktop and runs llmr in place of the relaunch
+out=$(cda switch router 2>&1)
+check "switch to an LLMR profile runs llmr <profile> app" "llmr router-p app" "$(cat "$tmp/llmr-calls")"
+check "and does not relaunch the claude.ai login" "" "$(grep '^open' "$tmp/calls" 2> /dev/null || true)"
+check "and writes the marker" router-p "$(cat "$CLAUDE_MULTIPASS_DIR/active-llmr")"
+check_true "and re-saves the login it leaves" grep -q "Saved the signed-in account as $acct" <<< "$out"
+check_true "and backs it up" grep -q "Backed up the current login to $b/login-" <<< "$out"
+check "and leaves the Desktop folder's login as it was" "$(jq -c 'with_entries(select(.key | test("oauth|lastKnown")))' "$tmp/config-before-llmr")" "$(jq -c 'with_entries(select(.key | test("oauth|lastKnown")))' "$d/config.json")"
+check_true "and prints the terminal hint" grep -q 'terminal: run llmr router-p' <<< "$out"
+check "and syncs no Code tab lists" 0 "$(grep -c ' written$' <<< "$out" || true)"
+
+# While an LLMR-launched Desktop runs, read commands report the LLMR profile
+printf '#!/bin/sh\ncase "$*" in *user-data-dir*) exit 0 ;; esac\nexit 1\n' > "$tmp/bin/pgrep"
+: > "$tmp/curl-args"
+check "current reports the running LLMR profile" router "$(cda current 2> /dev/null)"
+check "with no warning while the gateway answers" "" "$(cda current 2>&1 > /dev/null)"
+check_true "the probe asks the gateway's health route" grep -q 'http://127.0.0.1:3456/health' "$tmp/curl-args"
+check "list marks it" 1 "$(cda list | grep -c '^\* router           llmr router-p  ')"
+check "and marks no claude.ai account" 1 "$(cda list | grep -c '^\*')"
+check "list --json names it current" router "$(cda list --json | jq -r .current)"
+printf '#!/bin/sh\ncase "$*" in *3456/health*) exit 7 ;; esac\nexit 0\n' > "$tmp/bin/curl"
+check "current warns when the gateway does not answer" "router: LLMR profile, gateway not running" "$(cda current 2>&1 > /dev/null)"
+check "and still prints the profile" router "$(cda current 2> /dev/null)"
+check "list says the gateway is not running" 1 "$(cda list | grep -c '^\* router .*  (gateway not running)$')"
+write_curl
+
+# A marker with no LLMR Desktop is stale: reads report the claude.ai login and keep it, a writing run removes it
+printf '#!/bin/sh\nexit 1\n' > "$tmp/bin/pgrep"
+check "a stale marker: current reports the claude.ai login" "$acct" "$(cda current)"
+check "list --json too" "$acct" "$(cda list --json | jq -r .current)"
+check_true "and the read commands leave the marker" test -f "$CLAUDE_MULTIPASS_DIR/active-llmr"
+cda sync > /dev/null
+check_true "a writing run removes the stale marker" test ! -e "$CLAUDE_MULTIPASS_DIR/active-llmr"
+
+# Switch away to the account the Desktop folder still holds: quit and relaunch anyway
+echo router-p > "$CLAUDE_MULTIPASS_DIR/active-llmr"
+rm -f "$tmp/gone" "$tmp/calls"
+printf '#!/bin/sh\ncase "$*" in *user-data-dir* | *Claude*) test ! -e "%s/gone" ;; *) exit 1 ;; esac\n' "$tmp" > "$tmp/bin/pgrep"
+printf '#!/bin/sh\necho "osascript $*" >> "%s/calls"\ntouch "%s/gone"\n' "$tmp" "$tmp" > "$tmp/bin/osascript"
+check "current reports LLMR before the switch away" router "$(cda current 2> /dev/null)"
+check "switch away to the same account succeeds" 0 "$(exit_code cda switch "$acct")"
+check "and quits LLMR's Desktop" 1 "$(grep -c '^osascript' "$tmp/calls")"
+check "and relaunches the claude.ai login" 1 "$(grep -c '^open -a Claude$' "$tmp/calls")"
+check_true "and removes the marker" test ! -e "$CLAUDE_MULTIPASS_DIR/active-llmr"
+printf '#!/bin/sh\necho "osascript $*" >> "%s/calls"\n' "$tmp" > "$tmp/bin/osascript"
+printf '#!/bin/sh\nexit 1\n' > "$tmp/bin/pgrep"
+
+# A failed llmr launch relaunches the untouched claude.ai login and exits 1
+rm -f "$tmp/calls" "$tmp/llmr-calls"
+echo 2 > "$tmp/llmr-fail"
+err=$(cda switch router 2>&1 > /dev/null) && rc=0 || rc=$?
+check "a failed llmr launch exits 1" 1 "$rc"
+check_true "and shows the error" grep -q 'llmr router-p app exited 2; relaunching the claude.ai login' <<< "$err"
+check_true "and llmr's own message" grep -q 'llmr: no such profile' <<< "$err"
+check "and relaunches the claude.ai login" 1 "$(grep -c '^open -a Claude$' "$tmp/calls")"
+check_true "and writes no marker" test ! -e "$CLAUDE_MULTIPASS_DIR/active-llmr"
+check "and leaves the Desktop folder's login as it was" "$(jq -c 'with_entries(select(.key | test("oauth|lastKnown")))' "$tmp/config-before-llmr")" "$(jq -c 'with_entries(select(.key | test("oauth|lastKnown")))' "$d/config.json")"
+rm -f "$tmp/llmr-fail" "$tmp/calls"
+check "a missing llmr exits 1" 1 "$(CLAUDE_MULTIPASS_LLMR="$tmp/no-llmr" exit_code cda switch router)"
+check "before it quits or launches Desktop" "" "$(cat "$tmp/calls" 2> /dev/null)"
+check "--no-relaunch does not apply to an LLMR switch" 1 "$(exit_code cda switch router --no-relaunch)"
+check "and quits nothing" "" "$(cat "$tmp/calls" 2> /dev/null)"
+rm -f "$tmp/llmr-calls"
+env -u CLAUDE_MULTIPASS_LLMR PATH="$tmp/llmr-bin:$PATH" "$script" switch router > /dev/null 2>&1
+check "without CLAUDE_MULTIPASS_LLMR, llmr is found on PATH" "llmr router-p app" "$(cat "$tmp/llmr-calls")"
+rm -f "$CLAUDE_MULTIPASS_DIR/active-llmr"
+: > "$tmp/security-calls"
+cda rename router router2 > /dev/null
+check "rename moves an LLMR profile" router-p "$(jq -r .llmrProfile "$p/router2/meta.json")"
+check "without a Keychain call" 0 "$(wc -l < "$tmp/security-calls" | tr -d ' ')"
+rm -rf "$p/router2" "$tmp/calls"
 
 # the dotfiles-era store moves into the default location once, backups too
 # (XDG_CONFIG_HOME, not HOME: tools on PATH may read their own config from HOME)

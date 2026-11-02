@@ -18,7 +18,14 @@ struct AccountRow: View {
 
   private var isIdle: Bool { appState.phase == .idle }
   /// A confirm, or a running switch or save, has the row's attention; the panel stays out of it.
-  var offersDetail: Bool { isIdle && !isExpanded }
+  /// An LLMR profile has no usage figures to detail.
+  var offersDetail: Bool { isIdle && !isExpanded && !profile.isLLMR }
+  /// What the row says under the name.
+  var subtitle: String {
+    if profile.isLLMR { return "terminal: run llmr \(profile.llmrProfile ?? profile.name)" }
+    return profile.cliSaved ? "Desktop and terminal login" : "Desktop login only"
+  }
+  var showsUsage: Bool { appState.settings.usageEnabled && !profile.isLLMR }
   private var isSwitching: Bool { appState.phase == .switching(profile.name) }
   private var rowError: RowError? { appState.rowError?.name == profile.name ? appState.rowError : nil }
   private var rowNote: RowNote? { appState.rowNote?.name == profile.name ? appState.rowNote : nil }
@@ -29,13 +36,13 @@ struct AccountRow: View {
         HStack(spacing: 10) {
           VStack(alignment: .leading, spacing: 1) {
             Text(profile.name)
-            Text(profile.cliSaved ? "Desktop and terminal login" : "Desktop login only")
+            Text(subtitle)
               .font(.caption).foregroundStyle(.secondary)
           }
           Spacer(minLength: 8)
           if isSwitching {
             ProgressView().controlSize(.small)
-          } else if appState.settings.usageEnabled {
+          } else if showsUsage {
             usage
           }
         }
@@ -81,8 +88,7 @@ struct AccountRow: View {
       }
     } else if isExpanded {
       VStack(alignment: .leading, spacing: 4) {
-        Text("Switch to \(profile.name)? Claude Desktop quits and relaunches signed in as \(profile.name). Its Code tab will list every saved account's sessions. "
-          + (profile.cliSaved ? "The terminal's claude login switches too." : "The terminal's claude login stays as it is (no CLI login saved)."))
+        Text(confirmText)
           .font(.caption)
           .fixedSize(horizontal: false, vertical: true)
         HStack {
@@ -94,6 +100,15 @@ struct AccountRow: View {
     } else if let rowNote {
       Text(rowNote.message).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
     }
+  }
+
+  private var confirmText: String {
+    if let llmr = profile.llmrProfile, profile.isLLMR {
+      return "Switch to \(profile.name)? Claude Desktop quits and llm-router relaunches it on LLMR profile \(llmr). "
+        + "The terminal's claude login stays as it is; run llmr \(llmr) for a terminal on LLMR."
+    }
+    return "Switch to \(profile.name)? Claude Desktop quits and relaunches signed in as \(profile.name). Its Code tab will list every saved account's sessions. "
+      + (profile.cliSaved ? "The terminal's claude login switches too." : "The terminal's claude login stays as it is (no CLI login saved).")
   }
 
   private var entry: UsageEntry? { appState.usage[profile.name] }

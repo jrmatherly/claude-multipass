@@ -274,6 +274,18 @@ import Testing
     controller.dismiss()
   }
 
+  @Test func anLLMRRowShowsTheTerminalHintAndNoUsage() async throws {
+    let s = await state(FixtureRunner(usage: usage))
+    #expect(s.settings.usageEnabled)
+    let llmr = Profile(name: "router", account: "", savedAt: nil, sessions: 0, kind: "llmr", llmrProfile: "router-p")
+    let row = AccountRow(appState: s, profile: llmr, isExpanded: false, onTap: {}, onCancel: {}, onSwitch: { _ in })
+    #expect(row.subtitle == "terminal: run llmr router-p")
+    #expect(!row.showsUsage)
+    #expect(!row.offersDetail)
+    let work = try #require(s.snapshot?.profiles.first { $0.name == "work" })
+    #expect(AccountRow(appState: s, profile: work, isExpanded: false, onTap: {}, onCancel: {}, onSwitch: { _ in }).showsUsage)
+  }
+
   @Test func aRowOffersItsDetailOnlyWhenIdleWithNoConfirm() async throws {
     let s = await state(FixtureRunner(usage: usage, switchHangs: true))
     let profile = try #require(s.snapshot?.profiles.first { $0.name == "work" })
