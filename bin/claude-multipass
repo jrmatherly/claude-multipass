@@ -22,6 +22,10 @@
 #
 # `claude-multipass switch {{name}}`
 #
+# - Save an LLM Router profile under a name; switching to it runs `llmr {{llmr_profile}} app` (no quit, no Keychain):
+#
+# `claude-multipass save {{name}} --llmr {{llmr_profile}}`
+#
 # - Make every account's Claude Code sessions show in every account's Code tab:
 #
 # `claude-multipass sync`
@@ -76,6 +80,13 @@
 # shared ~/.claude/projects, so copying a pointer shows the session to another
 # account. A deleted_<id> file marks a session the user deleted; sync never
 # copies it back and never deletes anything.
+#
+# An LLMR profile's meta.json holds kind "llmr" and llmrProfile instead of an
+# account. Switching to it saves the outgoing login, quits Desktop and runs
+# `llmr <profile> app`, which launches Desktop on LLMR's own data folder; the
+# claude.ai login in the Desktop folder stays as it was. active-llmr beside
+# profiles/ names the LLMR profile while that instance runs. llmr is found
+# through CLAUDE_MULTIPASS_LLMR, then PATH, then ~/.llm-router/bin/llmr.
 #
 # Profiles: ${CLAUDE_MULTIPASS_DIR:-${XDG_CONFIG_HOME:-~/.config}/claude-multipass}/profiles/<name>/
 # (config.json, Cookies, Cookies-journal, meta.json, cli.json). The Claude Code
@@ -144,6 +155,7 @@ auth_keys='["oauth:tokenCache","oauth:tokenCacheV2","lastKnownAccountUuid"]'
 # own service, named after the profile; only the identity goes on disk.
 claude_json="${CLAUDE_CLI_CONFIG:-$HOME/.claude.json}"
 cli_home="${CLAUDE_CLI_HOME:-$HOME/.claude}"
+llmr_marker="$root/active-llmr"
 cli_service='Claude Code-credentials'
 cli_account=${USER:-$(id -un)}
 mp_service=claude-multipass
@@ -177,6 +189,7 @@ ${bold}Usage${reset}
   claude-multipass list
   claude-multipass show <name>
   claude-multipass save|switch|add <name> [--no-relaunch] [--force]
+  claude-multipass save <name> --llmr <llmr-profile> [--force]
   claude-multipass remove <name>
   claude-multipass rename <old> <new>
   claude-multipass sync [--force]
@@ -204,7 +217,11 @@ ${bold}Commands${reset}
                        account Desktop is signed in as right now. With --json,
                        one object: version, signedIn, desktopRunning, current
                        (null when the login has no name) and profiles (name,
-                       account, savedAt, sessions, cliSaved).
+                       account, savedAt, sessions, cliSaved, and kind "llmr"
+                       plus llmrProfile for an LLMR profile, whose account
+                       is ""). An LLMR profile's row reads "llmr <profile>",
+                       marked * while Desktop runs it, with "(gateway not
+                       running)" when LLMR does not answer.
   show <name>          Prints one saved account in detail, including its Code
                        session count per organization. The picker shows this
                        as its preview.
@@ -218,6 +235,20 @@ ${bold}Commands${reset}
                        already holds this one, save stops; add --force to
                        replace that profile (it is kept in the backups
                        folder, newest ten).
+  save <name> --llmr <llmr-profile>
+                       Saves an LLM Router (LLMR) profile under <name>. It
+                       writes only meta.json: Desktop keeps running and the
+                       Keychain is not read. Switching to <name> saves the
+                       login you leave as switch does, quits Desktop and
+                       runs llmr <llmr-profile> app instead of relaunching.
+                       The terminal's claude login stays as it is; run
+                       llmr <llmr-profile> for a terminal on LLMR. If llmr
+                       fails, Desktop relaunches on the claude.ai login and
+                       switch exits 1. Switching away quits LLMR's Desktop
+                       and relaunches the claude.ai login, also when the
+                       target is the account it already holds. An existing
+                       claude.ai profile under <name> stops it; add --force
+                       to replace that profile.
   add <name>           Prepares Desktop for signing in to another account: the
                        current login is saved (if it has a name), Desktop
                        relaunches at its sign-in screen, and you sign in with
@@ -260,6 +291,7 @@ ${bold}Commands${reset}
                        the OAuth profile, read at most once a day per
                        account, or an hour after a failed request while no
                        name is cached. Give a name to see one account.
+                       LLMR profiles are left out.
                        Exits 1 without the Command Line Tools.
                        Opt-in; see Cautions. With --json, {"profiles":[{name,
                        plan?, fiveHour? or ultra:true, sevenDay?, scoped?}
@@ -269,6 +301,9 @@ ${bold}Commands${reset}
   current              Prints the name of the saved account Desktop is signed
                        in as, "not saved" if the current login has no name, or
                        "signed out". For scripts and the Raycast commands.
+                       While Desktop runs an LLMR profile, prints that
+                       profile, with a warning when LLMR's gateway does not
+                       answer.
   pick                 Opens the fzf picker, the same as running the command
                        with no arguments.
   doctor               Checks the setup: Desktop's config.json, the tools on
@@ -293,6 +328,7 @@ ${bold}Options${reset}
   --version            Print the version.
   --json               list, usage: print JSON instead of text, for scripts and
                        the menu bar app.
+  --llmr <profile>     save: save an LLMR profile instead of the Desktop login.
 
 ${bold}Folders${reset}
   Profiles   $store/<name>/
@@ -416,6 +452,8 @@ cli_live_read() {
 
 # The CLI is skipped for this run (a held lock on save or add).
 cli_skip=''
+# Set once llmr launched Desktop, so the EXIT trap does not relaunch it.
+llmr_launched=''
 
 # Why the CLI part of this run is impossible, or nothing. Shared by the
 # capture and the restore so the two never disagree.
@@ -683,6 +721,57 @@ desktop_quit() {
 desktop_launch() {
   info "Launching Claude"
   open -a Claude
+}
+
+# A profile's LLMR profile name, or nothing for a claude.ai profile.
+llmr_of() { jq -r 'select(.kind == "llmr") | .llmrProfile | strings' "$store/$1/meta.json" 2> /dev/null || true; }
+
+llmr_bin() {
+  local bin=${CLAUDE_MULTIPASS_LLMR:-}
+  [[ -n $bin ]] || bin=$(command -v llmr) || bin=$HOME/.llm-router/bin/llmr
+  [[ -x $bin ]] || fail "llmr not found at $bin (install llm-router, or set CLAUDE_MULTIPASS_LLMR)"
+  printf %s "$bin"
+}
+
+# The marker's LLMR profile while a Desktop launched on an LLMR data folder
+# runs; status 1 otherwise, a stale marker included.
+# shortcut: any LLMR-launched Desktop counts, not only the marker's profile,
+# because LLMR names the folder after its profile id, which can differ from the
+# name given to save --llmr; match the id once llmr reports it.
+llmr_running() {
+  local p
+  p=$(cat "$llmr_marker" 2> /dev/null) || return 1
+  [[ -n $p ]] && pgrep -qf -- '--user-data-dir=.*/claude-app-user-data/' || return 1
+  printf %s "$p"
+}
+
+# The saved name of the LLMR profile Desktop runs now, or nothing.
+llmr_current() {
+  local p meta
+  p=$(llmr_running) || return 0
+  for meta in "$store"/*/meta.json; do
+    [[ -f $meta && $(llmr_of "$(basename "${meta%/meta.json}")") == "$p" ]] || continue
+    basename "${meta%/meta.json}"
+    return 0
+  done
+}
+
+# LLMR's gateway health route on its default port: no credential goes out and
+# the body (status and core endpoint) is dropped. -f counts its 503 (runtime
+# disabled) as down.
+llmr_gateway_up() { curl -fsS -o /dev/null --max-time 2 http://127.0.0.1:3456/health > /dev/null 2>&1; }
+
+# An LLMR profile is only its meta.json; nothing of Desktop's is read.
+llmr_save() {
+  local dir="$store/$1"
+  if [[ -f $dir/meta.json && -z $(llmr_of "$1") ]]; then
+    [[ -n $force ]] || refuse "$1 holds a claude.ai account: pick another name, or pass --force to replace it"
+    profile_set_aside "$1"
+    echo "Moved the old $1 profile into $backups"
+  fi
+  (umask 077 && mkdir -p "$dir")
+  jq_write "$dir/meta.json" -n --arg p "$2" --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{kind: "llmr", llmrProfile: $p, savedAt: $t}'
+  echo "Saved LLMR profile $2 as $1 (terminal: run llmr $2)"
 }
 
 # jq -e judges only the last document, so -s makes "[] {}" fail too.
@@ -1112,7 +1201,10 @@ doctor_report() {
       mode=$(stat -f %Lp "$file")
       [[ $mode == 600 ]] || echo "warn: $name: $(basename "$file") is mode $mode, expected 600"
     done
-    if [[ ! -f ${dir}meta.json ]]; then
+    if [[ -n $(llmr_of "$name") ]]; then
+      echo "ok: $name (LLMR profile $(llmr_of "$name"))"
+      continue
+    elif [[ ! -f ${dir}meta.json ]]; then
       echo "fail: $name: missing meta.json"
       status=1
     elif [[ ! -f ${dir}config.json ]]; then
@@ -1154,6 +1246,7 @@ usage_report() {
   local only=${1:-} key out meta dir name live account i=0
   if [[ -n $only ]]; then
     require_profile "$only"
+    [[ -z $(llmr_of "$only") ]] || fail "$only is an LLMR profile; usage reads claude.ai accounts only"
     require_meta "$only" > /dev/null
   fi
   key=$(safe_storage_key)
@@ -1163,6 +1256,7 @@ usage_report() {
     dir=$(dirname "$meta")
     name=${dir##*/}
     [[ -z $only || $only == "$name" ]] || continue
+    [[ -z $(llmr_of "$name") ]] || continue
     account=$(meta_account "$meta") || continue
     i=$((i + 1))
     usage_entry "$name" "$key" "$dir/config.json" "$account" > "$out/$(printf %03d "$i")" &
@@ -1200,6 +1294,12 @@ count_sessions() {
 # The signed-in saved account's name, or "not saved", or "signed out".
 current_profile() {
   local active
+  active=$(llmr_current)
+  if [[ -n $active ]]; then
+    echo "$active"
+    llmr_gateway_up || warning "$active: LLMR profile, gateway not running"
+    return 0
+  fi
   signed_in || {
     echo "signed out"
     return 0
@@ -1209,13 +1309,25 @@ current_profile() {
 }
 
 list_profiles() {
-  local live meta dir account mark any=''
-  live=$(live_account)
+  local live meta dir account mark any='' llmr llmr_active note
+  llmr_active=$(llmr_current)
+  # Desktop runs LLMR's instance, so the claude.ai login is not the signed-in one.
+  [[ -n $llmr_active ]] && live='' || live=$(live_account)
   for meta in "$store"/*/meta.json; do
     [[ -f $meta ]] || continue
     any=1
-    account=$(meta_account "$meta") || continue
     dir=$(dirname "$meta")
+    llmr=$(llmr_of "${dir##*/}")
+    if [[ -n $llmr ]]; then
+      mark='  ' note=''
+      if [[ ${dir##*/} == "$llmr_active" ]]; then
+        mark='* '
+        llmr_gateway_up || note='  (gateway not running)'
+      fi
+      printf '%s%-16s llmr %s  %s%s\n' "$mark" "${dir##*/}" "$llmr" "$(jq -r '.savedAt // "-"' "$meta")" "$note"
+      continue
+    fi
+    account=$(meta_account "$meta") || continue
     mark='  '
     [[ $account == "$live" ]] && mark='* '
     printf '%s%-16s %s  %s  %s sessions\n' "$mark" "${dir##*/}" "${account:0:8}" \
@@ -1229,9 +1341,15 @@ list_profiles() {
 # One JSON object for the menu bar app; [inputs] gathers the bare objects
 # into an array, [] when there are none
 list_json() {
-  local meta account profiles='' signed_in=false running=false cli_saved
+  local meta account profiles='' signed_in=false running=false cli_saved current
   for meta in "$store"/*/meta.json; do
     [[ -f $meta ]] || continue
+    # An empty account keeps the row decodable by an app that predates kind.
+    if [[ -n $(llmr_of "$(basename "${meta%/meta.json}")") ]]; then
+      profiles+=$(jq --arg name "$(basename "${meta%/meta.json}")" \
+        '{name: $name, account: "", kind: "llmr", llmrProfile, savedAt, sessions: 0, cliSaved: false}' "$meta")
+      continue
+    fi
     account=$(meta_account "$meta") || continue
     cli_saved=false
     [[ ! -f ${meta%/*}/cli.json ]] || cli_saved=true
@@ -1241,13 +1359,15 @@ list_json() {
   done
   signed_in && signed_in=true
   desktop_running && running=true
+  current=$(llmr_current)
+  [[ -n $current ]] || current=$(active_profile)
   printf '%s' "$profiles" | jq -n --arg v "$version" --argjson signedIn "$signed_in" --argjson running "$running" \
-    --arg current "$(active_profile)" \
+    --arg current "$current" \
     '{version: $v, signedIn: $signedIn, desktopRunning: $running, current: (if $current == "" then null else $current end), profiles: [inputs]}'
 }
 
 require_profile() {
-  [[ -f $store/$1/meta.json && -f $store/$1/config.json ]] \
+  [[ -f $store/$1/meta.json && (-f $store/$1/config.json || -n $(llmr_of "$1")) ]] \
     || fail "No saved account named $1 (see: claude-multipass list)"
 }
 
@@ -1269,6 +1389,11 @@ profile_rename() {
   require_profile "$1"
   [[ ! -e $store/$2 ]] || fail "$2 already exists"
   mv "$store/$1" "$store/$2"
+  # An LLMR profile has no CLI login item.
+  if [[ -n $(llmr_of "$2") ]]; then
+    echo "Renamed $1 to $2"
+    return 0
+  fi
   v=$(keychain_get "$mp_service" "$1") || rc=$?
   if ((rc == 0)); then
     if printf '%s' "$v" | keychain_put "$mp_service" "$2"; then
@@ -1284,7 +1409,15 @@ profile_rename() {
 }
 
 profile_show() {
-  local account org n
+  local account org n llmr
+  llmr=$(llmr_of "$1")
+  if [[ -n $llmr ]]; then
+    echo "$1"
+    echo "LLMR profile $llmr"
+    echo "saved at $(jq -r .savedAt "$store/$1/meta.json")"
+    echo "terminal: run llmr $llmr"
+    return 0
+  fi
   account=$(require_meta "$1")
   echo "$1"
   echo "account ${account:0:8}"
@@ -1302,7 +1435,7 @@ profile_show() {
 # Name first so fzf's {1} is the name; the signed-in mark moves to the end.
 pick_profile() {
   local rows choice
-  rows=$(list_profiles | sed -nE 's/^\* (.* sessions)$/\1  (signed in)/p; s/^  (.* sessions)$/\1/p')
+  rows=$(list_profiles | sed -nE 's/^\* (.*)$/\1  (signed in)/p; s/^  (.*)$/\1/p')
   [[ -n $rows ]] || {
     list_profiles
     return 0
@@ -1364,7 +1497,7 @@ run_lock() {
 run_unlock() { [[ $(readlink "$root/.run.lock" 2> /dev/null) != "$$" ]] || rm -f "$root/.run.lock"; }
 
 main() {
-  local cmd=${1:-} names=() name='' relaunch=1 force='' json='' arg active saved live other
+  local cmd=${1:-} names=() name='' relaunch=1 force='' json='' llmr_profile='' target_llmr='' llmr='' active saved live other
   [[ -n $cmd ]] || {
     if [[ -t 0 ]] && command -v fzf > /dev/null; then
       cmd=pick
@@ -1374,16 +1507,24 @@ main() {
     fi
   }
   [[ $# -eq 0 ]] || shift
-  for arg in "$@"; do
-    case $arg in
+  while (($# > 0)); do
+    case $1 in
       --no-relaunch) relaunch= ;;
       --force) force=1 ;;
       --json) json=1 ;;
+      --llmr)
+        [[ $# -ge 2 ]] || fail "--llmr needs an LLMR profile name"
+        valid_name "$2"
+        llmr_profile=$2
+        shift
+        ;;
       -h | --help) cmd=help ;;
-      -*) fail "Unknown option: $arg" ;;
-      *) names+=("$arg") ;;
+      -*) fail "Unknown option: $1" ;;
+      *) names+=("$1") ;;
     esac
+    shift
   done
+  [[ -z $llmr_profile || $cmd == save ]] || fail "--llmr applies to save"
   [[ -z $force || $cmd == sync || $cmd == switch || $cmd == save || $cmd == add ]] || fail "--force applies to sync, switch, save and add"
   [[ -z $json || $cmd == list || $cmd == usage ]] || fail "--json applies to list and usage"
 
@@ -1427,8 +1568,14 @@ main() {
     save | switch | add | sync | rename | remove)
       run_lock
       trap run_unlock EXIT
+      # Read commands only report a stale marker; a writing run clears it.
+      [[ ! -e $llmr_marker ]] || llmr_running > /dev/null || rm -f "$llmr_marker"
       ;;
   esac
+  if [[ -n $llmr_profile ]]; then
+    llmr_save "$name" "$llmr_profile"
+    return 0
+  fi
 
   # Before the refusals below, which would misread such a file: signed out, or an unsaved login.
   case $cmd in
@@ -1478,7 +1625,7 @@ main() {
       # Decided before the quit, so a refused save never bounces Desktop.
       if [[ -f $store/$name/meta.json && -z $force ]]; then
         saved=$(meta_account "$store/$name/meta.json" 2> /dev/null) \
-          || refuse "$name: $store/$name/meta.json is not valid: pass --force to replace the profile"
+          || refuse "$name: $store/$name/meta.json is not valid, or holds an LLMR profile: pass --force to replace the profile"
         live=$(live_account)
         [[ $saved == "$live" ]] || refuse "$name already holds account ${saved:0:8}, not the signed-in ${live:0:8}: pick another name, or pass --force to replace it"
       fi
@@ -1489,7 +1636,13 @@ main() {
     switch | add)
       if [[ $cmd == switch ]]; then
         require_profile "$name"
-        require_meta "$name" > /dev/null
+        target_llmr=$(llmr_of "$name")
+        if [[ -n $target_llmr ]]; then
+          [[ -n $relaunch ]] || fail "--no-relaunch does not apply to an LLMR profile: launching it is the switch"
+          llmr=$(llmr_bin) || exit 1
+        else
+          require_meta "$name" > /dev/null
+        fi
       fi
       if signed_in && [[ -z $(active_profile) && -z $force ]]; then
         refuse "The signed-in account isn't saved and would need its email code again: run save <name> first, or pass --force"
@@ -1504,8 +1657,10 @@ main() {
   # relaunch is main's local, so the trap text is chosen now, not at exit.
   # The run lock goes last, so no other run quits Desktop before it relaunches.
   # The trap goes in before the quit, so a signal or a failed quit relaunches.
-  if [[ -n $relaunch ]]; then trap 'cli_unlock; desktop_launch; run_unlock' EXIT; else trap 'cli_unlock; run_unlock' EXIT; fi
+  if [[ -n $relaunch ]]; then trap 'cli_unlock; [[ -n $llmr_launched ]] || desktop_launch; run_unlock' EXIT; else trap 'cli_unlock; run_unlock' EXIT; fi
   desktop_quit
+  # The quit ended LLMR's instance too; a switch to an LLMR profile writes it again.
+  rm -f "$llmr_marker"
   # The CLI's own locks guard its login while a save reads it or a switch
   # writes it. They are taken only when claude.json exists, because
   # cli_restore writes nothing without it.
@@ -1519,7 +1674,19 @@ main() {
   case $cmd in
     save) profile_save "$name" ;;
     switch)
-      if [[ $active == "$name" ]]; then
+      if [[ -n $target_llmr ]]; then
+        # LLMR's instance keeps its own data folder, so the claude.ai login in
+        # the Desktop folder stays in place for the switch back, and the Code
+        # tab sync and the CLI login have nothing to do.
+        [[ -z $active ]] || profile_save "$active"
+        backup_login
+        cli_unlock
+        info "Launching Claude through LLMR profile $target_llmr"
+        "$llmr" "$target_llmr" app < /dev/null || fail "llmr $target_llmr app exited $?; relaunching the claude.ai login"
+        llmr_launched=1
+        printf '%s\n' "$target_llmr" > "$llmr_marker"
+        echo "Switched to $name (terminal: run llmr $target_llmr)"
+      elif [[ $active == "$name" ]]; then
         echo "$name is already signed in"
         # Missing cookies are repaired from the profile; present ones may be newer
         # than the saved copy (Desktop rotates them), so they stay. The CLI part

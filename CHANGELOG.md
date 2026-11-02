@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- An LLM Router (LLMR) profile can be saved and switched to like an account. `save <name> --llmr <llmr-profile>` writes only that profile's `meta.json`, with no Desktop quit and no Keychain read. `switch <name>` re-saves the login you leave, quits Desktop and runs `llmr <llmr-profile> app` instead of relaunching it; if that fails, Desktop relaunches on the claude.ai login and the switch exits 1. Switching away relaunches the claude.ai login, also when it is the account Desktop already holds. `current`, `list` and `list --json` name the LLMR profile while its Desktop runs and say `gateway not running` when LLMR does not answer. `list --json` adds `kind` and `llmrProfile`. `usage` skips LLMR profiles, and the menu bar shows the row with no usage meter and the hint `terminal: run llmr <llmr-profile>`.
+
 - A Claude Code login that Claude Code itself cleared (both tokens empty, which it does to a login the server rejected) counts as signed out. `save` and the re-save on a switch warn `Claude Code cleared its login; switch to <name>, run claude auth login, then save <name>` and keep the profile's saved CLI login, and a `switch` to the same account restores the saved login instead of keeping the cleared one.
 
 ## 0.10.2 (2026-11-01)

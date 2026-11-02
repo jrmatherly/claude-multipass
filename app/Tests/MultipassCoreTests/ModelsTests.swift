@@ -24,6 +24,15 @@ import Testing
   #expect(s.profiles[0].cliSaved == false)
 }
 
+@Test func decodesAnLLMRProfile() throws {
+  let json = #"{"version":"0.11.0","signedIn":true,"desktopRunning":true,"current":"router","profiles":[{"name":"router","account":"","kind":"llmr","llmrProfile":"router-p","savedAt":"2026-01-01T00:00:00Z","sessions":0,"cliSaved":false},{"name":"beta","account":"b","savedAt":null,"sessions":4}]}"#
+  let s = try MultipassJSON.decoder.decode(Snapshot.self, from: Data(json.utf8))
+  #expect(s.profiles[0].isLLMR)
+  #expect(s.profiles[0].llmrProfile == "router-p")
+  // A claude.ai profile carries neither key.
+  #expect(!s.profiles[1].isLLMR && s.profiles[1].llmrProfile == nil)
+}
+
 @Test func decodesNullCurrent() throws {
   let json = #"{"version":"0.2.0","signedIn":true,"desktopRunning":true,"current":null,"profiles":[]}"#
   let s = try MultipassJSON.decoder.decode(Snapshot.self, from: Data(json.utf8))

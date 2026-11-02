@@ -44,17 +44,27 @@ public struct Profile: Decodable, Equatable, Identifiable {
   public var sessions: Int
   /// Whether the profile holds the terminal's claude login (tool 0.3.0+).
   public var cliSaved: Bool
+  /// "llmr" for a profile that runs Desktop through llm-router (tools after 0.10.2); nil for a claude.ai account.
+  public var kind: String?
+  /// The llm-router profile an LLMR profile launches.
+  public var llmrProfile: String?
   public var id: String { name }
+  public var isLLMR: Bool { kind == "llmr" }
 
-  public init(name: String, account: String, savedAt: Date?, sessions: Int, cliSaved: Bool = false) {
+  public init(
+    name: String, account: String, savedAt: Date?, sessions: Int, cliSaved: Bool = false,
+    kind: String? = nil, llmrProfile: String? = nil
+  ) {
     self.name = name
     self.account = account
     self.savedAt = savedAt
     self.sessions = sessions
     self.cliSaved = cliSaved
+    self.kind = kind
+    self.llmrProfile = llmrProfile
   }
 
-  private enum CodingKeys: String, CodingKey { case name, account, savedAt, sessions, cliSaved }
+  private enum CodingKeys: String, CodingKey { case name, account, savedAt, sessions, cliSaved, kind, llmrProfile }
 
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -64,6 +74,8 @@ public struct Profile: Decodable, Equatable, Identifiable {
     savedAt = try? c.decodeIfPresent(Date.self, forKey: .savedAt)
     sessions = try c.decode(Int.self, forKey: .sessions)
     cliSaved = try c.decodeIfPresent(Bool.self, forKey: .cliSaved) ?? false
+    kind = try c.decodeIfPresent(String.self, forKey: .kind)
+    llmrProfile = try c.decodeIfPresent(String.self, forKey: .llmrProfile)
   }
 }
 

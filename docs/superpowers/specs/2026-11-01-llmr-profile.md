@@ -1,6 +1,6 @@
 # LLM Router profile design
 
-Status: draft, revision 2. The first draft proposed a new `llmr takeover` command. llm-router's review showed it fights LLMR's lifecycle, so this revision uses the existing `llmr <profile> app` instead. Nothing here is agreed with llm-router; Jason decides what it builds. Evidence labels: **source** (read in code on 2026-11-01), **measured**, **inferred**, **not proven**.
+Status: implemented on branch `llmr-profile` (the claude-multipass side), revision 2. The real-launch check of the quit reaching LLMR's `open -n` instance is still open. The first draft proposed a new `llmr takeover` command. llm-router's review showed it fights LLMR's lifecycle, so this revision uses the existing `llmr <profile> app` instead. Nothing here is agreed with llm-router; Jason decides what it builds. Evidence labels: **source** (read in code on 2026-11-01), **measured**, **inferred**, **not proven**.
 
 ## Goal
 
