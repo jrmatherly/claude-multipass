@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.12.0 (2026-11-02)
 
 - `save`, `switch` and `add` pause a running Hindsight memory daemon (`hindsight-api`) while they read or write the terminal's Claude Code login, because a background `claude` it started on the old login can write that login back over the switched one. They wait up to 60 s for its running `claude` to finish, stop the daemon, and resume it before Desktop relaunches. A `claude` still running after 60 s can still write back, so the daemon stops anyway and the run warns. A run killed with SIGKILL leaves the daemon stopped until the next `save`, `switch` or `add` that gets past its refusals, and `doctor` warns while it is stopped.
 - `--debug`, or a non-empty `CLAUDE_MULTIPASS_DEBUG`, logs a `save`, `switch`, `add` or `pick` to `debug.log` (mode 0600, no token from the Keychain and no token hash, with `claude` command lines cut at 160 characters), and `--debug` also to stderr: timings, the Hindsight pause and each running `claude`. A `switch` also watches the Claude Code login for 30 s after the switch and warns `CLI login changed after the switch` each time something rewrites it, and warns at the start when the login is not on the target account.
