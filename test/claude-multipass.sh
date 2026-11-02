@@ -220,6 +220,10 @@ cp "$tmp/claude-alpha.json" "$tmp/claude.json"
 kc_delete "Claude Code-credentials" "$USER"
 check_true "save warns when the CLI is signed out" grep -q 'signed in as a different account, or signed out' <<< "$(cda save alpha --no-relaunch 2>&1 > /dev/null)"
 check "a signed-out save keeps the saved item" at-alpha "$(kc_get claude-multipass alpha | jq -r .claudeAiOauth.accessToken)"
+# Claude Code 2.1.316 clears a dead login in place: empty tokens, expiresAt 0. That is a sign-out, not a login to save
+kc_put "Claude Code-credentials" "$USER" '{"claudeAiOauth":{"accessToken":"","refreshToken":"","expiresAt":0,"scopes":[]},"mcpOAuth":{"srv":"shared"}}'
+check_true "save warns when Claude Code cleared its login" grep -q 'alpha: Claude Code cleared its login; run claude auth login, then save alpha' <<< "$(cda save alpha --no-relaunch 2>&1 > /dev/null)"
+check "a cleared save keeps the saved item" at-alpha "$(kc_get claude-multipass alpha | jq -r .claudeAiOauth.accessToken)"
 kc_put "Claude Code-credentials" "$USER" "$live_item"
 err=$(SECURITY_FAIL_ADD=1 cda save alpha --no-relaunch 2>&1 > /dev/null)
 check_true "a refused Keychain write on save warns" grep -q 'alpha: security exited 1 saving the CLI login; saved the Desktop login only' <<< "$err"
@@ -330,6 +334,14 @@ check "switch to the signed-in account re-saves the live CLI login" "beta is alr
 check "and writes no backup folder" "$n_backups" "$(ls -1d "$b"/login-*/ | wc -l | tr -d ' ')"
 check "and leaves the live tokens alone" at-beta-fresh "$(kc_get "Claude Code-credentials" "$USER" | jq -r .claudeAiOauth.accessToken)"
 check "and the profile now holds them" at-beta-fresh "$(kc_get claude-multipass beta | jq -r .claudeAiOauth.accessToken)"
+
+# The CLI's identity says the target account but Claude Code cleared the item: restore the saved one, keep the shared keys
+kc_put "Claude Code-credentials" "$USER" '{"claudeAiOauth":{"accessToken":"","refreshToken":"","expiresAt":0},"mcpOAuth":{"srv":"shared"}}'
+err=$(cda switch beta --no-relaunch 2>&1 > /dev/null)
+check "a same-account switch over a cleared item restores the saved login" at-beta-fresh "$(kc_get "Claude Code-credentials" "$USER" | jq -r .claudeAiOauth.accessToken)"
+check "and keeps the shared MCP keys" '{"srv":"shared"}' "$(kc_get "Claude Code-credentials" "$USER" | jq -c .mcpOAuth)"
+check "and leaves the profile's saved login alone" at-beta-fresh "$(kc_get claude-multipass beta | jq -r .claudeAiOauth.accessToken)"
+check "and warns nothing" "" "$err"
 
 # The CLI's identity says the target account but its Keychain item is gone: restore the saved one
 kc_delete "Claude Code-credentials" "$USER"

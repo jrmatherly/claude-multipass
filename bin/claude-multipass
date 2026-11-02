@@ -438,6 +438,10 @@ cli_shared='mcpOAuth, mcpOAuthClientConfig, mcpXaaIdp, mcpXaaIdpConfig, pluginSe
 # The account part of a CLI item, what a profile or a backup keeps.
 cli_account_part() { jq -c "del(.${cli_shared//, /, .})"; }
 
+# Claude Code clears a dead login in place: both tokens "" and expiresAt 0
+# (2.1.316, its "OAuth dead-token disk clear"). That item is a sign-out.
+cli_cleared() { printf '%s' "$1" | jq -e '.claudeAiOauth | .accessToken == "" and .refreshToken == "" and .expiresAt == 0' > /dev/null 2>&1; }
+
 # The CLI part of a save: the tokens into the profile's Keychain item, the
 # identity into cli.json. Any doubt leaves the profile's earlier CLI login
 # untouched, so a hand `claude auth login` as another account never
@@ -457,6 +461,10 @@ cli_capture() {
     return 0
   elif [[ $rc -ne 0 ]]; then
     warning "$name: $(keychain_exit "$rc") reading the CLI login; saved the Desktop login only"
+    return 0
+  fi
+  if cli_cleared "$live"; then
+    warning "$name: Claude Code cleared its login; run claude auth login, then save $name"
     return 0
   fi
   if ! part=$(printf '%s' "$live" | cli_account_part 2> /dev/null); then
@@ -597,9 +605,9 @@ cli_restore() {
     return 0
   fi
   cli_live_read || rc=$?
-  # The identity alone does not prove a login: the item must hold tokens too.
+  # The identity alone does not prove a login: the item must hold live tokens too.
   if ((rc == 0)) && [[ $(cli_signed_in_as) == "$(jq -r .account "$dir/meta.json")" ]] \
-    && printf '%s' "$cli_live" | jq -e '.claudeAiOauth != null' > /dev/null 2>&1; then
+    && printf '%s' "$cli_live" | jq -e '.claudeAiOauth != null' > /dev/null 2>&1 && ! cli_cleared "$cli_live"; then
     cli_capture "$name"
     return 0
   fi
