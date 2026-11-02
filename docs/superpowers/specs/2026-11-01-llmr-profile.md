@@ -1,67 +1,73 @@
 # LLM Router profile design
 
-Status: draft. It depends on an `llmr takeover` command that llm-router has not agreed to build. Jason decides whether it does. Evidence labels: **source** (read in llm-router's code on 2026-11-01, by its session and checked by this one), **measured**, **inferred**, **not proven**.
+Status: draft, revision 2. The first draft proposed a new `llmr takeover` command. llm-router's review showed it fights LLMR's lifecycle, so this revision uses the existing `llmr <profile> app` instead. Nothing here is agreed with llm-router; Jason decides what it builds. Evidence labels: **source** (read in code on 2026-11-01), **measured**, **inferred**, **not proven**.
 
 ## Goal
 
-A saved profile you can switch to that runs Claude through llm-router (LLMR). The Desktop app boots its third-party instance with inference through LLMR, and `claude` in a terminal routes through LLMR. Switching back to a claude.ai account undoes both and restores that account's Desktop and CLI logins. Jason chose Desktop and CLI together on 2026-11-01.
+A saved profile you can switch to that runs Claude Desktop through llm-router (LLMR). Switching back to a claude.ai account brings back that account's Desktop login. For the user it is one more row in `list`, the picker and the menu bar. For the next maintainer, claude-multipass never writes an LLMR file or the shared `Claude-3p/` folder.
 
-For the user, the LLMR profile is one more row in `list`, the picker and the menu bar. For the next maintainer, claude-multipass never writes LLMR's files. It calls one LLMR command and keeps its own storage model unchanged.
+## How Desktop picks its instance (source)
 
-## Decision: LLMR owns the takeover writes
+Read in Desktop 4.4212.0's `app.asar` by both sessions (`resolve3pForcingSource`; `m4` in `.vite/build/index.pre.js`).
 
-claude-multipass calls `llmr takeover` and never writes `Claude-3p/` or `~/.claude/settings.json` itself.
+- Desktop boots its third-party instance when the effective config activates third-party mode (an applied entry in `Claude-3p/configLibrary`, managed policy, or a key marked `activatesThirdPartyMode`) and `Claude-3p/claude_desktop_config.json` does not say `deploymentMode: "1p"`. A missing `deploymentMode` still boots 3p. `authentication.disableClaudeAiSignIn` forces it.
+- With `CLAUDE_USER_DATA_DIR` set, Desktop uses that folder as given and skips the `-3p` relocation.
+- The claude.ai login lives in `Claude/`. A mode change needs a full quit and relaunch.
 
-- LLMR derives the takeover from its own config on every config save and on every service start and stop (`syncClaudeAppGatewayConfig`, `packages/core/src/agents/claude-app/gateway-service.ts:88`; stop restores at `packages/core/src/web/management-server.ts:533`) (source). A direct write by claude-multipass would be undone, in either direction, the next time LLMR syncs.
-- LLMR's only scripting surface today is its management RPC (`POST http://127.0.0.1:3458/api/llmr/rpc`). Its auth token is random per run unless `LLMR_WEB_AUTH_TOKEN` was set at launch (source), so another tool cannot rely on it.
+## Decision: launch LLMR's own instance, leave the shared folders alone
 
-## The LLMR contract (proposed, not confirmed)
+`llmr <profile> app` already does what the profile needs (source, `packages/cli/src/cli.ts:205-220`, `packages/core/src/agents/claude-app/launch.ts:55-100`). It writes the gateway config into that LLMR profile's own data dir with `backup: false`, then spawns Desktop detached with `--user-data-dir=<dir>` and `CLAUDE_USER_DATA_DIR`. It writes the shared `Claude-3p/` only when the LLMR profile opts in with `claudeAppTakeover`; the profile used here must not.
 
-| Command | Effect |
-| --- | --- |
-| `llmr takeover on <profile>` | Sets `enabled` and `claudeAppTakeover: true` on that claude-code profile, then applies the Desktop takeover (`Claude-3p/`) and the Claude Code takeover (`settings.json`, `apiKeyHelper`). Rejects a profile whose `surface` is `cli`. |
-| `llmr takeover off` | Clears the takeover on every profile and restores both. The LLMR config library entry stays. |
-| `llmr takeover status --json` | `{"profile": <name or null>, "desktop": bool, "cli": bool, "running": bool}` |
+So:
 
-All three are idempotent, exit non-zero with one plain line on stderr on a refusal, and print no key or token. `on` with the LLMR service stopped fails with "start LLMR first", because Desktop on 3p with nothing listening fails every request and the Desktop write needs the gateway's live models (source, agreed by llm-router's session). `off` works with the service stopped.
+- Switch to the LLMR profile: save the outgoing login as `switch` does now, quit Desktop, run `llmr <p> app` in place of the relaunch.
+- Switch away: quit Desktop, restore the target's login as now, `open -a Claude`. The shared `Claude/` and `Claude-3p/` were never changed, so Desktop boots the claude.ai login.
 
-## What LLMR writes (source, for reference only)
+Why not `llmr takeover` (the first draft): LLMR undoes the shared takeover on an Electron quit, on `llmr stop`, and when the `llmr <profile>` daemon idles out 2 s after its last lease (source, `cli.ts:71`, `:555-566`). A kill -9 leaves Desktop on 3p pointed at a dead port. A CLI cannot reach a running Electron LLMR. A command named `takeover` would shadow an LLMR profile of that name (`cli.ts:259-280`). The launch path avoids all of these, because nothing shared changes.
 
-- Desktop. Under `~/Library/Application Support/Claude-3p/` only, never `Claude/`. The switch is `deploymentMode: "3p"` in `claude_desktop_config.json`, plus `appliedId` in `configLibrary/_meta.json` and a library entry with the gateway URL and a static LLMR key. The restore reverts those two keys from a backup at `~/.llm-router/claude-app-gateway-backup.json` and keeps the library entry.
-- Claude Code. `~/.claude/settings.json` gets `ANTHROPIC_BASE_URL` and related env keys, model env, and `apiKeyHelper` pointing at `~/.llm-router/bin/llmr-claude-code-api-key-<slug>`. It loses `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_API_KEY`. The revert restores LLMR's backup and deletes the helper.
-- LLMR is account-agnostic. It records no claude.ai account for either path.
+## The CLI side
+
+Jason asked for `claude` in a terminal to move too. Two shapes, and the choice is Jason's.
+
+| Shape | What the user types | What multipass does | Cost |
+| --- | --- | --- | --- |
+| Per-launch | `llmr <p> cli` (or `llmr <p>`) | Nothing. The Keychain login stays the outgoing account's. | No global state, nothing to undo. A different command. |
+| Global takeover | `claude` | Asks LLMR to write `apiKeyHelper` and base URL env into `~/.claude/settings.json`, and to revert them on switch-away. | Needs an LLMR command that does not exist. `llmr stop` never releases `settings.json` today (source, `main-app.ts:199`), so `claude` can be left on a dead gateway. |
+
+Recommendation: per-launch. It keeps the "the tool never sets `apiKeyHelper`" rule simply true, and it needs no LLMR change.
 
 ## claude-multipass changes
 
-- Profile kind. `profiles/<name>/meta.json` gains `kind: "llmr"` and `llmrProfile: "<LLMR profile name>"`. Such a profile holds no `config.json`, cookies or CLI item. Existing profiles have no `kind` and stay claude.ai profiles.
-- Creating one. `save <name> --llmr <llmr-profile>`. It checks `llmr takeover status --json` runs, and that the LLMR profile exists. It never quits Desktop.
-- Switching to it. Save the outgoing login as `switch` does now (backup, CLI capture), quit Desktop, run `llmr takeover on <p>`, relaunch. `open -a Claude` then boots the 3p instance. If `on` fails, relaunch the untouched claude.ai login and show LLMR's line.
-- Switching away. Quit Desktop, run `llmr takeover off`, restore the target's Desktop login and CLI item as now, relaunch. `off` runs before the relaunch, or Desktop boots 3p again.
-- The refusal "switch away from a login that was never saved" does not apply while the LLMR profile is active, since there is no claude.ai login to lose.
-- `current` and `list` read `llmr takeover status --json` when the last switch went to an LLMR profile, so a takeover turned off in LLMR's own UI shows as not active.
-- `index_sync` and `usage` skip LLMR profiles. The menu bar shows the row with no usage meter.
-- `llmr` is found on PATH, then at `~/.llm-router/bin/llmr`. `CLAUDE_MULTIPASS_LLMR` overrides it, and the self-check stubs it.
+- Profile kind. `profiles/<name>/meta.json` gains `kind: "llmr"` and `llmrProfile: "<LLMR profile>"`. It holds no `config.json`, cookies or CLI item. Existing profiles have no `kind`.
+- Creating one. `save <name> --llmr <p>` writes that meta and nothing else. It does not quit Desktop. Whether `<p>` exists is checked at switch time by `llmr <p> app` itself, until LLMR offers a profile list.
+- Active marker. `$root/active-llmr` holds the LLMR profile name while Desktop runs LLMR's instance. `switch` to an LLMR profile writes it after `llmr <p> app` succeeds. Any switch away removes it.
+- `current` and `list`. With the marker present and a Desktop process whose arguments carry `--user-data-dir` for that profile, the LLMR profile is current. A marker with no such process is stale: `current` reports the `Claude/` login and removes the marker.
+- Switch away when the target is the account `Claude/` still holds. Today that hits the "already signed in" branch (`bin/claude-multipass:1510-1520`), which does not relaunch. With the marker present, the switch quits Desktop and relaunches with `open -a Claude` even though the login is unchanged.
+- Failures. If `llmr <p> app` fails, the `EXIT` trap relaunches the untouched claude.ai login and the error line is shown. The profile switch is then not current.
+- Refusals. "Switch away from a login that was never saved" still applies to the outgoing claude.ai login. Leaving an LLMR profile has no login to lose, so it never refuses.
+- `index_sync`, `usage` and `rename`'s Keychain move skip LLMR profiles. The menu bar shows the row with no usage meter.
+- `llmr` is found on PATH, then at `~/.llm-router/bin/llmr`. `CLAUDE_MULTIPASS_LLMR` overrides it, and the self-check stubs it, recording its arguments.
+- Docs. `README.md:52` and `docs/claude-multipass.md:141` ("close the gateway before a switch") get a line for the LLMR profile.
 
 ## Safety rules this touches
 
-- "The tool never sets `apiKeyHelper` or `ANTHROPIC_API_KEY`" stays true. LLMR sets them, and only after the user switched to an LLMR profile. The rule in `.claude/rules/safety-and-terms.md` gains that one sentence.
-- Desktop is still quit before any takeover change, and the `EXIT` trap still relaunches it. A failed `llmr takeover` call is a warning, never a stuck quit.
-- No automatic switch. A takeover turned off in LLMR's UI is only reported, never followed by a switch.
+- Desktop is still quit before any change and relaunched from the `EXIT` trap. `llmr <p> app` replaces the relaunch only after the quit succeeded.
+- The tool still never sets `apiKeyHelper` or `ANTHROPIC_API_KEY`, with the per-launch CLI shape.
+- No automatic switch. A stale marker is reported, never followed.
 
-## Risks
+## Must check before building
 
-- Token rotation. When LLMR refreshes an expired token in `Claude Code-credentials`, the refresh token rotates and any older copy is dead (source). The switch away from LLMR must not restore a CLI item saved before LLMR last refreshed that account. The dead-token fix (treat an item with empty tokens and `expiresAt` 0 as signed out) covers the cleared case, not this one. _Proposed:_ while an LLMR profile is active, the switch away captures the live CLI item into the outgoing account's profile first, when its `oauthAccount` matches.
-- Keychain race. LLMR re-reads the item before its write-back and adopts a changed pair, but the check and the write are not atomic (source). A swap inside that window could be overwritten. The window is small. _Accepted_, and stated in the docs.
-- The item's account name. claude-multipass writes the CLI item under `$USER`, which is the account LLMR looks up first (source). Keep it that way.
-- Other 3p triggers. `deploymentMode` is not the only one (source, Desktop 4.4212.0 `app.asar`, read 2026-11-01). `resolve3pForcingSource` forces the 3p instance whenever the effective config activates third-party mode (`kl`: an applied config library entry, managed policy, or any key marked `activatesThirdPartyMode`). It returns `"chooser-disabled"` when `authentication.disableClaudeAiSignIn` is true, `null` (1P) only when `deploymentMode` is `"1p"`, and otherwise `"persisted"` or `"hybrid-pointer"`. So a missing `deploymentMode` with LLMR's `appliedId` still in `_meta.json` boots 3p. `llmr takeover off` must revert `appliedId` as well as `deploymentMode`, which `restoreClaudeAppGatewayConfig` does today. `takeover status` must report `desktop: true` whenever an applied entry would activate 3p, not only when `deploymentMode` is `"3p"`. Managed policy that activates 3p is outside both tools; `doctor` should name it. Not measured by a launch.
+- The quit. Whether `osascript` quit of "Claude" and the `pgrep -x Claude` fallback stop an instance launched with `--user-data-dir`. Check: launch with `llmr <p> app`, run the quit path, `pgrep -lf Claude`.
+- The lease. Whether LLMR's gateway stays up for as long as the Desktop it launched runs, or idles out 2 s after `llmr <p> app` returns. Check: `llmr <p> app`, wait a minute, send a message in Desktop. If it idles out, LLMR needs a lease tied to the Desktop pid, and that is LLMR's change.
+- Code tab sessions. LLMR's instance sets `CLAUDE_CONFIG_DIR` for its own Code tab (source, `launch.ts:64`). Sessions there do not appear under claude.ai accounts and are outside `index_sync`. State it in the docs.
 
 ## Out of scope
 
-- Writing any LLMR file, or starting or stopping the LLMR service.
-- Listing Code tab sessions from `Claude-3p/` after a switch.
+- Writing any LLMR file, `Claude-3p/`, or `~/.claude/settings.json`.
+- Starting or stopping the LLMR service beyond running `llmr <p> app`.
 - Usage for an LLMR profile.
 
-## Open
+## Useful from LLMR, not required
 
-- Jason: whether llm-router builds `llmr takeover`, and when. Check: a reply in the llm-router session, or a PR in `jrmatherly/llm-router`.
-- Desktop's 3p triggers by a real launch: apply, `off`, relaunch, and confirm Desktop opens the `Claude` folder's account. Check: run it with a throwaway LLMR profile once `llmr takeover` exists.
+- A read-only `llmr status --json` (`{profile, desktop, cli, running}`, no secrets) would let `current` drop the process check and `save --llmr` check the profile exists.
+- The `llmr stop` bug that leaves `settings.json` taken over is LLMR's to fix, whatever this design does.
