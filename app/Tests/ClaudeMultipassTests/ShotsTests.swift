@@ -17,6 +17,7 @@ struct FixtureRunner: CommandRunner {
   var versionFails = false
   var switchHangs = false
   var switchRefusal: String?
+  var list: String?
   var location: String? { "/opt/homebrew/bin/claude-multipass" }
 
   func runCapturing(_ args: [String]) async throws -> CommandOutput {
@@ -25,7 +26,7 @@ struct FixtureRunner: CommandRunner {
     case "--version":
       if versionFails { throw CLIError.failed(status: 127, stderr: "/opt/homebrew/bin/claude-multipass: line 12: syntax error: bogus line") }
       return out("claude-multipass 0.4.0\n")
-    case "list": return out(snapshot)
+    case "list": return out(list ?? snapshot)
     case "usage":
       if usageFails { throw CLIError.timedOut }
       return out(usage ?? #"{"profiles":[]}"#)

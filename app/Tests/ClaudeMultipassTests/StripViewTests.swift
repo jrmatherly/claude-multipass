@@ -135,6 +135,16 @@ import Testing
     #expect(await popover(#""sevenDay":{"utilization":59}"#).planLine == nil)
   }
 
+  @Test func anLLMRCurrentShowsNoUsageOrPlanLine() async {
+    let list = #"{"version":"0.11.0","signedIn":true,"desktopRunning":true,"current":"router","profiles":[{"name":"router","account":"","kind":"llmr","llmrProfile":"router-p","savedAt":null,"sessions":0,"cliSaved":false}]}"#
+    let s = await state(FixtureRunner(usage: #"{"profiles":[{"name":"router","plan":"Ultra"}]}"#, list: list))
+    #expect(s.settings.usageEnabled)
+    let popover = PopoverView(appState: s, openSettings: { _ in }, close: {})
+    #expect(!popover.showsUsage)
+    #expect(popover.planLine == nil)
+    #expect(PopoverView(appState: await state(FixtureRunner(usage: #"{"profiles":[]}"#)), openSettings: { _ in }, close: {}).showsUsage)
+  }
+
   @Test func theHeaderHidesThePlanLineWithUsageOff() async {
     let s = await state(FixtureRunner(usage: #"{"profiles":[{"name":"matherly-gmail","plan":"Ultra"}]}"#))
     let popover = PopoverView(appState: s, openSettings: { _ in }, close: {})

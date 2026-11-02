@@ -1,6 +1,6 @@
 # LLM Router profile design
 
-Status: draft, revision 2. The first draft proposed a new `llmr takeover` command. llm-router's review showed it fights LLMR's lifecycle, so this revision uses the existing `llmr <profile> app` instead. Nothing here is agreed with llm-router; Jason decides what it builds. Evidence labels: **source** (read in code on 2026-11-01), **measured**, **inferred**, **not proven**.
+Status: implemented in #64 (the claude-multipass side), revision 2. The real-launch check of the quit reaching LLMR's `open -n` instance is still open. The first draft proposed a new `llmr takeover` command. llm-router's review showed it fights LLMR's lifecycle, so this revision uses the existing `llmr <profile> app` instead. Nothing here is agreed with llm-router; Jason decides what it builds. Evidence labels: **source** (read in code on 2026-11-01), **measured**, **inferred**, **not proven**.
 
 ## Goal
 
@@ -27,27 +27,27 @@ Why not `llmr takeover` (the first draft): LLMR undoes the shared takeover on an
 
 ## The CLI side
 
-Decided by Jason on 2026-11-01 (relayed by llm-router's session): per-launch, shared home. Pending llm-router's shared-home mode, which is planned and not started.
+Decided by Jason on 2026-11-01 (relayed by llm-router's session): per-launch, shared home. llm-router's shared-home mode (`claudeCodeSharedHome`, "Use my ~/.claude in the terminal") is on its main after v7.1.1, not yet in a release.
 
 - Terminal `claude` reaches LLMR only when started as `llmr <p>`. LLMR will run `claude --settings <generated file>` with `CLAUDE_CONFIG_DIR` unset, so `~/.claude` (CLAUDE.md, skills, plugins, MCP servers, history) stays in use. The file carries the base URL env, the model env and `apiKeyHelper`.
 - `--settings` sits above user, project and local settings and below managed settings, and `apiKeyHelper` outranks the saved claude.ai login for that process only (Anthropic's settings and authentication docs, as read by llm-router's session; not checked by this one). Plain `claude` in other terminals keeps the claude.ai login.
-- claude-multipass does nothing for the CLI on an LLMR switch. No `settings.json` write, no Keychain change. `cli_verify` and `doctor` are unaffected.
+- claude-multipass does nothing for the CLI on an LLMR switch. No `settings.json` write, no Keychain change. `cli_verify` is unaffected. `doctor` warns, without failing, when an LLMR profile is saved and `llmr` cannot be found.
 - The LLMR row shows the hint "terminal: run `llmr <p>`".
 - Rejected: LLMR's current `llmr`-scope profile, which sets `CLAUDE_CONFIG_DIR` to a blank home and loses the user's setup; a global-scope profile, which writes `~/.claude/settings.json` on every launch; and a global takeover, for the lifecycle reasons above.
-- Until the shared-home mode ships, `llmr <p>` works today only with a blank Claude home.
+- Without that setting on, or on llm-router v7.1.1 and earlier, `llmr <p>` uses a blank Claude home.
 
 ## claude-multipass changes
 
 - Profile kind. `profiles/<name>/meta.json` gains `kind: "llmr"` and `llmrProfile: "<LLMR profile>"`. It holds no `config.json`, cookies or CLI item. Existing profiles have no `kind`.
 - Creating one. `save <name> --llmr <p>` writes that meta and nothing else. It does not quit Desktop. Whether `<p>` exists is checked at switch time by `llmr <p> app` itself, until LLMR offers a profile list.
-- Active marker. `$root/active-llmr` holds the LLMR profile name while Desktop runs LLMR's instance. `switch` to an LLMR profile writes it after `llmr <p> app` succeeds. Any switch away removes it.
-- `current` and `list`. With the marker present and a Desktop process whose arguments carry `--user-data-dir` for that profile, the LLMR profile is current. A marker with no such process is stale: `current` reports the `Claude/` login and removes the marker.
-- Switch away when the target is the account `Claude/` still holds. Today that hits the "already signed in" branch (`bin/claude-multipass:1510-1520`), which does not relaunch. With the marker present, the switch quits Desktop and relaunches with `open -a Claude` even though the login is unchanged.
-- Failures. If `llmr <p> app` fails, the `EXIT` trap relaunches the untouched claude.ai login and the error line is shown. The profile switch is then not current.
+- Active marker. `$root/active-llmr` holds the saved profile name while Desktop runs LLMR's instance, so two saved names on one LLMR profile stay apart. `switch` to an LLMR profile writes it once `llmr <p> app` exits 0 and a Desktop with LLMR's `--user-data-dir` shows up within 10 s. Any switch away removes it, and `remove` and `rename` of that profile remove or move it.
+- `current` and `list`. With the marker naming a saved LLMR profile and a Desktop process whose arguments carry LLMR's `--user-data-dir` (`pgrep -aqf`, any LLMR profile's folder, since LLMR names it after its profile id), that profile is current. A marker with no such process is stale: read commands report the `Claude/` login and leave the marker, and the next writing run removes it.
+- Switch away when the target is the account `Claude/` still holds. Every switch quits Desktop first and the `EXIT` trap relaunches it with `open -a Claude`, so the "already signed in" branch relaunches too, with the login unchanged.
+- Failures. If `llmr <p> app` fails, or no LLMR Desktop appears within 10 s, the `EXIT` trap relaunches the untouched claude.ai login and the error line is shown. The profile switch is then not current.
 - Refusals. "Switch away from a login that was never saved" still applies to the outgoing claude.ai login. Leaving an LLMR profile has no login to lose, so it never refuses.
-- `index_sync`, `usage` and `rename`'s Keychain move skip LLMR profiles. The menu bar shows the row with no usage meter.
+- A switch to an LLMR profile runs no `index_sync` and no `backup_login`, since nothing merges into `config.json`. `usage` and `rename`'s Keychain move skip LLMR profiles. The menu bar shows the row with no usage meter, and no usage block or plan line while it is current.
 - `llmr` is found on PATH, then at `~/.llm-router/bin/llmr`. `CLAUDE_MULTIPASS_LLMR` overrides it, and the self-check stubs it, recording its arguments.
-- Docs. `README.md:52` and `docs/claude-multipass.md:141` ("close the gateway before a switch") get a line for the LLMR profile.
+- Docs. The "close the gateway before a switch" caution in `README.md` and `docs/claude-multipass.md` gets a line for the LLMR profile.
 
 ## The gateway's lifetime (source, llm-router `cli.ts:167-178`, `launch-core.ts:84-89`)
 
