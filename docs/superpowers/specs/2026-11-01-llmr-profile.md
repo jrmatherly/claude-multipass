@@ -27,14 +27,14 @@ Why not `llmr takeover` (the first draft): LLMR undoes the shared takeover on an
 
 ## The CLI side
 
-Jason asked for `claude` in a terminal to move too. Two shapes, and the choice is Jason's.
+Decided by Jason on 2026-11-01 (relayed by llm-router's session): per-launch, shared home. Pending llm-router's shared-home mode, which is planned and not started.
 
-| Shape | What the user types | What multipass does | Cost |
-| --- | --- | --- | --- |
-| Per-launch | `llmr <p> cli` (or `llmr <p>`) | Nothing. The Keychain login stays the outgoing account's. | No global state, nothing to undo. A different command. |
-| Global takeover | `claude` | Asks LLMR to write `apiKeyHelper` and base URL env into `~/.claude/settings.json`, and to revert them on switch-away. | Needs an LLMR command that does not exist. `llmr stop` never releases `settings.json` today (source, `main-app.ts:199`), so `claude` can be left on a dead gateway. |
-
-Recommendation: per-launch. It keeps the "the tool never sets `apiKeyHelper`" rule simply true, and it needs no LLMR change.
+- Terminal `claude` reaches LLMR only when started as `llmr <p>`. LLMR will run `claude --settings <generated file>` with `CLAUDE_CONFIG_DIR` unset, so `~/.claude` (CLAUDE.md, skills, plugins, MCP servers, history) stays in use. The file carries the base URL env, the model env and `apiKeyHelper`.
+- `--settings` sits above user, project and local settings and below managed settings, and `apiKeyHelper` outranks the saved claude.ai login for that process only (Anthropic's settings and authentication docs, as read by llm-router's session; not checked by this one). Plain `claude` in other terminals keeps the claude.ai login.
+- claude-multipass does nothing for the CLI on an LLMR switch. No `settings.json` write, no Keychain change. `cli_verify` and `doctor` are unaffected.
+- The LLMR row shows the hint "terminal: run `llmr <p>`".
+- Rejected: LLMR's current `llmr`-scope profile, which sets `CLAUDE_CONFIG_DIR` to a blank home and loses the user's setup; a global-scope profile, which writes `~/.claude/settings.json` on every launch; and a global takeover, for the lifecycle reasons above.
+- Until the shared-home mode ships, `llmr <p>` works today only with a blank Claude home.
 
 ## claude-multipass changes
 
@@ -58,7 +58,7 @@ Recommendation: per-launch. It keeps the "the tool never sets `apiKeyHelper`" ru
 ## Safety rules this touches
 
 - Desktop is still quit before any change and relaunched from the `EXIT` trap. `llmr <p> app` replaces the relaunch only after the quit succeeded.
-- The tool still never sets `apiKeyHelper` or `ANTHROPIC_API_KEY`, with the per-launch CLI shape.
+- The tool still never sets `apiKeyHelper` or `ANTHROPIC_API_KEY`. LLMR passes `apiKeyHelper` per process through `--settings` and writes no file claude-multipass manages.
 - No automatic switch. A stale marker is reported, never followed.
 
 ## Must check before building
