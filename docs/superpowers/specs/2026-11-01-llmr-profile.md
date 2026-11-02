@@ -49,6 +49,12 @@ Recommendation: per-launch. It keeps the "the tool never sets `apiKeyHelper`" ru
 - `llmr` is found on PATH, then at `~/.llm-router/bin/llmr`. `CLAUDE_MULTIPASS_LLMR` overrides it, and the self-check stubs it, recording its arguments.
 - Docs. `README.md:52` and `docs/claude-multipass.md:141` ("close the gateway before a switch") get a line for the LLMR profile.
 
+## The gateway's lifetime (source, llm-router `cli.ts:167-178`, `launch-core.ts:84-89`)
+
+- `llmr <p> app` takes no lease and starts no daemon for a claude-code app launch. It needs the user's long-running LLMR (the desktop app, or `llmr start`/`serve`) already up, and exits non-zero otherwise. The fallback relaunch above covers that.
+- That LLMR does not idle out. If the user quits it while LLMR's Desktop is open, Desktop's requests fail until it comes back, because the profile's own folder still points at `127.0.0.1:3456`.
+- So `current` also probes that LLMR answers, and reports "LLMR profile, gateway not running" when it does not. Not run live.
+
 ## Safety rules this touches
 
 - Desktop is still quit before any change and relaunched from the `EXIT` trap. `llmr <p> app` replaces the relaunch only after the quit succeeded.
@@ -58,7 +64,7 @@ Recommendation: per-launch. It keeps the "the tool never sets `apiKeyHelper`" ru
 ## Must check before building
 
 - The quit. Whether `osascript` quit of "Claude" and the `pgrep -x Claude` fallback stop an instance launched with `--user-data-dir`. Check: launch with `llmr <p> app`, run the quit path, `pgrep -lf Claude`.
-- The lease. Whether LLMR's gateway stays up for as long as the Desktop it launched runs, or idles out 2 s after `llmr <p> app` returns. Check: `llmr <p> app`, wait a minute, send a message in Desktop. If it idles out, LLMR needs a lease tied to the Desktop pid, and that is LLMR's change.
+- The quit reaching the second instance. LLMR launches it with `open -W -n` (source, `launch.ts:77-123`), so it is a separate instance of the same bundle, and an AppleScript quit by name may reach only one.
 - Code tab sessions. LLMR's instance sets `CLAUDE_CONFIG_DIR` for its own Code tab (source, `launch.ts:64`). Sessions there do not appear under claude.ai accounts and are outside `index_sync`. State it in the docs.
 
 ## Out of scope
