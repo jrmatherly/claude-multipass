@@ -246,7 +246,7 @@ private func enabledUsage(_ s: AppState) -> AppSettings {
   #expect(seen.overrides.count == 2)
 }
 
-@Test @MainActor func turningDebugSwitchesOnRebuildsTheRunner() async {
+@Test @MainActor func turningDebugSwitchesOnOrOffRebuildsTheRunner() async {
   let r = readyRunner()
   final class Seen: @unchecked Sendable { var debug: [Bool] = [] }
   let seen = Seen()
@@ -259,6 +259,12 @@ private func enabledUsage(_ s: AppState) -> AppSettings {
   settings.debugSwitches = true
   await s.apply(settings)
   #expect(seen.debug == [false, true])
+  settings.debugSwitches = false
+  await s.apply(settings)
+  #expect(seen.debug == [false, true, false])
+  settings.stripStyle = .name
+  await s.apply(settings)
+  #expect(seen.debug == [false, true, false])
 }
 
 @Test @MainActor func refreshStoresSnapshot() async {

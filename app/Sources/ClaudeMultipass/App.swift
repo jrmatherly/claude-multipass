@@ -25,7 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
           override: settings.cliPathOverride,
           bundled: CLI.bundledTool(in: .main)
         ).map {
-          CLI(executable: $0, extraEnvironment: settings.debugSwitches ? ["CLAUDE_MULTIPASS_DEBUG": "1"] : [:])
+          CLI(executable: $0, extraEnvironment: settings.cliEnvironment)
         }
       },
       store: SettingsStore(defaults: .standard))

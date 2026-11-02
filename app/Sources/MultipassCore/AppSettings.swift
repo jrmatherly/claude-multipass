@@ -19,6 +19,11 @@ public struct AppSettings: Equatable, Codable {
   public static let usageRefreshFloor: TimeInterval = 30
   public static let allowedIntervals = [5, 15, 30, 60]
 
+  /// Added to the environment of every run of the tool.
+  public var cliEnvironment: [String: String] {
+    debugSwitches ? ["CLAUDE_MULTIPASS_DEBUG": "1"] : [:]
+  }
+
   public init() {}
 
   private enum Keys: String, CodingKey { case usageEnabled, usageIntervalMinutes, stripStyle, enabledModules, cliPathOverride, updateChecksEnabled, debugSwitches }

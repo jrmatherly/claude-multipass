@@ -1581,9 +1581,10 @@ spawn_claude() {
   rm "$1"
   /bin/sleep 1 > /dev/null 2>&1 &
   echo $! > "$hs-child"
+  [ ! -e "$hs-desktop-reopens" ] || touch "$hs-desktop-up"
 }
 case "$*" in
-  "-f /bin/hindsight-api( |\$)")
+  "-f ^([^ ]*/python[^ ]* )?[^ ]*/bin/hindsight-api( |\$)")
     [ ! -e "$hs-silent" ] || exit 0
     [ -f "$hs-pid" ] || exit 1
     cat "$hs-pid"
@@ -1600,6 +1601,7 @@ case "$*" in
     [ ! -e "$hs-die-at-warning" ] || kill -9 "$(cat "$hs-pid")"
     exit 1
     ;;
+  "-axq Claude") test -e "$hs-desktop-up" ;;
   "-aqf -- --user-data-dir=.*/claude-app-user-data/") test -e "$hs-llmr-up" ;;
   *) exit 1 ;;
 esac
@@ -1607,6 +1609,8 @@ EOF
 printf '#!/bin/sh\necho "open $*" >> "%s/calls"\n[ ! -f "%s-pid" ] || ps -o state= -p "$(cat "%s-pid")" >> "%s-at-open"\n' "$tmp" "$hs_file" "$hs_file" "$hs_file" > "$tmp/bin/open"
 printf '#!/bin/sh\nps -o state= -p "$(cat "%s-pid")" > "%s-at-llmr"\ntouch "%s-llmr-up"\n' "$hs_file" "$hs_file" "$hs_file" > "$tmp/hs-llmr"
 chmod +x "$tmp/hs-llmr"
+# Quitting a Desktop that came back clears it, and records what had been written by then.
+printf '#!/bin/sh\necho "osascript $*" >> "%s/calls"\nrm -f "%s-desktop-up"\njq -r .lastKnownAccountUuid "%s/config.json" > "%s-config-at-quit"\nwc -l < "%s-states" > "%s-keychain-at-quit"\n' "$tmp" "$hs_file" "$d" "$hs_file" "$hs_file" "$hs_file" > "$tmp/bin/osascript"
 hs_background() {
   "$@" > /dev/null 2>&1 &
   hs_last=$!
@@ -1635,11 +1639,47 @@ hs_start() {
     echo "$fake_child" > "$hs_file-child"
   fi
 }
+# A SIGSTOP that lands while the fixture is still in its exec is lost (measured), so it repeats.
+hs_stop_daemon() {
+  local i
+  for ((i = 0; i < 50; i++)); do
+    kill -STOP "$fake_daemon"
+    [[ $(hs_stopped "$fake_daemon") == no ]] || return 0
+    /bin/sleep 0.05
+  done
+  check "the fixture daemon stops" yes no
+}
 hs_run() {
   hs_rc=0
   hs_out=$(cda "$@" 2> "$hs_file-err") || hs_rc=$?
   hs_err=$(cat "$hs_file-err")
 }
+
+# The pattern from the script against the real pgrep. It may print a real daemon
+# too, so only these fixtures' pids are looked at, and only they are signalled.
+hs_pattern=$(sed -n "s/^hindsight_daemon_pids() { pgrep -f '\(.*\)' 2> .*/\1/p" "$script")
+mkdir -p "$tmp/x/bin"
+printf 'while :; do /bin/sleep 1; done\n' > "$tmp/x/bin/hindsight-api"
+hs_background /bin/bash -c 'exec -a /x/bin/hindsight-api /bin/sleep 30'
+hs_bare=$hs_last
+hs_background /bin/bash -c 'exec -a /x/bin/python3.12 /bin/bash "$0" --port 9077' "$tmp/x/bin/hindsight-api"
+hs_python=$hs_last
+hs_background /bin/bash -c '/bin/sleep 10; true # /x/bin/hindsight-api '
+hs_comment=$hs_last
+hs_background /bin/sh -c '/bin/sleep 10; true' 'uv tool uvx hindsight-api@1.1.0 --port 9077'
+hs_wrapper=$hs_last
+for ((i = 0; i < 50; i++)); do
+  [[ $(ps -o command= -p "$hs_bare") != /x/bin/hindsight-api* || $(ps -o command= -p "$hs_python") != /x/bin/python3.12* ]] || break
+  /bin/sleep 0.1
+done
+hs_real=$(/usr/bin/pgrep -f "$hs_pattern" || true)
+hs_in_real() { grep -qx "$1" <<< "$hs_real" && echo yes || echo no; }
+check "the daemon pattern matches a bare hindsight-api" yes "$(hs_in_real "$hs_bare")"
+check "and one run by python" yes "$(hs_in_real "$hs_python")"
+check "and not a shell whose text holds that path" no "$(hs_in_real "$hs_comment")"
+check "nor the uvx wrapper" no "$(hs_in_real "$hs_wrapper")"
+hs_end
+
 # A second account to switch to, so these cases do not lean on the ones above.
 mkdir -p "$p/hsother"
 printf '{"oauth:tokenCache":"enc-C1","oauth:tokenCacheV2":"enc-C2","lastKnownAccountUuid":"hhhhhhhh-8888"}' > "$p/hsother/config.json"
@@ -1650,9 +1690,7 @@ kc_put claude-multipass hsother '{"claudeAiOauth":{"accessToken":"at-other","ref
 cda switch beta --force --no-relaunch > /dev/null 2>&1
 
 hs_start
-touch "$hs_file-spawn-at-first-look"
-hs_background /bin/sleep 300
-fake_wrapper=$hs_last
+touch "$hs_file-spawn-at-first-look" "$hs_file-desktop-reopens"
 hs_run switch hsother
 check "a switch with Hindsight running succeeds" 0 "$hs_rc"
 check "and moves the CLI login" hhhhhhhh-8888 "$(jq -r .oauthAccount.accountUuid "$tmp/claude.json")"
@@ -1661,12 +1699,16 @@ check "at every Keychain access" 0 "$(grep -cv '^T' "$hs_file-states" || true)"
 check "and resumes it before relaunching Desktop" no "$(grep -q '^T' "$hs_file-at-open" && echo yes || echo no)"
 check_true "the relaunch did happen" test -s "$hs_file-at-open"
 check "and leaves it running" no "$(hs_stopped "$fake_daemon")"
-check "and never signals the uvx wrapper" no "$(hs_stopped "$fake_wrapper")"
 check_true "and says so" grep -q "Paused Hindsight's memory daemon" <<< "$hs_out"
 check "and waits for its in-flight claude" gone "$(kill -0 "$(cat "$hs_file-child")" 2> /dev/null && echo alive || echo gone)"
 check "no Hindsight claude is alive when the CLI login is read" yes "$(! grep -q 'children=[1-9]' "$hs_file-states" && echo yes)"
 check_true "and the daemon runs while that child finishes" grep -q 'running-with-child' "$hs_file-wait"
 check "so no warning names it" "" "$(grep 'still running after 60 s' <<< "$hs_err" || true)"
+check_true "and it says what it waits for" grep -q "Waiting up to 60 s for Hindsight's claude (pid $(cat "$hs_file-child")) to finish" <<< "$hs_out"
+check "and a running daemon is not reported as resumed" "" "$(grep "Resumed Hindsight" <<< "$hs_out" || true)"
+check_true "a Desktop reopened during that wait is quit again" grep -q 'osascript -e tell application "Claude" to quit' "$tmp/calls"
+check "before the Desktop login moves" "$(jq -r .account "$p/beta/meta.json")" "$(cat "$hs_file-config-at-quit")"
+check "and before any Keychain access" 0 "$(tr -d ' ' < "$hs_file-keychain-at-quit")"
 
 # A claude spawned in the gap between the check and the stop
 hs_start
@@ -1687,6 +1729,17 @@ rm -f "$CLAUDE_MULTIPASS_DIR/debug.log"
 hs_run save beta --no-relaunch --debug
 check_true "debug logs the Hindsight pause" grep -q "hindsight stopped pid $fake_daemon; waited 0 s for children: none" "$CLAUDE_MULTIPASS_DIR/debug.log"
 check_true "and the resume" grep -q "hindsight resumed pid $fake_daemon" "$CLAUDE_MULTIPASS_DIR/debug.log"
+# A switch under debug. The sleep stub records the daemon's state at each 2 s poll.
+printf '#!/bin/sh\n[ "$1" != 2 ] || { ps -o state= -p "$(cat "%s-pid")" >> "%s-at-poll"; exit 0; }\nexec /bin/sleep "$@"\n' "$hs_file" "$hs_file" > "$tmp/bin/sleep"
+chmod +x "$tmp/bin/sleep"
+hs_start
+touch "$hs_file-spawn-at-first-look"
+hs_run switch beta --no-relaunch --debug
+rm "$tmp/bin/sleep"
+check_true "debug logs the wait" grep -q "waiting up to 60 s for Hindsight's claude (pid $(cat "$hs_file-child"))" "$CLAUDE_MULTIPASS_DIR/debug.log"
+check "the watch polls 15 times with Hindsight" 15 "$(wc -l < "$hs_file-at-poll" | tr -d ' ')"
+check "and the daemon runs from the first poll" 0 "$(grep -c '^T' "$hs_file-at-poll" || true)"
+check "its hash was armed while the daemon was stopped: only the polls read a running one" 15 "$(grep -cv '^T' "$hs_file-states" || true)"
 rm -f "$CLAUDE_MULTIPASS_DIR/debug.log"
 cp "$d/config.json" "$tmp/config-before-hs-add"
 hs_start
@@ -1724,14 +1777,24 @@ hs_run switch beta --no-relaunch
 check "a pgrep that exits 0 and prints nothing finds no daemon" "" "$(grep "Paused Hindsight" <<< "$hs_out" || true)"
 rm "$hs_file-silent"
 
-# No CLI login can move without claude.json, so nothing stops
+# No CLI login can move, so nothing stops, but a daemon a killed run left stopped runs again.
 hs_start
 mv "$tmp/claude.json" "$tmp/claude.json.hs"
 hs_run switch beta --no-relaunch
 mv "$tmp/claude.json.hs" "$tmp/claude.json"
 check "a switch with no claude.json pauses nothing" "" "$(grep "Paused Hindsight" <<< "$hs_out" || true)"
+hs_stop_daemon
 CLAUDE_CONFIG_DIR=$tmp/hs-config hs_run switch beta --no-relaunch
 check "nor does one under CLAUDE_CONFIG_DIR" "" "$(grep "Paused Hindsight" <<< "$hs_out" || true)"
+check "which still resumes a daemon a killed run left stopped" no "$(hs_stopped "$fake_daemon")"
+check_true "and says so" grep -q "Resumed Hindsight's memory daemon, left stopped by a killed run" <<< "$hs_out"
+CLAUDE_SECURESTORAGE_CONFIG_DIR=$tmp/hs-config hs_run switch beta --no-relaunch
+check "nor does one under CLAUDE_SECURESTORAGE_CONFIG_DIR" "" "$(grep "Paused Hindsight" <<< "$hs_out" || true)"
+mv "$tmp/claude.json" "$tmp/claude.json.hs"
+printf '{' > "$tmp/claude.json"
+hs_run switch beta --no-relaunch
+mv "$tmp/claude.json.hs" "$tmp/claude.json"
+check "nor does one with an invalid claude.json" "" "$(grep "Paused Hindsight" <<< "$hs_out" || true)"
 
 # The daemon gone at the first Keychain read, or before the stop
 hs_start
@@ -1768,16 +1831,17 @@ check_true "a child still running after 60 s is named and the switch goes on" gr
 check_true "and the daemon is stopped anyway for the swap" grep -q '^T.*children=1' "$hs_file-states"
 check "and ends running" no "$(hs_stopped "$fake_daemon")"
 
-# A daemon left stopped by a run the watchdog killed. Its claude blocks on a
-# pipe the stopped daemon does not read, so it ends only once the daemon runs.
+# A daemon left stopped by a run the watchdog killed. The child stands in for a
+# claude blocked on a pipe the stopped daemon does not read: it ends only once the daemon runs.
 hs_start
-kill -STOP "$fake_daemon"
+hs_stop_daemon
 hs_background /bin/sh -c 'i=0; while [ $i -lt 300 ] && ps -o state= -p "$0" | grep -q "^T"; do /bin/sleep 0.1; i=$((i + 1)); done; /bin/sleep 1' "$fake_daemon"
 fake_child=$hs_last
 echo "$fake_child" > "$hs_file-child"
 hs_run switch beta --no-relaunch
 check "a daemon an earlier run left stopped does not hang the wait for its claude" "" "$(grep 'still running after 60 s' <<< "$hs_err" || true)"
 check_true "it runs again while that claude finishes" grep -q 'running-with-child' "$hs_file-wait"
+check_true "and says it resumed it" grep -q "Resumed Hindsight's memory daemon, left stopped by a killed run" <<< "$hs_out"
 check "and ends running" no "$(hs_stopped "$fake_daemon")"
 
 # A real SIGTERM, then a real SIGKILL, in the middle of a swap (the app's
@@ -1804,27 +1868,30 @@ check "a SIGTERM still resumes Hindsight" no "$(hs_stopped "$fake_daemon")"
 hs_start
 hs_killed_run KILL
 check "a SIGKILL leaves it stopped" yes "$(hs_stopped "$fake_daemon")"
-check_true "the limit --help names" grep -q 'the daemon stays stopped until the next save, switch or add' <<< "$(cda --help | tr -s ' \n' ' ')"
+check_true "the limit --help names" grep -q 'the daemon stays stopped until the next save, switch or add that gets past its refusals' <<< "$(cda --help | tr -s ' \n' ' ')"
 rm -rf "$tmp/claude.json.lock" "$tmp/claude-home/.oauth_refresh.lock" "$tmp/claude-home.lock"
 # Read commands signal nothing, so it stays stopped through them.
 cda list > /dev/null
 cda list --json > /dev/null
 cda show beta > /dev/null
 cda current > /dev/null
-cda doctor > /dev/null 2>&1 || true
+hs_doctor=$(cda doctor 2>&1 || true)
 check "list, show, current and doctor do not resume it" yes "$(hs_stopped "$fake_daemon")"
+check_true "doctor warns about it and names the line that resumes it" grep -q "^warn: hindsight: .*kill -CONT $fake_daemon" <<< "$hs_doctor"
 hs_run switch beta --no-relaunch
 check "the next switch heals it" no "$(hs_stopped "$fake_daemon")"
+check "and doctor no longer warns" "" "$(cda doctor 2>&1 | grep '^warn: hindsight' || true)"
 hs_end
 rm -rf "$p/hsother"
 printf '#!/bin/sh\nexit 1\n' > "$tmp/bin/pgrep"
+printf '#!/bin/sh\necho "osascript $*" >> "%s/calls"\n' "$tmp" > "$tmp/bin/osascript"
 printf '#!/bin/sh\necho "open $*" >> "%s/calls"\n' "$tmp" > "$tmp/bin/open"
 rm -f "$tmp/calls"
 
 # Debug mode. pgrep names a real background process as a running claude, with a
 # token past the 160 characters of its command the log keeps. The open stub runs
 # $tmp/dbg-at-open, a late writer of the CLI item. The sleep stub counts the
-# watch's 2 s polls and skips them.
+# watch's 2 s polls and skips them, running $tmp/dbg-at-poll-<n> at poll n.
 dbg_log=$CLAUDE_MULTIPASS_DIR/debug.log
 mkdir -p "$p/dbother"
 printf '{"oauth:tokenCache":"enc-D1","oauth:tokenCacheV2":"enc-D2","lastKnownAccountUuid":"dddddddd-7777"}' > "$p/dbother/config.json"
@@ -1836,13 +1903,13 @@ cda switch beta --force --no-relaunch > /dev/null 2>&1
 cat > "$tmp/bin/pgrep" << EOF
 #!/bin/sh
 case "\$*" in
-  "-x claude") [ -f "$tmp/dbg-claude" ] && cat "$tmp/dbg-claude" || exit 1 ;;
+  "-ax claude") [ -f "$tmp/dbg-claude" ] && cat "$tmp/dbg-claude" || exit 1 ;;
   "-aqf -- --user-data-dir=.*/claude-app-user-data/") test -e "$tmp/llmr-up" ;;
   *) exit 1 ;;
 esac
 EOF
 printf '#!/bin/sh\necho "open $*" >> "%s/calls"\n[ ! -f "%s/dbg-at-open" ] || . "%s/dbg-at-open"\n' "$tmp" "$tmp" "$tmp" > "$tmp/bin/open"
-printf '#!/bin/sh\ncase "$1" in 2) [ ! -e "%s/dbg-sleep-fail" ] || exit 1; echo poll >> "%s/dbg-polls"; exit 0 ;; 0.5 | 1) exit 0 ;; esac\nexec /bin/sleep "$@"\n' "$tmp" "$tmp" > "$tmp/bin/sleep"
+printf '#!/bin/sh\ncase "$1" in 2) [ ! -e "%s/dbg-sleep-fail" ] || exit 1; echo poll >> "%s/dbg-polls"; at="%s/dbg-at-poll-$(wc -l < "%s/dbg-polls" | tr -d " ")"; [ ! -f "$at" ] || . "$at"; exit 0 ;; 0.5 | 1) exit 0 ;; esac\nexec /bin/sleep "$@"\n' "$tmp" "$tmp" "$tmp" "$tmp" > "$tmp/bin/sleep"
 chmod +x "$tmp/bin/sleep"
 hs_background /bin/sh -c 'while :; do /bin/sleep 1; done' "$(printf 'a%.0s' {1..200})rt-argv-leak"
 fake_claude=$hs_last
@@ -1854,9 +1921,13 @@ dbg_run() {
   hs_run "$@"
   [[ ! -f $dbg_log ]] || cat "$dbg_log" >> "$tmp/dbg-all"
   printf '%s\n' "$hs_err" >> "$tmp/dbg-all"
+  rm -f "$tmp"/dbg-at-poll-*
 }
 dbg_at_open() { printf '%s\n' "$1" > "$tmp/dbg-at-open"; }
-dbg_put_item() { dbg_at_open "security add-generic-password -U -a \"\$USER\" -s 'Claude Code-credentials' -X $(printf %s "$1" | xxd -p | tr -d '\n')"; }
+dbg_at_poll() { printf '%s\n' "$2" > "$tmp/dbg-at-poll-$1"; }
+dbg_item_cmd() { echo "security add-generic-password -U -a \"\$USER\" -s 'Claude Code-credentials' -X $(printf %s "$1" | xxd -p | tr -d '\n')"; }
+dbg_put_item() { dbg_at_open "$(dbg_item_cmd "$1")"; }
+dbg_warned() { grep -c 'debug: CLI login changed after the switch' <<< "$hs_err" || true; }
 dbg_polls() { wc -l < "$tmp/dbg-polls" | tr -d ' '; }
 dbg_logged() { grep -q -- "$1" "$dbg_log" && echo yes || echo no; }
 
@@ -1884,6 +1955,25 @@ CLAUDE_MULTIPASS_DEBUG='' dbg_run switch dbother --no-relaunch
 check "an empty CLAUDE_MULTIPASS_DEBUG stays off" absent "$([[ -e $dbg_log ]] && echo present || echo absent)"
 cda switch beta --no-relaunch > /dev/null 2>&1
 
+# A write to a closed pipe raises SIGPIPE, and the relaunch still happens. Under
+# bash 3.2 the failed line stays in the builtin's buffer, and a $(...) in the trap
+# would capture it, so the lock check tells whether the trap cleared that.
+rm -f "$tmp/calls"
+# shellcheck disable=SC2216
+{ cda switch dbother --debug > /dev/null; } 2>&1 | : || true
+check_true "a closed stderr still relaunches Desktop" grep -q 'open -a Claude' "$tmp/calls"
+check "and frees the run lock" absent "$([[ -L $CLAUDE_MULTIPASS_DIR/.run.lock ]] && echo present || echo absent)"
+# shellcheck disable=SC2216
+{ cda switch dbother --debug --no-relaunch > /dev/null; } 2>&1 | : || true
+check "and so does a --no-relaunch run, with no later write to flush that line" absent "$([[ -L $CLAUDE_MULTIPASS_DIR/.run.lock ]] && echo present || echo absent)"
+rm -f "$tmp/calls"
+# shellcheck disable=SC2216
+{ cda switch dbother 2> /dev/null; } | : || true
+check_true "a closed stdout still relaunches Desktop" grep -q 'open -a Claude' "$tmp/calls"
+check "and frees the run lock" absent "$([[ -L $CLAUDE_MULTIPASS_DIR/.run.lock ]] && echo present || echo absent)"
+rm -f "$tmp/calls"
+cda switch beta --no-relaunch > /dev/null 2>&1
+
 # A stable login
 dbg_run switch dbother --debug
 check "a switch under debug succeeds" 0 "$hs_rc"
@@ -1893,6 +1983,7 @@ check "debug logs the quit with Desktop not running" yes "$(dbg_logged 'quit don
 check "debug logs the swap" yes "$(dbg_logged 'cli restore wrote dddddddd-7777')"
 check "debug logs the relaunch" yes "$(dbg_logged 'launching Claude')"
 check "debug lists running claude processes at the swap" yes "$(dbg_logged "claude pid=$fake_claude ppid=[0-9]* /bin/sh -c while")"
+check "from pgrep -a, while the warning keeps plain pgrep, which hides this run's ancestors" "" "$(grep 'Claude Code is running' <<< "$hs_err" || true)"
 check "debug watch reports a stable login" yes "$(dbg_logged 'CLI login unchanged for 30 s')"
 check "after 15 polls of 2 s" 15 "$(dbg_polls)"
 check "a process line is cut at 160 characters of its command" 160 "$(grep 'claude pid=' "$dbg_log" | sed -E 's/.* ppid=[0-9]+ //' | head -1 | tr -d '\n' | wc -c | tr -d ' ')"
@@ -1917,12 +2008,16 @@ rm -f "$dbg_log"
 # A late writer of the CLI item. Without the cache reset the watch sees none of them.
 cda switch beta --no-relaunch > /dev/null 2>&1
 dbg_put_item '{"claudeAiOauth":{"accessToken":"at-rotated","refreshToken":"rt-rotated","expiresAt":3}}'
+dbg_at_poll 3 "$(dbg_item_cmd '{"claudeAiOauth":{"accessToken":"at-rotated","refreshToken":"rt-rotated-later","expiresAt":3}}')"
+dbg_at_poll 5 "jq '.oauthAccount.accountUuid = \"bbbbbbbb-flip\"' '$tmp/claude.json' > '$tmp/claude.json.new' && mv '$tmp/claude.json.new' '$tmp/claude.json'"
 dbg_run switch dbother --debug
 check "a write-back does not change the exit code" 0 "$hs_rc"
 check_true "debug watch reports a write-back" grep -q "debug: CLI login changed after the switch (now dddddddd-7777); see $dbg_log" <<< "$hs_err"
-check "and stops at the first change" 1 "$(dbg_polls)"
-check "and names the processes then" 2 "$(grep -c 'claude pid=' "$dbg_log")"
-check "and logs the change" yes "$(dbg_logged 'CLI login changed after the switch')"
+check "a change, then a later write, both warn, and so does an identity-only flip" 3 "$(dbg_warned)"
+check_true "which names the new identity" grep -q "debug: CLI login changed after the switch (now bbbbbbbb-flip); see $dbg_log" <<< "$hs_err"
+check "and every poll runs" 15 "$(dbg_polls)"
+check "and names the processes at each change" 4 "$(grep -c 'claude pid=' "$dbg_log")"
+check "and logs the changes" yes "$(dbg_logged 'CLI login changed after the switch')"
 check "and does not call it stable" no "$(dbg_logged 'CLI login unchanged')"
 
 cda switch beta --no-relaunch > /dev/null 2>&1
@@ -1930,20 +2025,20 @@ dbg_put_item '{"claudeAiOauth":{"accessToken":"at-rotated","refreshToken":"rt-ro
 CLAUDE_MULTIPASS_DEBUG=1 dbg_run switch dbother
 check "CLAUDE_MULTIPASS_DEBUG=1 turns it on for a switch" yes "$(dbg_logged 'quit done')"
 check "and keeps its lines off stderr, which the app shows as a warning" "" "$(grep -E '^debug: [0-9:]{8} ' <<< "$hs_err" || true)"
-check "the watch with it" 1 "$(dbg_polls)"
+check "the watch with it" 15 "$(dbg_polls)"
+check "and a change warning still reaches stderr, for the app's row note" 1 "$(dbg_warned)"
 rm "$tmp/dbg-at-open"
 
 cda switch beta --no-relaunch > /dev/null 2>&1
 dbg_at_open 'security delete-generic-password -a "$USER" -s "Claude Code-credentials"'
 dbg_run switch dbother --debug
-check "a deleted item counts as a change" 1 "$(dbg_polls)"
-check_true "and is reported" grep -q 'CLI login changed after the switch' <<< "$hs_err"
+check "a deleted item counts as one change" 1 "$(dbg_warned)"
 rm "$tmp/dbg-at-open"
 
 cda switch beta --no-relaunch > /dev/null 2>&1
 dbg_put_item '{"claudeAiOauth":{"accessToken":"","refreshToken":"","expiresAt":0}}'
 dbg_run switch dbother --debug
-check "an emptied refresh token counts as a change" 1 "$(dbg_polls)"
+check "an emptied refresh token counts as a change" 1 "$(dbg_warned)"
 rm "$tmp/dbg-at-open"
 
 # Reads that tell nothing skip their poll: an item that is not JSON, a failed read.
@@ -1952,17 +2047,20 @@ dbg_put_item 'not json'
 dbg_run switch dbother --debug
 check "an item that is not JSON does not change the exit code" 0 "$hs_rc"
 check "and skips each poll" 15 "$(dbg_polls)"
-check "and the log says so" yes "$(dbg_logged 'CLI login unchanged in the 0 of 15 reads that worked')"
-check "and does not call it unchanged for 30 s" no "$(dbg_logged 'CLI login unchanged for 30 s')"
+check "and the log says nothing was checked" yes "$(dbg_logged 'could not read the CLI login in any of the 15 polls; nothing was checked')"
+check_true "and so does a warning" grep -q 'debug: could not read the CLI login in any of the 15 polls; nothing was checked' <<< "$hs_err"
+check "and does not call it unchanged" no "$(dbg_logged 'unchanged')"
 rm "$tmp/dbg-at-open"
 kc_put "Claude Code-credentials" "$USER" '{"claudeAiOauth":{"accessToken":"at-dbother","refreshToken":"rt-dbother","expiresAt":2}}'
 
 cda switch beta --no-relaunch > /dev/null 2>&1
 dbg_at_open "touch '$tmp/security-find-fail'"
+dbg_at_poll 8 "rm '$tmp/security-find-fail'"
 dbg_run switch dbother --debug
-rm "$tmp/security-find-fail" "$tmp/dbg-at-open"
+rm "$tmp/dbg-at-open"
 check "a read that fails does not change the exit code" 0 "$hs_rc"
-check "and skips each poll" yes "$(dbg_logged 'CLI login unchanged in the 0 of 15 reads that worked')"
+check_true "and a warning names how many failed" grep -q 'debug: could not read the CLI login in 7 of 15 polls' <<< "$hs_err"
+check "and does not call it unchanged" no "$(dbg_logged 'unchanged')"
 
 # The trap runs under set -e, so a failure inside the watch must not end it.
 touch "$tmp/dbg-sleep-fail"
@@ -1986,7 +2084,21 @@ check "and reads no Keychain item" 0 "$(wc -l < "$tmp/security-calls" | tr -d ' 
 # No CLI part, no watch
 CLAUDE_CONFIG_DIR=$tmp/dbg-config dbg_run switch dbother --debug --no-relaunch
 check "a blocked CLI part arms no watch" 0 "$(dbg_polls)"
-check "and logs no watch line" no "$(dbg_logged 'CLI login')"
+check "and logs why" yes "$(dbg_logged 'no watch: CLAUDE_CONFIG_DIR is set')"
+check "and no verdict on the login" no "$(dbg_logged 'CLI login changed\|CLI login unchanged')"
+
+# The arm: a login that did not follow the switch reads as that, not as stable.
+mv "$p/dbother/cli.json" "$tmp/dbother-cli.json"
+dbg_run switch dbother --debug --no-relaunch
+mv "$tmp/dbother-cli.json" "$p/dbother/cli.json"
+check_true "a CLI login left on another account warns at the arm" grep -q "debug: the CLI login is on $(jq -r .account "$p/beta/meta.json"), not dbother" <<< "$hs_err"
+check "and logs it" yes "$(dbg_logged "the CLI login is on $(jq -r .account "$p/beta/meta.json"), not dbother")"
+check "and keeps watching" 15 "$(dbg_polls)"
+touch "$tmp/security-find-fail"
+dbg_run switch dbother --debug --no-relaunch
+rm "$tmp/security-find-fail"
+check_true "a read that fails at the arm warns" grep -q 'debug: could not read the CLI login; no watch' <<< "$hs_err"
+check "and watches nothing" 0 "$(dbg_polls)"
 cda switch beta --no-relaunch --force > /dev/null 2>&1
 
 # save and add log, and watch nothing, and read the Keychain as often as without debug.
@@ -2029,7 +2141,7 @@ dbg_run pick --debug
 rm "$tmp/dbg-at-open"
 check "pick --debug succeeds" 0 "$hs_rc"
 check "and its switch logs" yes "$(dbg_logged 'switch dbother: claude-multipass')"
-check "and watches" 1 "$(dbg_polls)"
+check "and watches" 15 "$(dbg_polls)"
 check "and pick itself logs nothing" no "$(dbg_logged ' pick')"
 printf '#!/bin/sh\nexit 130\n' > "$tmp/bin/fzf"
 chmod +x "$tmp/bin/fzf"

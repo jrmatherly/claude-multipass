@@ -91,7 +91,7 @@ struct SettingsView: View {
       Toggle(isOn: binding(\.debugSwitches)) {
         VStack(alignment: .leading, spacing: 2) {
           Text("Debug log for switches")
-          Text("Writes timings and process lists to debug.log in the claude-multipass folder, and checks for 30 s after a switch that the terminal login stayed switched. A switch takes that much longer. No tokens are written.")
+          Text("Writes timings and process lists to debug.log in the claude-multipass folder, and checks for 30 s after a switch that the terminal login stayed switched. A switch takes that much longer. No tokens from the Keychain are written.")
             .font(.caption).foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
         }
