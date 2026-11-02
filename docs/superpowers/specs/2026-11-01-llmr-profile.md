@@ -53,7 +53,7 @@ All three are idempotent, exit non-zero with one plain line on stderr on a refus
 - Token rotation. When LLMR refreshes an expired token in `Claude Code-credentials`, the refresh token rotates and any older copy is dead (source). The switch away from LLMR must not restore a CLI item saved before LLMR last refreshed that account. The dead-token fix (treat an item with empty tokens and `expiresAt` 0 as signed out) covers the cleared case, not this one. _Proposed:_ while an LLMR profile is active, the switch away captures the live CLI item into the outgoing account's profile first, when its `oauthAccount` matches.
 - Keychain race. LLMR re-reads the item before its write-back and adopts a changed pair, but the check and the write are not atomic (source). A swap inside that window could be overwritten. The window is small. _Accepted_, and stated in the docs.
 - The item's account name. claude-multipass writes the CLI item under `$USER`, which is the account LLMR looks up first (source). Keep it that way.
-- Other 3p triggers. Whether `deploymentMode` is the only setting that makes Desktop boot 3p is **not proven**. LLMR's earlier spec names `readPersistedDeploymentMode` and `resolve3pForcingSource` in Desktop's bundle. Read those before building.
+- Other 3p triggers. `deploymentMode` is not the only one (source, Desktop 4.4212.0 `app.asar`, read 2026-11-01). `resolve3pForcingSource` forces the 3p instance whenever the effective config activates third-party mode (`kl`: an applied config library entry, managed policy, or any key marked `activatesThirdPartyMode`). It returns `"chooser-disabled"` when `authentication.disableClaudeAiSignIn` is true, `null` (1P) only when `deploymentMode` is `"1p"`, and otherwise `"persisted"` or `"hybrid-pointer"`. So a missing `deploymentMode` with LLMR's `appliedId` still in `_meta.json` boots 3p. `llmr takeover off` must revert `appliedId` as well as `deploymentMode`, which `restoreClaudeAppGatewayConfig` does today. `takeover status` must report `desktop: true` whenever an applied entry would activate 3p, not only when `deploymentMode` is `"3p"`. Managed policy that activates 3p is outside both tools; `doctor` should name it. Not measured by a launch.
 
 ## Out of scope
 
@@ -64,4 +64,4 @@ All three are idempotent, exit non-zero with one plain line on stderr on a refus
 ## Open
 
 - Jason: whether llm-router builds `llmr takeover`, and when. Check: a reply in the llm-router session, or a PR in `jrmatherly/llm-router`.
-- Desktop's 3p triggers. Check: `resolve3pForcingSource` in the installed Claude.app bundle.
+- Desktop's 3p triggers by a real launch: apply, `off`, relaunch, and confirm Desktop opens the `Claude` folder's account. Check: run it with a throwaway LLMR profile once `llmr takeover` exists.
