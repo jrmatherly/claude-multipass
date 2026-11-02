@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- A Claude Code login that Claude Code itself cleared (both tokens empty, which it does to a login the server rejected) counts as signed out. `save` and the re-save on a switch warn `Claude Code cleared its login; switch to <name>, run claude auth login, then save <name>` and keep the profile's saved CLI login, and a `switch` to the same account restores the saved login instead of keeping the cleared one.
+
 ## 0.10.2 (2026-11-01)
 
 - A warning a switch or save leaves in the popover clears on Refresh, and when you close a popover that opened on it. Desktop takes focus and closes the popover just after a switch, so a warning that arrives then shows at the next open. It describes the moment of the switch, such as a Claude Code process that has since quit, and used to stay until the next switch.
