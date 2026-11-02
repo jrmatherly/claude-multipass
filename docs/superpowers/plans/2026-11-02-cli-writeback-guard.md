@@ -85,16 +85,16 @@ check "switch stops Hindsight while it reads the CLI login" yes "$(grep -q '^T' 
 check "and resumes it before relaunching Desktop" no "$(grep -q '^T' "$tmp/hindsight-at-open" && echo yes || echo no)"
 check "and leaves it running" no "$(ps -o state= -p "$fake_daemon" | grep -q '^T' && echo yes || echo no)"
 check "and never signals the uvx wrapper" no "$(ps -o state= -p "$fake_wrapper" | grep -q '^T' && echo yes || echo no)"
-check "and says so" yes "$(grep -q "Paused Hindsight's memory daemon" <<< "$out" && echo yes)" # test file only: the here-string rule is the script's
+check "and says so" yes "$(printf "%s" "$out" | grep -q "Paused Hindsight's memory daemon" && echo yes)"
 check "and waits for its in-flight claude" gone "$(kill -0 "$fake_child" 2> /dev/null && echo alive || echo gone)"
 # a failure after the pause: switch with cli_lock_all failing (pre-create "$tmp/home/.claude.lock")
 check "a failed switch still resumes Hindsight" no "$(ps -o state= -p "$fake_daemon" | grep -q '^T' && echo yes || echo no)"
 # no Hindsight: rm "$tmp/hindsight-pid"
-check "switch without Hindsight pauses nothing" '' "$(grep "Paused Hindsight" <<< "$out")"
+check "switch without Hindsight pauses nothing" '' "$(printf "%s" "$out" | grep "Paused Hindsight")"
 # the daemon gone before resume: the security stub kills fake_daemon on its first call
 check "a daemon gone before resume does not fail the switch" 0 "$rc"
 # a child that never exits within the cap: stub sleep to return at once and the child to stay alive
-check "a child still running after 60 s is named and the switch goes on" yes "$(grep -q 'still running after 60 s' <<< "$err" && echo yes)"
+check "a child still running after 60 s is named and the switch goes on" yes "$(printf "%s" "$err" | grep -q 'still running after 60 s' && echo yes)"
 ```
 
 Use whatever capture helpers the file already has for `$out`, `$err` and `$rc`. Kill the fixture processes at the end of the block.
@@ -163,7 +163,7 @@ check "debug logs the quit and the swap" yes "$(grep -q 'quit done' "$root/debug
 check "debug lists running claude processes at the swap" yes "$(grep -q 'claude pid=' "$root/debug.log" && echo yes)"
 check "debug.log holds no token" no "$(grep -q -e "$fixture_refresh_token" -e "$fixture_access_token" "$root/debug.log" && echo yes || echo no)"
 # write-back: the open stub rewrites the fake Claude Code-credentials item with another refresh token
-check "debug watch reports a write-back" yes "$(grep -q 'CLI login changed after the switch' <<< "$err" && echo yes)"
+check "debug watch reports a write-back" yes "$(printf "%s" "$err" | grep -q 'CLI login changed after the switch' && echo yes)"
 check "and names the processes then" yes "$(grep -c 'claude pid=' "$root/debug.log" | awk '$1>=2{print "yes"}')"
 # no write-back
 check "debug watch reports a stable login" yes "$(grep -q 'CLI login unchanged for 30 s' "$root/debug.log" && echo yes)"
