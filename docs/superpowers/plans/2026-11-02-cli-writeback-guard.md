@@ -24,6 +24,8 @@ Labels: **M** measured on this Mac on 2026-11-02, **S** read in source, **I** in
 8. **S.** `cli_running_warning` (`bin/claude-multipass:591`) runs `pgrep -x claude` once and only warns. Spawn-per-call children start after it, so it never sees them.
 9. **I, not measured.** The Oct 31 death of matherly-gmail's saved refresh token likely had the same cause: a background refresh rotated it after the save.
 10. **M.** Current state is safe. The live item holds gmail's current pair and Desktop is spoons. A `switch matherly-gmail` takes the "already on target" path and re-saves the live pair.
+11. **M.** A child that exits while its parent is stopped no longer matches `pgrep -P <parent> -x claude` (a compiled test binary named `claude` under a stopped `sh`, 2026-11-02). So waiting on children cannot hang on a zombie.
+12. **I.** A child writes its `stream-json` output to a pipe its daemon reads. With the daemon stopped, a child that fills the pipe buffer blocks, and it already holds the old login. So the daemon must keep running while its children finish, and be stopped only once none is left.
 
 Decisions (Jason, 2026-11-02):
 
@@ -42,14 +44,15 @@ Decisions (Jason, 2026-11-02):
 - Prose: no em-dashes, short declarative sentences, straight quotes.
 - Exit codes are unchanged: refusals 3, failures 1, usage errors 2.
 - Every new option and behaviour gets a case in `test/claude-multipass.sh`.
+- `debug.log` is written only by `save`, `switch` and `add`, the commands that quit Desktop. `--debug` is accepted by every command and does nothing for the others, because the app's toggle reaches its 30 s `list` poll too.
 
 ## Review Focus
 
 1. **A `fail` between the pause and the end.** For example, `cli_lock_all` fails on `switch` ("Claude Code holds …"). The daemon must still get SIGCONT. Task 1 tests a failure after the pause.
 2. **Hindsight's hooks and MCP server talk to the frozen daemon.** Their HTTP calls stall for the pause. The wait is capped at 60 s, so the worst-case freeze is the quit plus 60 s plus the swap. The pause must end when the CLI part ends, not after the relaunch and the 30 s debug watch. Task 1 tests that CONT comes before `open -a Claude`.
-3. **The `uvx` wrapper also matches a loose `hindsight-api` pattern.** Pausing the wrapper is harmless but its children are not the `claude` processes. The pattern is pinned to the python entry point. Task 1 tests that the wrapper's pid is not signalled.
+3. **Hindsight is busy with no idle gap.** The pause waits for a moment with no `claude` child, then stops the daemon. After 60 s without one it stops the daemon anyway and names the children that were still running. Task 1 tests that a child alive at the first stop is waited out with the daemon running.
 4. **The daemon exits or restarts during the pause.** SIGCONT to a dead pid must not fail the switch (`kill -CONT … 2> /dev/null || true`). Task 1 tests a pid that is gone by resume time.
-5. **Debug mode in the app.** The toggle must take effect without a relaunch. AppState rebuilds the runner when it changes, as it does for `cliPathOverride`. Task 3 tests the rebuilt runner's environment.
+5. **Debug mode in the app.** The toggle must take effect without a relaunch. AppState rebuilds the runner when it changes, as it does for `cliPathOverride`. Task 3 tests that the runner is rebuilt with the new setting.
 
 ---
 
@@ -64,10 +67,10 @@ Decisions (Jason, 2026-11-02):
 
 - Produces:
   - Global `hindsight_paused=()`: the pids this run stopped.
-  - `hindsight_pause()`: finds the daemon, stops it, waits for its `claude` children, prints one info line. Returns 0 always.
+  - `hindsight_pause()`: finds the daemon and stops it only once it has no `claude` child, prints one info line. Returns 0 always.
   - `hindsight_resume()`: SIGCONT to every pid in `hindsight_paused`, then empties it. Idempotent and safe from the trap.
   - `hindsight_daemon_pids()`: prints daemon pids, one per line, from `pgrep -f '/bin/hindsight-api( |$)'`.
-  - `hindsight_children()`: prints the live `claude` children of the paused pids (`pgrep -P <pid> -x claude` for each).
+  - `hindsight_children <pid…>`: prints the live `claude` children of the given pids (`pgrep -P <pid> -x claude` for each).
 - Consumes: `sleep`, `info`, `warning`, the existing trap structure.
 
 - [ ] **Step 1: Write the failing tests**
@@ -77,7 +80,7 @@ Fixture: start two real background processes, each a `sleep 300` (`fake_daemon`,
 - `-f '/bin/hindsight-api( |$)'` prints `$(cat "$tmp/hindsight-pid")` when that file exists, otherwise exits 1. The wrapper pid is never printed, since the real wrapper does not match the pattern.
 - `-P <pid> -x claude` prints `fake_child`'s pid while `kill -0` on it succeeds.
 
-Extend the `security` stub to append `ps -o state= -p $(cat "$tmp/hindsight-pid")` to `$tmp/hindsight-states` on every call. That records the daemon's state at each Keychain access. Extend the `open` stub to append the same state to `$tmp/hindsight-at-open`.
+Extend the `security` stub to append `<state> children=<n>` to `$tmp/hindsight-states` on every call. `<state>` is `ps -o state= -p $(cat "$tmp/hindsight-pid")` and `<n>` is the number of live `claude` children the `pgrep -P` stub reports. The `pgrep -P` stub also appends `running-with-child` to `$tmp/hindsight-wait` when it reports a child while the daemon's state is not `T`. That records the daemon's state at each Keychain access. Extend the `open` stub to append the same state to `$tmp/hindsight-at-open`.
 
 ```bash
 # switch with Hindsight running
@@ -87,6 +90,8 @@ check "and leaves it running" no "$(ps -o state= -p "$fake_daemon" | grep -q '^T
 check "and never signals the uvx wrapper" no "$(ps -o state= -p "$fake_wrapper" | grep -q '^T' && echo yes || echo no)"
 check "and says so" yes "$(printf "%s" "$out" | grep -q "Paused Hindsight's memory daemon" && echo yes)"
 check "and waits for its in-flight claude" gone "$(kill -0 "$fake_child" 2> /dev/null && echo alive || echo gone)"
+check "no Hindsight claude is alive when the CLI login is read" yes "$(! grep -q 'children=[1-9]' "$tmp/hindsight-states" && echo yes)"
+check "and the daemon runs while that child finishes" yes "$(grep -q 'running-with-child' "$tmp/hindsight-wait" && echo yes)"
 # a failure after the pause: switch with cli_lock_all failing (pre-create "$tmp/home/.claude.lock")
 check "a failed switch still resumes Hindsight" no "$(ps -o state= -p "$fake_daemon" | grep -q '^T' && echo yes || echo no)"
 # no Hindsight: rm "$tmp/hindsight-pid"
@@ -106,7 +111,14 @@ Run: `bash test/claude-multipass.sh < /dev/null > "$S/sc.log" 2>&1 &` (backgroun
 - [ ] **Step 3: Implement the pause in `bin/claude-multipass`**
 
 - `hindsight_daemon_pids`: `pgrep -f '/bin/hindsight-api( |$)' 2> /dev/null || true`.
-- `hindsight_pause`: for each pid, `kill -STOP "$pid" 2> /dev/null && hindsight_paused+=("$pid")`. If any pid was stopped, `info "Paused Hindsight's memory daemon during the CLI login swap"`. Then poll `hindsight_children` every 0.5 s for at most 120 polls. If children remain, `warning "Hindsight's claude (pid <pids>) is still running after 60 s; it may write back the login it loaded"` and continue.
+- `hindsight_pause`: return 0 when `hindsight_daemon_pids` prints nothing. Otherwise loop for at most 120 rounds of 0.5 s:
+  - while the daemon has children, sleep 0.5 s with it running (its children need it to read their output);
+  - when it has none, `kill -STOP` each daemon pid (record the ones that succeed in `hindsight_paused`), then check children once more;
+  - none: done;
+  - one appeared in that gap: `kill -CONT` the same pids, empty `hindsight_paused`, and go on looping.
+
+  After the cap, stop the daemon anyway and `warning "Hindsight's claude (pid <pids>) was still running after 60 s; it may write back the login it loaded"`. When the daemon was stopped, `info "Paused Hindsight's memory daemon during the CLI login swap"`.
+
 - `hindsight_resume`: `kill -CONT "$pid" 2> /dev/null || true` for each pid, then `hindsight_paused=()`.
 - Comment for the why, one or two lines: Hindsight's `claude-code` LLM provider spawns a `claude` per call on the shared login, and a call that loaded the old login writes its rotated pair back after the swap (measured 2026-11-02).
 - Call `hindsight_pause` right after `desktop_quit` in `main`. That point is before `cli_running_warning`, `cli_lock_all` and any `profile_save`, `cli_capture` or `cli_restore`.
@@ -145,10 +157,10 @@ git add -A && git commit -m "Pause Hindsight's daemon while a switch moves the C
 
 - Consumes: `hindsight_pause` and `hindsight_resume` from Task 1. Debug lines go at their start and end.
 - Produces:
-  - Global `debug`: set by `--debug` or a non-empty `CLAUDE_MULTIPASS_DEBUG`. `--debug` is accepted by every command.
-  - `dbg <message…>`: no-op unless `debug`. Otherwise prints `debug: <HH:MM:SS> <message>` to stderr and appends `<ISO-8601 UTC> <pid> <message>` to `$root/debug.log`, created with mode 0600.
+  - Global `debug`: set by `--debug` or a non-empty `CLAUDE_MULTIPASS_DEBUG`, then cleared unless the command is `save`, `switch` or `add`. `--debug` is accepted by every command.
+  - `dbg <message…>`: no-op unless `debug`. Otherwise prints `debug: <HH:MM:SS> <message>` to stderr and appends `<ISO-8601 UTC> <pid> <message>` to `$root/debug.log`, created with mode 0600. At the first `dbg` of a run, the log is trimmed to its last 2000 lines.
   - `dbg_claude_procs()`: under debug, one `dbg` line per running `claude` (from `pgrep -x claude`): `claude pid=<pid> ppid=<ppid> <command, first 160 chars>`.
-  - Global `cli_written_hash`: the sha256 of the refresh token `cli_restore` wrote, set only under debug, never printed.
+  - `debug_arm()`: under debug, at the end of the CLI part (just before `hindsight_resume`), reads the live item once and keeps the sha256 of its refresh token in `cli_written_hash`, never printed. That covers both a written login and one `cli_restore` re-saved.
   - `debug_watch()`: called from the trap after `desktop_launch`. A no-op unless `debug` and `cli_written_hash` is set. Polls 15 times, 2 s apart, until it finds the first change.
 
 - [ ] **Step 1: Write the failing tests**
@@ -158,6 +170,7 @@ check "--debug is accepted by list" 0 "$(
   cda list --debug > /dev/null 2>&1
   echo $?
 )"
+check "and list writes no debug.log" absent "$([[ -e $root/debug.log ]] && echo present || echo absent)"
 check "debug.log is created 0600" 600 "$(stat -f %Lp "$root/debug.log")"
 check "debug logs the quit and the swap" yes "$(grep -q 'quit done' "$root/debug.log" && grep -q 'cli restore wrote' "$root/debug.log" && echo yes)"
 check "debug lists running claude processes at the swap" yes "$(grep -q 'claude pid=' "$root/debug.log" && echo yes)"
@@ -168,9 +181,15 @@ check "and names the processes then" yes "$(grep -c 'claude pid=' "$root/debug.l
 # no write-back
 check "debug watch reports a stable login" yes "$(grep -q 'CLI login unchanged for 30 s' "$root/debug.log" && echo yes)"
 check "without debug no debug.log is written" absent "$([[ -e $root2/debug.log ]] && echo present || echo absent)"
-check "CLAUDE_MULTIPASS_DEBUG=1 turns it on" yes "$(
-  CLAUDE_MULTIPASS_DEBUG=1 cda list > /dev/null 2>&1
+check "CLAUDE_MULTIPASS_DEBUG=1 turns it on for a switch" yes "$(
+  CLAUDE_MULTIPASS_DEBUG=1 cda switch beta > /dev/null 2>&1
   [[ -s $root/debug.log ]] && echo yes
+)"
+check "debug watches a re-save switch too" yes "$(grep -q 'CLI login unchanged for 30 s' "$root/debug.log" && echo yes)"
+check "debug.log is trimmed to its last 2000 lines" yes "$(
+  seq 3000 > "$root/debug.log"
+  cda switch beta --debug > /dev/null 2>&1
+  (($(wc -l < "$root/debug.log") <= 2100)) && ! grep -qx 1 "$root/debug.log" && echo yes
 )"
 ```
 
@@ -190,7 +209,7 @@ Run it as in Task 1, Step 2. Expected: FAIL at "--debug is accepted by list" (`U
   - `cli_running_warning` (`dbg_claude_procs`);
   - `cli_restore` after its write (`cli restore wrote <target account uuid>`);
   - `desktop_launch`.
-- In `cli_restore`, after the successful write, under debug only: `cli_written_hash=$(printf '%s' "$merged" | jq -r '.claudeAiOauth.refreshToken // empty' | shasum -a 256 | cut -c1-64)`. Use whichever variable holds the written JSON.
+- `debug_arm`: `cli_live_read`, then `cli_written_hash=$(printf '%s' "$cli_live" | jq -r '.claudeAiOauth.refreshToken // empty' | shasum -a 256 | cut -c1-64)`. Skip it when the run made no CLI change (`cli_skip`, or no `~/.claude.json`).
 - `debug_watch`: each poll reads the live item with the existing `cli_live_read`, hashes its refresh token the same way, and reads `cli_signed_in_as`.
   - On the first change, `warning "debug: CLI login changed after the switch (now <account uuid or unknown>); see $root/debug.log"`, call `dbg_claude_procs`, and stop.
   - After 15 stable polls, `dbg "CLI login unchanged for 30 s"`.

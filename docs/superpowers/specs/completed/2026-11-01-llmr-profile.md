@@ -1,6 +1,6 @@
 # LLM Router profile design
 
-Status: implemented in #64 (the claude-multipass side), revision 2. The real-launch check of the quit reaching LLMR's `open -n` instance is still open. The first draft proposed a new `llmr takeover` command. llm-router's review showed it fights LLMR's lifecycle, so this revision uses the existing `llmr <profile> app` instead. Nothing here is agreed with llm-router; Jason decides what it builds. Evidence labels: **source** (read in code on 2026-11-01), **measured**, **inferred**, **not proven**.
+Status: shipped in 0.11.0 (#64), revision 2. Open after shipping: the real-launch check of the quit reaching LLMR's `open -n` instance, tracked in the session handoff. The first draft proposed a new `llmr takeover` command. llm-router's review showed it fights LLMR's lifecycle, so this revision uses the existing `llmr <profile> app` instead. Nothing here is agreed with llm-router; Jason decides what it builds. Evidence labels: **source** (read in code on 2026-11-01), **measured**, **inferred**, **not proven**.
 
 ## Goal
 
@@ -61,7 +61,7 @@ Decided by Jason on 2026-11-01 (relayed by llm-router's session): per-launch, sh
 - The tool still never sets `apiKeyHelper` or `ANTHROPIC_API_KEY`. LLMR passes `apiKeyHelper` per process through `--settings` and writes no file claude-multipass manages.
 - No automatic switch. A stale marker is reported, never followed.
 
-## Must check before building
+## Checks after shipping
 
 - The quit. Whether `osascript` quit of "Claude" and the `pgrep -x Claude` fallback stop an instance launched with `--user-data-dir`. Check: launch with `llmr <p> app`, run the quit path, `pgrep -lf Claude`.
 - The quit reaching the second instance. LLMR launches it with `open -W -n` (source, `launch.ts:77-123`), so it is a separate instance of the same bundle, and an AppleScript quit by name may reach only one.
