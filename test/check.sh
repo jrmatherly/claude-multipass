@@ -30,6 +30,16 @@ shellcheck --severity=warning "${shell_scripts[@]}"
 prettier --log-level warn --ignore-unknown --check "**/*.{js,cjs,ts,md,json,sh}" "bin/*" ".github/**/*.yml"
 # bin/claude-multipass against a fixture Desktop folder (never the real one)
 bash test/claude-multipass.sh > /dev/null
+# its filter: a section by name runs that section and no other, a miss exits 2
+filtered=$(bash test/claude-multipass.sh prune)
+grep -q '^ok: login backups pruned to ten$' <<< "$filtered"
+if grep -q '^ok: switch restores Cookies$' <<< "$filtered"; then
+  echo "check: the self-check's filter ran a section it was not asked for" >&2
+  exit 1
+fi
+rc=0
+bash test/claude-multipass.sh no-such-section > /dev/null 2>&1 || rc=$?
+[[ $rc == 2 ]]
 # scripts/make-appcast.sh and scripts/verify-appcast.sh
 bash test/appcast.sh > /dev/null
 # the codesign retry in scripts/sign-mac-app.sh
