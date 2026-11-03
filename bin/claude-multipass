@@ -531,37 +531,84 @@ cli_live_read() {
   return "$rc"
 }
 
-# The sha256 of the live item's refresh token, for the debug watch, through pipes
-# only and never kept beyond a comparison. An absent item or token hashes like any
-# other value, so a deletion reads as a change. It fails on a read that tells
-# nothing: another security status, or an item that is not JSON. The cache is
-# cleared because the watch exists to see what changed since the last read.
-cli_token_hash() {
+# A new read for the debug watch, which exists to see what changed since the last
+# one, so the cache is cleared. Status 44 is an answer; any other status tells nothing.
+cli_live_fresh() {
   local rc=0
   cli_live_rc=''
   cli_live_read || rc=$?
-  ((rc == 0 || rc == 44)) || return 1
+  ((rc == 0 || rc == 44))
+}
+
+# The item as the last read found it: absent, or in Claude Code's cleared shape.
+cli_live_cleared() { [[ $cli_live_rc == 44 ]] || cli_cleared "$cli_live"; }
+
+# The sha256 of the refresh token in $cli_live, for the debug watch, through pipes
+# only and never kept beyond a comparison. An absent item or token hashes like any
+# other value, so a deletion reads as a change. It fails on an item that is not JSON.
+cli_token_hash() {
   printf '%s' "$cli_live" | jq -r '.claudeAiOauth.refreshToken // empty' 2> /dev/null | shasum -a 256 | cut -c1-64
+}
+
+# The saved profile holding an account id, else the id, else unknown. An LLMR
+# profile has no account, so it never matches.
+account_label() {
+  local meta
+  if [[ -z $1 ]]; then
+    echo unknown
+    return 0
+  fi
+  for meta in "$store"/*/meta.json; do
+    [[ -f $meta ]] || continue
+    if [[ $(meta_account "$meta" 2> /dev/null) == "$1" ]]; then
+      basename "$(dirname "$meta")"
+      return 0
+    fi
+  done
+  echo "$1"
 }
 
 # "<refresh token hash> <CLI identity>", the login the watch compares against.
 cli_watch_pair=''
+# The trap has no access to main's locals.
+cli_watch_name='' cli_watch_want=''
+
+# What a change of the pair means. The token message names claude auth status
+# because a write-back can change the item a minute before the identity (measured).
+debug_report_login() {
+  cli_watch_pair="$1 $2"
+  if cli_live_cleared; then
+    dbg_warning "the CLI login was cleared; run claude auth login, then save $cli_watch_name"
+  elif [[ $2 != "$cli_watch_want" ]]; then
+    dbg_warning "the CLI login went back to $(account_label "$2") after the switch to $cli_watch_name; run claude-multipass switch $cli_watch_name"
+  else
+    dbg_warning "the CLI login's token changed on $cli_watch_name, usually an ordinary refresh; claude auth status shows the account it uses"
+  fi
+  dbg_claude_procs
+}
+
 # The last step of a switch, with the CLI part done and Hindsight still stopped.
 debug_arm() {
   [[ -n $debug ]] || return 0
-  local name=$1 why hash now want
+  local name=$1 why hash now
   why=$(cli_blocker)
   if [[ -n $why ]]; then
     dbg "no watch: ${why//$'\n'/; }"
     return 0
   fi
-  if ! hash=$(cli_token_hash); then
+  if ! cli_live_fresh || ! hash=$(cli_token_hash); then
     dbg_warning "could not read the CLI login; no watch"
     return 0
   fi
   now=$(cli_signed_in_as)
-  want=$(jq -r '.account // empty' "$store/$name/meta.json" 2> /dev/null || true)
-  [[ $now == "$want" ]] || dbg_warning "the CLI login is on ${now:-unknown}, not $name"
+  cli_watch_name=$name
+  cli_watch_want=$(jq -r '.account // empty' "$store/$name/meta.json" 2> /dev/null || true)
+  # A clear can land before the arm, as early as cli_verify.
+  if cli_live_cleared; then
+    debug_report_login "$hash" "$now"
+    return 0
+  fi
+  [[ $now == "$cli_watch_want" ]] || dbg_warning "the CLI login is on $(account_label "$now"), not $name"
   cli_watch_pair="$hash $now"
 }
 
@@ -574,21 +621,19 @@ debug_watch() {
   local i hash now failed=0 changed=''
   for ((i = 0; i < 15; i++)); do
     sleep 2
-    if ! hash=$(cli_token_hash); then
+    if ! cli_live_fresh || ! hash=$(cli_token_hash); then
       failed=$((failed + 1))
       continue
     fi
     now=$(cli_signed_in_as)
     [[ "$hash $now" != "$cli_watch_pair" ]] || continue
-    cli_watch_pair="$hash $now"
     changed=1
-    dbg_warning "CLI login changed after the switch (now ${now:-unknown}); see $root/debug.log"
-    dbg_claude_procs
+    debug_report_login "$hash" "$now"
   done
   if ((failed == 15)); then
     dbg_warning "could not read the CLI login in any of the 15 polls; nothing was checked"
   elif ((failed > 0)); then
-    dbg_warning "could not read the CLI login in $failed of 15 polls; see $root/debug.log"
+    dbg_warning "could not read the CLI login in $failed of 15 polls"
   elif [[ -z $changed ]]; then
     dbg "CLI login unchanged for 30 s"
   fi

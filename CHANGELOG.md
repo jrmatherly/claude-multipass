@@ -3,6 +3,7 @@
 ## Unreleased
 
 - A switch now launches Desktop with the environment a Dock launch gets, so nothing from your terminal or the menu bar app, `CLAUDE_MULTIPASS_DEBUG` included, reaches Desktop or the sessions it spawns. An LLMR launch keeps the caller's environment and drops only that variable.
+- The debug watch now says what happened to the CLI login and what to do: it was cleared, it went back to another account, or its token changed. It names saved profiles instead of account ids.
 
 ## 0.12.0 (2026-11-02)
 
