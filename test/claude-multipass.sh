@@ -7,20 +7,26 @@
 # `test/claude-multipass.sh`
 #
 # - While iterating, run setup and one section by name, or each section whose text
-#   holds a string (a case's name), with the sections they need:
+#   holds a string (a case's name as the file writes it), with the sections they need:
 #
 # `test/claude-multipass.sh hindsight`
+#
+# - Print what a filter selects, without running it:
+#
+# `SELF_CHECK_DRY_RUN=1 test/claude-multipass.sh hindsight`
 #
 # ---
 # Never touches the real Claude Desktop folder: CLAUDE_DESKTOP_DIR and
 # CLAUDE_MULTIPASS_DIR point into a temp dir, and pgrep, osascript, pkill,
-# open, fzf, security, xcode-select and curl are stubbed on PATH so no app is
+# open, fzf, security, xcode-select, curl, claude and sleep are stubbed on PATH so no app is
 # quit or launched and no Keychain or network is touched. CLAUDE_MULTIPASS_LLMR
 # points at an llmr stub, so the real llm-router never runs.
 #
 # License: MIT
 
 set -euo pipefail
+# The curl stub reads stdin, so an open one (a terminal, an agent's shell) hangs the gateway cases.
+exec < /dev/null
 
 script="$(cd "$(dirname "$0")/.." && pwd -P)/bin/claude-multipass"
 tmp=$(mktemp -d)
@@ -45,7 +51,8 @@ printf '#!/bin/sh\necho /Library/Developer/CommandLineTools\n' > "$tmp/bin/xcode
 # The script's waits at fixture speed: no 1 s lock retries, and a lock toucher
 # that ticks every 0.3 s, not 3 s. stat's mtime has 1 s steps, so the lock cases
 # wait past a second and a tick. A case that writes its own stub removes it.
-printf '#!/bin/sh\ncase "$1" in\n  1) exit 0 ;;\n  3) exec /bin/sleep 0.3 ;;\nesac\nexec /bin/sleep "$@"\n' > "$tmp/bin/sleep"
+fast_sleep() { printf '#!/bin/sh\ncase "$1" in\n  1) exit 0 ;;\n  3) exec /bin/sleep 0.3 ;;\nesac\nexec /bin/sleep "$@"\n' > "$tmp/bin/sleep"; }
+fast_sleep
 # A stateful security stub. Every call and every `-i` stdin line goes to
 # $tmp/security-calls, so the log tells the stdin route from the argv one the
 # script takes for an item too large for a security -i line. The "Claude Safe
@@ -150,7 +157,7 @@ kc_put() { printf 'add-generic-password -U -a "%s" -s "%s" -X %s\n' "$2" "$1" "$
 kc_delete() { security delete-generic-password -a "$2" -s "$1" > /dev/null 2>&1 || true; }
 chmod +x "$tmp"/bin/*
 # Not the caller's PATH: a real claude reads the real login and rewrites ~/.claude.json.
-# /usr/bin first: a version-manager shim in jq's folder costs about 30 ms a call, and a switch makes dozens.
+# /usr/bin first: a version-manager shim in jq's folder costs about 30 ms a call, and a fixture switch makes hundreds.
 noclaude="$tmp/bin:/usr/bin:/bin:$(dirname "$(command -v jq)")"
 export PATH="$noclaude"
 # llmr records its environment in llmr-env, logs its argv (to llmr-calls and
@@ -198,33 +205,53 @@ exit_code() {
   "$@" > /dev/null 2>&1 && echo 0 || echo $?
 }
 # The sections are the #@ lines, each `#@ <name>` or `#@ <name> needs <earlier sections>`.
-if [[ $# -gt 0 ]]; then
+if [[ $# -gt 1 ]]; then
+  echo "one filter at a time" >&2
+  exit 2
+fi
+if [[ $# -eq 1 ]]; then
   awk -v want="$1" '
     /^#@ / {
       n++
       name[n] = $2
+      if (seen[$2]++ || (NF > 2 && $3 != "needs")) bad = bad " " $2
+      for (i = 4; i <= NF; i++) {
+        if (!seen[$i]) bad = bad " " $i
+        needs[n] = needs[n] " " $i " "
+      }
       if ($2 == want) exact = n
-      for (i = 4; i <= NF; i++) needs[n] = needs[n] " " $i " "
       next
     }
     n {
       body[n] = body[n] $0 "\n"
-      if (index($0, want)) hit[n] = found = 1
+      if (index($0, want)) {
+        hit[n] = 1
+        if (n > 1) found = 1
+      }
     }
     END {
+      if (bad) {
+        print "bad #@ line for:" bad > "/dev/stderr"
+        exit 2
+      }
       if (exact) {
         delete hit
         hit[exact] = 1
       } else if (!found) {
         for (i = 1; i <= n; i++) list = list " " name[i]
-        print "no section holds \"" want "\"; sections:" list > "/dev/stderr"
+        print "no section past setup holds \"" want "\"; sections:" list > "/dev/stderr"
         exit 2
       }
       hit[1] = 1
       for (i = n; i > 1; i--) if (hit[i]) for (j = 1; j < i; j++) if (index(needs[i], " " name[j] " ")) hit[j] = 1
+      printf "# sections:"
+      for (i = 1; i <= n; i++) if (hit[i]) printf " %s", name[i]
+      print ""
       for (i = 1; i <= n; i++) if (hit[i]) printf "%s", body[i]
     }
   ' "$0" > "$tmp/selected"
+  sed -n '1s/^# //p' "$tmp/selected"
+  [[ -z ${SELF_CHECK_DRY_RUN:-} ]] || exit 0
   # shellcheck disable=SC1091
   . "$tmp/selected"
   echo "Filtered claude-multipass checks passed"
@@ -606,6 +633,19 @@ for lock in "$tmp/claude-home/.oauth_refresh.lock" "$tmp/claude-home.lock"; do
   rmdir "$lock"
   check_true "and the tool's own locks are released" test ! -e "$tmp/claude-home/.oauth_refresh.lock" -a ! -e "$tmp/claude-home.lock" -a ! -e "$tmp/claude.json.lock"
 done
+
+# A lock freed during the retries does not fail the switch. The toucher's sleep
+# outlasts the run, so the caller's pipe closes in time only if the toucher left
+# it behind: the app and Raycast read this script's pipes to EOF.
+printf '#!/bin/sh\ncase "$1" in\n  1) rmdir "%s/claude.json.lock"; exit 0 ;;\n  3) exec /bin/sleep 8 ;;\nesac\nexec /bin/sleep "$@"\n' "$tmp" > "$tmp/bin/sleep"
+mkdir "$tmp/claude.json.lock"
+start=$SECONDS
+rc=0
+out=$(cda switch beta --no-relaunch 2>&1) || rc=$?
+check "a lock freed during the retries does not fail the switch" 0 "$rc"
+check_true "a toucher does not hold the caller's pipes" test "$((SECONDS - start))" -lt 8
+fast_sleep
+cda switch alpha --no-relaunch > /dev/null 2>&1
 
 # A tool killed outright (the app's watchdog sends SIGKILL 2 s after SIGTERM) runs no
 # trap, so the loop must notice on its own or it pins the CLI's locks for good.
@@ -2350,4 +2390,4 @@ check_true "migration warns when the new backups folder already exists" grep -q 
 check_true "and leaves the legacy backups where they were" test -d "$tmp/home2/.config/dotfiles/claude-desktop-accounts-backups"
 
 #@ done
-echo "All claude-multipass checks passed"
+[[ $# -gt 0 ]] || echo "All claude-multipass checks passed"
