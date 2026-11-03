@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.13.0 (2026-11-03)
 
 - Every relaunch of Desktop now uses the environment a Dock launch gets, so nothing from your terminal or the menu bar app, `CLAUDE_MULTIPASS_DEBUG` included, reaches Desktop or the sessions it spawns. An LLMR launch keeps the caller's environment and drops only that variable.
 - A relaunch of Desktop that fails now warns `Claude did not relaunch; open it by hand` and keeps the run's exit code, so a switch that worked is not reported as failed and its locks are freed.
