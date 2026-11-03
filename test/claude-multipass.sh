@@ -25,7 +25,7 @@ trap '[[ -z $hs_pids ]] || kill -9 $hs_pids 2> /dev/null || true; rm -rf "$tmp"'
 
 export CLAUDE_DESKTOP_DIR="$tmp/desktop" CLAUDE_MULTIPASS_DIR="$tmp/multipass"
 export TERM=dumb
-unset CLAUDE_MULTIPASS_DEBUG
+unset CLAUDE_MULTIPASS_DEBUG CLAUDE_CONFIG_DIR CLAUDE_SECURESTORAGE_CONFIG_DIR
 d=$CLAUDE_DESKTOP_DIR p=$CLAUDE_MULTIPASS_DIR/profiles b=$CLAUDE_MULTIPASS_DIR/backups s=$CLAUDE_DESKTOP_DIR/claude-code-sessions
 mkdir -p "$tmp/bin"
 # pgrep says "not running" so quit is a no-op; the other three only log.
@@ -35,7 +35,7 @@ for stub in osascript pkill; do
 done
 # desktop_launch runs open under env -i, so every open stub sets PATH itself: a
 # security call in one must find the stub, not the real Keychain tool.
-printf '#!/bin/sh\nPATH="%s/bin:$PATH"\necho "open $*" >> "%s/calls"\n' "$tmp" "$tmp" > "$tmp/bin/open"
+printf '#!/bin/sh\nexport PATH="%s/bin:$PATH"\necho "open $*" >> "%s/calls"\n' "$tmp" "$tmp" > "$tmp/bin/open"
 printf '#!/bin/sh\necho /Library/Developer/CommandLineTools\n' > "$tmp/bin/xcode-select"
 # A stateful security stub. Every call and every `-i` stdin line goes to
 # $tmp/security-calls, so the log tells the stdin route from the argv one the
@@ -143,9 +143,9 @@ chmod +x "$tmp"/bin/*
 # Not the caller's PATH: a real claude reads the real login and rewrites ~/.claude.json.
 noclaude="$tmp/bin:$(dirname "$(command -v jq)"):/usr/bin:/bin"
 export PATH="$noclaude"
-# llmr records its environment in llmr-env, logs its argv (to llmr-calls and calls) and exits with the status in
-# llmr-fail, if any; on success it marks its Desktop up (llmr-up and
-# claude-up) unless llmr-no-desktop exists.
+# llmr records its environment in llmr-env, logs its argv (to llmr-calls and
+# calls) and exits with the status in llmr-fail, if any; on success it marks its
+# Desktop up (llmr-up and claude-up) unless llmr-no-desktop exists.
 mkdir -p "$tmp/llmr-bin"
 printf '#!/bin/sh\n/usr/bin/env > "%s/llmr-env"\necho "llmr $*" >> "%s/llmr-calls"\n[ ! -f "%s/llmr-fail" ] || { echo "llmr: no such profile" >&2; exit "$(cat "%s/llmr-fail")"; }\necho "llmr $*" >> "%s/calls"\n[ -e "%s/llmr-no-desktop" ] || touch "%s/llmr-up" "%s/claude-up"\n' "$tmp" "$tmp" "$tmp" "$tmp" "$tmp" "$tmp" "$tmp" "$tmp" > "$tmp/llmr-bin/llmr"
 chmod +x "$tmp/llmr-bin/llmr"
@@ -1629,7 +1629,7 @@ case "$*" in
   *) exit 1 ;;
 esac
 EOF
-printf '#!/bin/sh\nPATH="%s/bin:$PATH"\necho "open $*" >> "%s/calls"\n[ ! -f "%s-pid" ] || ps -o state= -p "$(cat "%s-pid")" >> "%s-at-open"\n' "$tmp" "$tmp" "$hs_file" "$hs_file" "$hs_file" > "$tmp/bin/open"
+printf '#!/bin/sh\nexport PATH="%s/bin:$PATH"\necho "open $*" >> "%s/calls"\n[ ! -f "%s-pid" ] || ps -o state= -p "$(cat "%s-pid")" >> "%s-at-open"\n' "$tmp" "$tmp" "$hs_file" "$hs_file" "$hs_file" > "$tmp/bin/open"
 printf '#!/bin/sh\nps -o state= -p "$(cat "%s-pid")" > "%s-at-llmr"\ntouch "%s-llmr-up"\n' "$hs_file" "$hs_file" "$hs_file" > "$tmp/hs-llmr"
 chmod +x "$tmp/hs-llmr"
 # Quitting a Desktop that came back clears it, and records what had been written by then.
@@ -1908,7 +1908,7 @@ hs_end
 rm -rf "$p/hsother"
 printf '#!/bin/sh\nexit 1\n' > "$tmp/bin/pgrep"
 printf '#!/bin/sh\necho "osascript $*" >> "%s/calls"\n' "$tmp" > "$tmp/bin/osascript"
-printf '#!/bin/sh\nPATH="%s/bin:$PATH"\necho "open $*" >> "%s/calls"\n' "$tmp" "$tmp" > "$tmp/bin/open"
+printf '#!/bin/sh\nexport PATH="%s/bin:$PATH"\necho "open $*" >> "%s/calls"\n' "$tmp" "$tmp" > "$tmp/bin/open"
 rm -f "$tmp/calls"
 
 check "a caller with no USER can still switch" 0 "$(exit_code env -u USER "$script" switch beta)"
@@ -1935,7 +1935,7 @@ case "\$*" in
   *) exit 1 ;;
 esac
 EOF
-printf '#!/bin/sh\nPATH="%s/bin:$PATH"\necho "open $*" >> "%s/calls"\n/usr/bin/env > "%s/open-env"\n[ ! -f "%s/dbg-at-open" ] || . "%s/dbg-at-open"\n' "$tmp" "$tmp" "$tmp" "$tmp" "$tmp" > "$tmp/bin/open"
+printf '#!/bin/sh\nexport PATH="%s/bin:$PATH"\necho "open $*" >> "%s/calls"\n/usr/bin/env > "%s/open-env"\n[ ! -f "%s/dbg-at-open" ] || . "%s/dbg-at-open"\n' "$tmp" "$tmp" "$tmp" "$tmp" "$tmp" > "$tmp/bin/open"
 printf '#!/bin/sh\ncase "$1" in 2) [ ! -e "%s/dbg-sleep-fail" ] || exit 1; echo poll >> "%s/dbg-polls"; at="%s/dbg-at-poll-$(wc -l < "%s/dbg-polls" | tr -d " ")"; [ ! -f "$at" ] || . "$at"; exit 0 ;; 0.5 | 1) exit 0 ;; esac\nexec /bin/sleep "$@"\n' "$tmp" "$tmp" "$tmp" "$tmp" > "$tmp/bin/sleep"
 chmod +x "$tmp/bin/sleep"
 hs_background /bin/sh -c 'while :; do /bin/sleep 1; done' "$(printf 'a%.0s' {1..200})rt-argv-leak"
@@ -2135,11 +2135,14 @@ check "and no verdict on the login" no "$(dbg_logged 'the CLI login was\|the CLI
 
 # The arm: a login that did not follow the switch reads as that, not as stable.
 mv "$p/dbother/cli.json" "$tmp/dbother-cli.json"
+dbg_at_poll 3 "$(dbg_item_cmd '{"claudeAiOauth":{"accessToken":"at-off","refreshToken":"rt-off-target","expiresAt":3}}')"
 dbg_run switch dbother --debug --no-relaunch
 mv "$tmp/dbother-cli.json" "$p/dbother/cli.json"
 check_true "a CLI login left on another account warns at the arm, by profile name" grep -q "^debug: the CLI login is on beta, not dbother$" <<< "$hs_err"
 check "and logs it" yes "$(dbg_logged "the CLI login is on beta, not dbother")"
 check "and keeps watching" 15 "$(dbg_polls)"
+check "a refresh left on that account repeats it" 2 "$(grep -c "^debug: the CLI login is on beta, not dbother$" <<< "$hs_err" || true)"
+check "and nothing says it went back" 0 "$(grep -c 'went back' <<< "$hs_err" || true)"
 touch "$tmp/security-find-fail"
 dbg_run switch dbother --debug --no-relaunch
 rm "$tmp/security-find-fail"
@@ -2225,7 +2228,7 @@ check_true "the tldr names it" grep -q 'claude-multipass switch {{name}} --debug
 hs_end
 rm -rf "$p/dbother" "$tmp/dbg-claude" "$dbg_log" "$tmp/bin/sleep"
 printf '#!/bin/sh\nexit 1\n' > "$tmp/bin/pgrep"
-printf '#!/bin/sh\nPATH="%s/bin:$PATH"\necho "open $*" >> "%s/calls"\n' "$tmp" "$tmp" > "$tmp/bin/open"
+printf '#!/bin/sh\nexport PATH="%s/bin:$PATH"\necho "open $*" >> "%s/calls"\n' "$tmp" "$tmp" > "$tmp/bin/open"
 printf '#!/bin/sh\ngrep "^beta "\n' > "$tmp/bin/fzf"
 rm -f "$tmp/calls"
 

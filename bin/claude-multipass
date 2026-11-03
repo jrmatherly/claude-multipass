@@ -241,7 +241,8 @@ ${bold}Commands${reset}
                        one object: version, signedIn, desktopRunning, current
                        (null when the login has no name), cliAccount (the
                        account id the terminal's claude is signed in as, or
-                       null when signed out or unreadable) and profiles (name,
+                       null when signed out, unreadable or under
+                       CLAUDE_CONFIG_DIR) and profiles (name,
                        account, savedAt, sessions, cliSaved, and kind "llmr"
                        plus llmrProfile for an LLMR profile, whose account
                        is ""). An LLMR profile's row reads "llmr <profile>",
@@ -542,7 +543,7 @@ cli_live_fresh() {
   ((rc == 0 || rc == 44))
 }
 
-# The item as the last read found it: absent, or in Claude Code's cleared shape.
+# Whether the last read found the item absent or in Claude Code's cleared shape.
 cli_live_cleared() { [[ $cli_live_rc == 44 ]] || cli_cleared "$cli_live"; }
 
 # The sha256 of the refresh token in $cli_live, for the debug watch, through pipes
@@ -578,9 +579,14 @@ cli_watch_name='' cli_watch_want=''
 # What a change of the pair means. The token message names claude auth status
 # because a write-back can change the item a minute before the identity (measured).
 debug_report_login() {
+  local was=${cli_watch_pair#* }
   cli_watch_pair="$1 $2"
   if cli_live_cleared; then
     dbg_warning "the CLI login was cleared; run claude auth login, then save $cli_watch_name"
+  elif [[ $2 != "$cli_watch_want" && $2 == "$was" ]]; then
+    # A Desktop-only profile or a failed restore leaves it there on purpose, so
+    # a refresh must not send anyone to switch again.
+    dbg_warning "the CLI login is on $(account_label "$2"), not $cli_watch_name"
   elif [[ $2 != "$cli_watch_want" ]]; then
     dbg_warning "the CLI login went back to $(account_label "$2") after the switch to $cli_watch_name; run claude-multipass switch $cli_watch_name"
   else
@@ -1639,7 +1645,7 @@ list_profiles() {
 # One JSON object for the menu bar app; [inputs] gathers the bare objects
 # into an array, [] when there are none
 list_json() {
-  local meta account profiles='' signed_in=false running=false cli_saved current cli_account=''
+  local meta account profiles='' signed_in=false running=false cli_saved current cli_now=''
   for meta in "$store"/*/meta.json; do
     [[ -f $meta ]] || continue
     # An empty account keeps the row decodable by an app that predates kind.
@@ -1659,9 +1665,9 @@ list_json() {
   desktop_running && running=true
   current=$(llmr_current)
   [[ -n $current ]] || current=$(active_profile)
-  [[ -n $(cli_blocker) ]] || cli_account=$(cli_signed_in_as)
+  [[ -n $(cli_blocker) ]] || cli_now=$(cli_signed_in_as)
   printf '%s' "$profiles" | jq -n --arg v "$version" --argjson signedIn "$signed_in" --argjson running "$running" \
-    --arg current "$current" --arg cli "$cli_account" \
+    --arg current "$current" --arg cli "$cli_now" \
     '{version: $v, signedIn: $signedIn, desktopRunning: $running, current: (if $current == "" then null else $current end), cliAccount: (if $cli == "" then null else $cli end), profiles: [inputs]}'
 }
 

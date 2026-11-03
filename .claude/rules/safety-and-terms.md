@@ -10,7 +10,7 @@ paths:
 
 ## Rules a change must keep
 
-- Quit Desktop before touching `config.json`, the cookie files or `claude-code-sessions`: the cookie database is locked and `config.json` rewritten while the app runs. `sync` refuses while Desktop runs unless `--force`. Everything past the quit runs under an `EXIT` trap that relaunches the app, so a failure midway still brings it back (`--no-relaunch` opts out).
+- Quit Desktop before touching `config.json`, the cookie files or `claude-code-sessions`: the cookie database is locked and `config.json` rewritten while the app runs. `sync` refuses while Desktop runs unless `--force`. Everything past the quit runs under an `EXIT` trap that relaunches the app, under `env -i` with only `HOME` and `USER` (an LLMR launch keeps the caller's environment), so a failure midway still brings it back (`--no-relaunch` opts out).
 - Back up the live login (`config.json` plus cookies) into `backups/login-*` before every merge into `config.json`. The ten newest are kept.
 - Only the three login keys change in `config.json`; every other key stays byte-identical (the self-check compares the whole file).
 - Never overwrite a saved profile that holds a different account; `save` refuses unless `--force`, and then moves the old profile into `backups/` (newest ten kept; a reproduced data-loss defect, now a case in the self-check).
