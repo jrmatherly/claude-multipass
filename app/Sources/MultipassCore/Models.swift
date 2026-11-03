@@ -26,13 +26,24 @@ public struct Snapshot: Decodable, Equatable {
   public var desktopRunning: Bool
   public var current: String?
   public var profiles: [Profile]
+  /// The account the terminal's claude is signed in as (tools after 0.12.0); nil when signed out or unknown.
+  public var cliAccount: String?
 
-  public init(version: String, signedIn: Bool, desktopRunning: Bool, current: String?, profiles: [Profile]) {
+  public init(version: String, signedIn: Bool, desktopRunning: Bool, current: String?, profiles: [Profile], cliAccount: String? = nil) {
     self.version = version
     self.signedIn = signedIn
     self.desktopRunning = desktopRunning
     self.current = current
     self.profiles = profiles
+    self.cliAccount = cliAccount
+  }
+
+  /// Which account the terminal is on, for the popover's status line. An LLMR profile's terminal is llmr's, so it has none.
+  public var terminalClause: String? {
+    guard let cliAccount, let here = profiles.first(where: { $0.name == current }), !here.isLLMR else { return nil }
+    if cliAccount == here.account { return "terminal on this account" }
+    if let other = profiles.first(where: { $0.account == cliAccount }) { return "terminal on \(other.name)" }
+    return "terminal on another account"
   }
 }
 

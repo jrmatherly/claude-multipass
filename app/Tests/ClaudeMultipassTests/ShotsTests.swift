@@ -39,7 +39,7 @@ struct FixtureRunner: CommandRunner {
   }
 }
 
-private let snapshot = #"{"version":"0.4.0","signedIn":true,"desktopRunning":true,"current":"matherly-gmail","profiles":[{"name":"matherly-gmail","account":"a","savedAt":null,"sessions":3,"cliSaved":true},{"name":"work","account":"b","savedAt":null,"sessions":9,"cliSaved":false},{"name":"max-plan","account":"c","savedAt":null,"sessions":1,"cliSaved":true}]}"#
+private let snapshot = #"{"version":"0.4.0","signedIn":true,"desktopRunning":true,"current":"matherly-gmail","profiles":[{"name":"matherly-gmail","account":"a","savedAt":null,"sessions":3,"cliSaved":true},{"name":"work","account":"b","savedAt":null,"sessions":9,"cliSaved":false},{"name":"max-plan","account":"c","savedAt":null,"sessions":1,"cliSaved":true}],"cliAccount":"a"}"#
 
 private func usageJSON(five: Double, seven: Double) -> String {
   let iso = ISO8601DateFormatter()
@@ -250,6 +250,12 @@ private func menuBar(_ view: some View) -> some View {
       let s = await state(FixtureRunner(usage: usage))
       try render(PopoverView(appState: s, openSettings: { _ in }, close: {}), "popover-usage-\(level)")
     }
+
+    func terminalOn(_ cliAccount: String) -> String {
+      #"{"version":"0.4.0","signedIn":true,"desktopRunning":true,"current":"matherly-gmail","profiles":[{"name":"matherly-gmail","account":"a","savedAt":null,"sessions":3,"cliSaved":true},{"name":"a-profile-name-of-thirty-chars","account":"b","savedAt":null,"sessions":9,"cliSaved":true}],"cliAccount":"\#(cliAccount)"}"#
+    }
+    try render(PopoverView(appState: await state(FixtureRunner(list: terminalOn("b"))), openSettings: { _ in }, close: {}), "popover-terminal-long-name")
+    try render(PopoverView(appState: await state(FixtureRunner(list: terminalOn("stranger"))), openSettings: { _ in }, close: {}), "popover-terminal-stranger")
 
     let switching = await state(FixtureRunner(usage: usageLevels[0].1, switchHangs: true))
     Task { await switching.switchTo("work") }

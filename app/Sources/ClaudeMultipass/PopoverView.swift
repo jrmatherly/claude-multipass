@@ -91,7 +91,7 @@ struct PopoverView: View {
           Text(planLine).font(.caption).foregroundStyle(.secondary).lineLimit(1)
         }
       }
-      Text((snapshot?.desktopRunning == true ? "Desktop running" : "Desktop not running") + (current?.cliSaved == true ? " · terminal login too" : ""))
+      Text((snapshot?.desktopRunning == true ? "Desktop running" : "Desktop not running") + (snapshot?.terminalClause.map { " · \($0)" } ?? ""))
         .font(.caption).foregroundStyle(.secondary)
       // A switch's warning or failure stays visible once its target is the signed-in account.
       if let note = appState.rowNote, note.name == name {

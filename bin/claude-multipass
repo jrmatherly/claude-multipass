@@ -239,7 +239,9 @@ ${bold}Commands${reset}
                        and how many Code sessions it has. A leading * marks the
                        account Desktop is signed in as right now. With --json,
                        one object: version, signedIn, desktopRunning, current
-                       (null when the login has no name) and profiles (name,
+                       (null when the login has no name), cliAccount (the
+                       account id the terminal's claude is signed in as, or
+                       null when signed out or unreadable) and profiles (name,
                        account, savedAt, sessions, cliSaved, and kind "llmr"
                        plus llmrProfile for an LLMR profile, whose account
                        is ""). An LLMR profile's row reads "llmr <profile>",
@@ -1637,7 +1639,7 @@ list_profiles() {
 # One JSON object for the menu bar app; [inputs] gathers the bare objects
 # into an array, [] when there are none
 list_json() {
-  local meta account profiles='' signed_in=false running=false cli_saved current
+  local meta account profiles='' signed_in=false running=false cli_saved current cli_account=''
   for meta in "$store"/*/meta.json; do
     [[ -f $meta ]] || continue
     # An empty account keeps the row decodable by an app that predates kind.
@@ -1657,9 +1659,10 @@ list_json() {
   desktop_running && running=true
   current=$(llmr_current)
   [[ -n $current ]] || current=$(active_profile)
+  [[ -n $(cli_blocker) ]] || cli_account=$(cli_signed_in_as)
   printf '%s' "$profiles" | jq -n --arg v "$version" --argjson signedIn "$signed_in" --argjson running "$running" \
-    --arg current "$current" \
-    '{version: $v, signedIn: $signedIn, desktopRunning: $running, current: (if $current == "" then null else $current end), profiles: [inputs]}'
+    --arg current "$current" --arg cli "$cli_account" \
+    '{version: $v, signedIn: $signedIn, desktopRunning: $running, current: (if $current == "" then null else $current end), cliAccount: (if $cli == "" then null else $cli end), profiles: [inputs]}'
 }
 
 require_profile() {
