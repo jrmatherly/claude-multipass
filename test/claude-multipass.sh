@@ -140,7 +140,9 @@ kc_get() {
 kc_put() { printf 'add-generic-password -U -a "%s" -s "%s" -X %s\n' "$2" "$1" "$(printf %s "$3" | xxd -p | tr -d '\n')" | security -i > /dev/null; }
 kc_delete() { security delete-generic-password -a "$2" -s "$1" > /dev/null 2>&1 || true; }
 chmod +x "$tmp"/bin/*
-export PATH="$tmp/bin:$PATH"
+# Not the caller's PATH: a real claude reads the real login and rewrites ~/.claude.json.
+noclaude="$tmp/bin:$(dirname "$(command -v jq)"):/usr/bin:/bin"
+export PATH="$noclaude"
 # llmr records its environment in llmr-env, logs its argv (to llmr-calls and calls) and exits with the status in
 # llmr-fail, if any; on success it marks its Desktop up (llmr-up and
 # claude-up) unless llmr-no-desktop exists.
@@ -148,7 +150,10 @@ mkdir -p "$tmp/llmr-bin"
 printf '#!/bin/sh\n/usr/bin/env > "%s/llmr-env"\necho "llmr $*" >> "%s/llmr-calls"\n[ ! -f "%s/llmr-fail" ] || { echo "llmr: no such profile" >&2; exit "$(cat "%s/llmr-fail")"; }\necho "llmr $*" >> "%s/calls"\n[ -e "%s/llmr-no-desktop" ] || touch "%s/llmr-up" "%s/claude-up"\n' "$tmp" "$tmp" "$tmp" "$tmp" "$tmp" "$tmp" "$tmp" "$tmp" > "$tmp/llmr-bin/llmr"
 chmod +x "$tmp/llmr-bin/llmr"
 export CLAUDE_MULTIPASS_LLMR="$tmp/llmr-bin/llmr"
-export CLAUDE_CLI_CONFIG="$tmp/claude.json" CLAUDE_CLI_HOME="$tmp/claude-home" CLAUDE_MULTIPASS_BIN="$script"
+# The Raycast scripts put Homebrew's bin first, where a real claude or curl could answer.
+printf '#!/bin/sh\nPATH="%s" exec "%s" "$@"\n' "$noclaude" "$script" > "$tmp/cda-fixture-path"
+chmod +x "$tmp/cda-fixture-path"
+export CLAUDE_CLI_CONFIG="$tmp/claude.json" CLAUDE_CLI_HOME="$tmp/claude-home" CLAUDE_MULTIPASS_BIN="$tmp/cda-fixture-path"
 mkdir -p "$tmp/claude-home"
 cda() { "$script" "$@"; }
 # jq and cat that log their stdin's file type. bash 3.2 backs a here-string
@@ -182,6 +187,7 @@ check_true() {
 exit_code() {
   "$@" > /dev/null 2>&1 && echo 0 || echo $?
 }
+check_true "the no-claude PATH has no claude" test -z "$(PATH=$noclaude command -v claude || true)"
 
 kc_put t u 'a "b" c'"'"'d'
 check "security stub decodes a hex value" 'a "b" c'"'"'d' "$(kc_get t u)"
@@ -593,9 +599,6 @@ printf '#!/bin/sh\necho not json\n' > "$tmp/bin/claude"
 err=$(cda switch beta --no-relaunch 2>&1 > /dev/null)
 check_true "a claude auth status without JSON warns and names the backup" grep -q "claude auth status printed no JSON; could not verify the CLI login (the previous login is in $b/login-" <<< "$err"
 rm "$tmp/bin/claude"
-# a PATH without claude (jq's folder, the stub folder and the system folders only)
-noclaude="$tmp/bin:$(dirname "$(command -v jq)"):/usr/bin:/bin"
-check_true "the no-claude PATH has no claude" test -z "$(PATH=$noclaude command -v claude || true)"
 check "no claude on PATH, no verification warning" 0 "$(PATH=$noclaude "$script" switch alpha --no-relaunch 2>&1 > /dev/null | grep -c 'different org')"
 
 # A running claude keeps its token and can refresh it over the switched login
