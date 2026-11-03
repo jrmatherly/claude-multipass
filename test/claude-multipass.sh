@@ -24,13 +24,18 @@ hs_pids=''
 trap '[[ -z $hs_pids ]] || kill -9 $hs_pids 2> /dev/null || true; rm -rf "$tmp"' EXIT
 
 export CLAUDE_DESKTOP_DIR="$tmp/desktop" CLAUDE_MULTIPASS_DIR="$tmp/multipass"
+export TERM=dumb
+unset CLAUDE_MULTIPASS_DEBUG CLAUDE_CONFIG_DIR CLAUDE_SECURESTORAGE_CONFIG_DIR
 d=$CLAUDE_DESKTOP_DIR p=$CLAUDE_MULTIPASS_DIR/profiles b=$CLAUDE_MULTIPASS_DIR/backups s=$CLAUDE_DESKTOP_DIR/claude-code-sessions
 mkdir -p "$tmp/bin"
 # pgrep says "not running" so quit is a no-op; the other three only log.
 printf '#!/bin/sh\nexit 1\n' > "$tmp/bin/pgrep"
-for stub in osascript pkill open; do
+for stub in osascript pkill; do
   printf '#!/bin/sh\necho "%s $*" >> "%s/calls"\n' "$stub" "$tmp" > "$tmp/bin/$stub"
 done
+# desktop_launch runs open under env -i, so every open stub sets PATH itself: a
+# security call in one must find the stub, not the real Keychain tool.
+printf '#!/bin/sh\nexport PATH="%s/bin:$PATH"\necho "open $*" >> "%s/calls"\n' "$tmp" "$tmp" > "$tmp/bin/open"
 printf '#!/bin/sh\necho /Library/Developer/CommandLineTools\n' > "$tmp/bin/xcode-select"
 # A stateful security stub. Every call and every `-i` stdin line goes to
 # $tmp/security-calls, so the log tells the stdin route from the argv one the
@@ -135,15 +140,20 @@ kc_get() {
 kc_put() { printf 'add-generic-password -U -a "%s" -s "%s" -X %s\n' "$2" "$1" "$(printf %s "$3" | xxd -p | tr -d '\n')" | security -i > /dev/null; }
 kc_delete() { security delete-generic-password -a "$2" -s "$1" > /dev/null 2>&1 || true; }
 chmod +x "$tmp"/bin/*
-export PATH="$tmp/bin:$PATH"
-# llmr logs its argv (to llmr-calls and calls) and exits with the status in
-# llmr-fail, if any; on success it marks its Desktop up (llmr-up and
-# claude-up) unless llmr-no-desktop exists.
+# Not the caller's PATH: a real claude reads the real login and rewrites ~/.claude.json.
+noclaude="$tmp/bin:$(dirname "$(command -v jq)"):/usr/bin:/bin"
+export PATH="$noclaude"
+# llmr records its environment in llmr-env, logs its argv (to llmr-calls and
+# calls) and exits with the status in llmr-fail, if any; on success it marks its
+# Desktop up (llmr-up and claude-up) unless llmr-no-desktop exists.
 mkdir -p "$tmp/llmr-bin"
-printf '#!/bin/sh\necho "llmr $*" >> "%s/llmr-calls"\n[ ! -f "%s/llmr-fail" ] || { echo "llmr: no such profile" >&2; exit "$(cat "%s/llmr-fail")"; }\necho "llmr $*" >> "%s/calls"\n[ -e "%s/llmr-no-desktop" ] || touch "%s/llmr-up" "%s/claude-up"\n' "$tmp" "$tmp" "$tmp" "$tmp" "$tmp" "$tmp" "$tmp" > "$tmp/llmr-bin/llmr"
+printf '#!/bin/sh\n/usr/bin/env > "%s/llmr-env"\necho "llmr $*" >> "%s/llmr-calls"\n[ ! -f "%s/llmr-fail" ] || { echo "llmr: no such profile" >&2; exit "$(cat "%s/llmr-fail")"; }\necho "llmr $*" >> "%s/calls"\n[ -e "%s/llmr-no-desktop" ] || touch "%s/llmr-up" "%s/claude-up"\n' "$tmp" "$tmp" "$tmp" "$tmp" "$tmp" "$tmp" "$tmp" "$tmp" > "$tmp/llmr-bin/llmr"
 chmod +x "$tmp/llmr-bin/llmr"
 export CLAUDE_MULTIPASS_LLMR="$tmp/llmr-bin/llmr"
-export CLAUDE_CLI_CONFIG="$tmp/claude.json" CLAUDE_CLI_HOME="$tmp/claude-home" CLAUDE_MULTIPASS_BIN="$script"
+# The Raycast scripts put Homebrew's bin first, where a real claude or curl could answer.
+printf '#!/bin/sh\nPATH="%s" exec "%s" "$@"\n' "$noclaude" "$script" > "$tmp/cda-fixture-path"
+chmod +x "$tmp/cda-fixture-path"
+export CLAUDE_CLI_CONFIG="$tmp/claude.json" CLAUDE_CLI_HOME="$tmp/claude-home" CLAUDE_MULTIPASS_BIN="$tmp/cda-fixture-path"
 mkdir -p "$tmp/claude-home"
 cda() { "$script" "$@"; }
 # jq and cat that log their stdin's file type. bash 3.2 backs a here-string
@@ -177,6 +187,7 @@ check_true() {
 exit_code() {
   "$@" > /dev/null 2>&1 && echo 0 || echo $?
 }
+check_true "the no-claude PATH has no claude" test -z "$(PATH=$noclaude command -v claude || true)"
 
 kc_put t u 'a "b" c'"'"'d'
 check "security stub decodes a hex value" 'a "b" c'"'"'d' "$(kc_get t u)"
@@ -588,9 +599,6 @@ printf '#!/bin/sh\necho not json\n' > "$tmp/bin/claude"
 err=$(cda switch beta --no-relaunch 2>&1 > /dev/null)
 check_true "a claude auth status without JSON warns and names the backup" grep -q "claude auth status printed no JSON; could not verify the CLI login (the previous login is in $b/login-" <<< "$err"
 rm "$tmp/bin/claude"
-# a PATH without claude (jq's folder, the stub folder and the system folders only)
-noclaude="$tmp/bin:$(dirname "$(command -v jq)"):/usr/bin:/bin"
-check_true "the no-claude PATH has no claude" test -z "$(PATH=$noclaude command -v claude || true)"
 check "no claude on PATH, no verification warning" 0 "$(PATH=$noclaude "$script" switch alpha --no-relaunch 2>&1 > /dev/null | grep -c 'different org')"
 
 # A running claude keeps its token and can refresh it over the switched login
@@ -615,6 +623,25 @@ check "list --json sessions" 4 "$(jq -r '.profiles[1].sessions' <<< "$out")"
 check "list --json version" "$pkg_version" "$(jq -r .version <<< "$out")"
 check "list --json cliSaved true" true "$(jq -r '.profiles[] | select(.name == "beta") | .cliSaved' <<< "$out")"
 check "list --json cliSaved false for a legacy profile" false "$(jq -r '.profiles[] | select(.name == "legacy") | .cliSaved' <<< "$out")"
+listing_item=$(kc_get "Claude Code-credentials" "$USER")
+kc_put "Claude Code-credentials" "$USER" '{"claudeAiOauth":{"accessToken":"","refreshToken":"","expiresAt":0}}'
+check "list --json keeps the account of a cleared login" bbbbbbbb "$(cda list --json | jq -r .cliAccount | cut -c1-8)"
+kc_put "Claude Code-credentials" "$USER" "$listing_item"
+calls_before=$(wc -l < "$tmp/security-calls")
+check "list --json names the terminal's account" bbbbbbbb "$(jq -r .cliAccount <<< "$out" | cut -c1-8)"
+cp "$tmp/claude.json" "$tmp/claude-listing.json"
+jq '.oauthAccount.accountUuid = "zzzzzzzz-9999"' "$tmp/claude-listing.json" > "$tmp/claude.json"
+check "and an account no profile holds" zzzzzzzz-9999 "$(cda list --json | jq -r .cliAccount)"
+jq 'del(.oauthAccount)' "$tmp/claude-listing.json" > "$tmp/claude.json"
+check "and null when signed out" null "$(cda list --json | jq -r .cliAccount)"
+printf 'not json' > "$tmp/claude.json"
+check "and null with a corrupt claude.json, and it still answers" "null beta" "$(cda list --json | jq -r '"\(.cliAccount) \(.current)"')"
+rm "$tmp/claude.json"
+check "and null with no claude.json, and it still answers" "null beta" "$(cda list --json | jq -r '"\(.cliAccount) \(.current)"')"
+cp "$tmp/claude-listing.json" "$tmp/claude.json"
+check "and null under CLAUDE_CONFIG_DIR" null "$(CLAUDE_CONFIG_DIR=$tmp/x cda list --json | jq -r .cliAccount)"
+check "and null under CLAUDE_SECURESTORAGE_CONFIG_DIR" null "$(CLAUDE_SECURESTORAGE_CONFIG_DIR=$tmp/x cda list --json | jq -r .cliAccount)"
+check "and reads no Keychain item" "$calls_before" "$(wc -l < "$tmp/security-calls")"
 check "--json rejected elsewhere" 1 "$(exit_code cda current --json)"
 # one bad meta.json must not empty the list
 mkdir -p "$p/broken" "$p/nodate"
@@ -1606,7 +1633,7 @@ case "$*" in
   *) exit 1 ;;
 esac
 EOF
-printf '#!/bin/sh\necho "open $*" >> "%s/calls"\n[ ! -f "%s-pid" ] || ps -o state= -p "$(cat "%s-pid")" >> "%s-at-open"\n' "$tmp" "$hs_file" "$hs_file" "$hs_file" > "$tmp/bin/open"
+printf '#!/bin/sh\nexport PATH="%s/bin:$PATH"\necho "open $*" >> "%s/calls"\n[ ! -f "%s-pid" ] || ps -o state= -p "$(cat "%s-pid")" >> "%s-at-open"\n' "$tmp" "$tmp" "$hs_file" "$hs_file" "$hs_file" > "$tmp/bin/open"
 printf '#!/bin/sh\nps -o state= -p "$(cat "%s-pid")" > "%s-at-llmr"\ntouch "%s-llmr-up"\n' "$hs_file" "$hs_file" "$hs_file" > "$tmp/hs-llmr"
 chmod +x "$tmp/hs-llmr"
 # Quitting a Desktop that came back clears it, and records what had been written by then.
@@ -1885,7 +1912,11 @@ hs_end
 rm -rf "$p/hsother"
 printf '#!/bin/sh\nexit 1\n' > "$tmp/bin/pgrep"
 printf '#!/bin/sh\necho "osascript $*" >> "%s/calls"\n' "$tmp" > "$tmp/bin/osascript"
-printf '#!/bin/sh\necho "open $*" >> "%s/calls"\n' "$tmp" > "$tmp/bin/open"
+printf '#!/bin/sh\nexport PATH="%s/bin:$PATH"\necho "open $*" >> "%s/calls"\n' "$tmp" "$tmp" > "$tmp/bin/open"
+rm -f "$tmp/calls"
+
+check "a caller with no USER can still switch" 0 "$(exit_code env -u USER "$script" switch beta)"
+check_true "and Desktop still relaunches" grep -q 'open -a Claude' "$tmp/calls"
 rm -f "$tmp/calls"
 
 # Debug mode. pgrep names a real background process as a running claude, with a
@@ -1908,7 +1939,7 @@ case "\$*" in
   *) exit 1 ;;
 esac
 EOF
-printf '#!/bin/sh\necho "open $*" >> "%s/calls"\n[ ! -f "%s/dbg-at-open" ] || . "%s/dbg-at-open"\n' "$tmp" "$tmp" "$tmp" > "$tmp/bin/open"
+printf '#!/bin/sh\nexport PATH="%s/bin:$PATH"\necho "open $*" >> "%s/calls"\n/usr/bin/env > "%s/open-env"\n[ ! -f "%s/dbg-at-open" ] || . "%s/dbg-at-open"\n' "$tmp" "$tmp" "$tmp" "$tmp" "$tmp" > "$tmp/bin/open"
 printf '#!/bin/sh\ncase "$1" in 2) [ ! -e "%s/dbg-sleep-fail" ] || exit 1; echo poll >> "%s/dbg-polls"; at="%s/dbg-at-poll-$(wc -l < "%s/dbg-polls" | tr -d " ")"; [ ! -f "$at" ] || . "$at"; exit 0 ;; 0.5 | 1) exit 0 ;; esac\nexec /bin/sleep "$@"\n' "$tmp" "$tmp" "$tmp" "$tmp" > "$tmp/bin/sleep"
 chmod +x "$tmp/bin/sleep"
 hs_background /bin/sh -c 'while :; do /bin/sleep 1; done' "$(printf 'a%.0s' {1..200})rt-argv-leak"
@@ -1927,7 +1958,7 @@ dbg_at_open() { printf '%s\n' "$1" > "$tmp/dbg-at-open"; }
 dbg_at_poll() { printf '%s\n' "$2" > "$tmp/dbg-at-poll-$1"; }
 dbg_item_cmd() { echo "security add-generic-password -U -a \"\$USER\" -s 'Claude Code-credentials' -X $(printf %s "$1" | xxd -p | tr -d '\n')"; }
 dbg_put_item() { dbg_at_open "$(dbg_item_cmd "$1")"; }
-dbg_warned() { grep -c 'debug: CLI login changed after the switch' <<< "$hs_err" || true; }
+dbg_warned() { grep -c '^debug: the CLI login' <<< "$hs_err" || true; }
 dbg_polls() { wc -l < "$tmp/dbg-polls" | tr -d ' '; }
 dbg_logged() { grep -q -- "$1" "$dbg_log" && echo yes || echo no; }
 
@@ -2010,19 +2041,38 @@ cda switch beta --no-relaunch > /dev/null 2>&1
 dbg_put_item '{"claudeAiOauth":{"accessToken":"at-rotated","refreshToken":"rt-rotated","expiresAt":3}}'
 dbg_at_poll 3 "$(dbg_item_cmd '{"claudeAiOauth":{"accessToken":"at-rotated","refreshToken":"rt-rotated-later","expiresAt":3}}')"
 dbg_at_poll 5 "jq '.oauthAccount.accountUuid = \"bbbbbbbb-flip\"' '$tmp/claude.json' > '$tmp/claude.json.new' && mv '$tmp/claude.json.new' '$tmp/claude.json'"
+beta_account=$(jq -r .account "$p/beta/meta.json")
+dbg_at_poll 7 "jq '.oauthAccount.accountUuid = \"$beta_account\"' '$tmp/claude.json' > '$tmp/claude.json.new' && mv '$tmp/claude.json.new' '$tmp/claude.json'"
+dbg_at_poll 9 "jq 'del(.oauthAccount)' '$tmp/claude.json' > '$tmp/claude.json.new' && mv '$tmp/claude.json.new' '$tmp/claude.json'"
+dbg_at_poll 11 "cp '$tmp/claude.json' '$tmp/claude.json.whole' && printf '{\"oauth' > '$tmp/claude.json'"
+dbg_at_poll 12 "mv '$tmp/claude.json.whole' '$tmp/claude.json'"
 dbg_run switch dbother --debug
 check "a write-back does not change the exit code" 0 "$hs_rc"
-check_true "debug watch reports a write-back" grep -q "debug: CLI login changed after the switch (now dddddddd-7777); see $dbg_log" <<< "$hs_err"
-check "a change, then a later write, both warn, and so does an identity-only flip" 3 "$(dbg_warned)"
-check_true "which names the new identity" grep -q "debug: CLI login changed after the switch (now bbbbbbbb-flip); see $dbg_log" <<< "$hs_err"
+check_true "a token change names the profile, not an id" grep -q "^debug: the CLI login's token changed on dbother, usually an ordinary refresh; claude auth status shows the account it uses$" <<< "$hs_err"
+check "a change, then a later write, both warn, and so does each identity-only flip" 5 "$(dbg_warned)"
+check_true "an identity flip says it went back" grep -q "^debug: the CLI login went back to bbbbbbbb-flip after the switch to dbother; run claude-multipass switch dbother$" <<< "$hs_err"
+check_true "an account with a profile prints its name" grep -q "^debug: the CLI login went back to beta after the switch to dbother; run claude-multipass switch dbother$" <<< "$hs_err"
+check_true "no identity at all says it is gone, not the LLMR profile with no account" grep -q "^debug: the CLI login's identity is gone from ~/.claude.json; claude auth status shows the login$" <<< "$hs_err"
+check_true "a partial write of the identity file is a failed read" grep -q 'debug: could not read the CLI login in 1 of 15 polls' <<< "$hs_err"
+check "and no warning prints an account id for the target" 0 "$(grep '^debug: the CLI login' <<< "$hs_err" | grep -c 'dddddddd-7777' || true)"
+check "and no warning points at the log" 0 "$(grep -c 'see .*debug.log' <<< "$hs_err" || true)"
 check "and every poll runs" 15 "$(dbg_polls)"
-check "and names the processes at each change" 4 "$(grep -c 'claude pid=' "$dbg_log")"
-check "and logs the changes" yes "$(dbg_logged 'CLI login changed after the switch')"
+check "and names the processes at each change" 6 "$(grep -c 'claude pid=' "$dbg_log")"
+check "and logs the changes" yes "$(dbg_logged 'the CLI login went back to beta')"
 check "and does not call it stable" no "$(dbg_logged 'CLI login unchanged')"
 
 cda switch beta --no-relaunch > /dev/null 2>&1
-dbg_put_item '{"claudeAiOauth":{"accessToken":"at-rotated","refreshToken":"rt-rotated-2","expiresAt":3}}'
+dbg_put_item '{"claudeAiOauth":{"accessToken":"at-rotated","refreshToken":"rt-rotated","expiresAt":3}}'
+rm -f "$tmp/calls"
+export DBG_LEAK_PROBE=1
 CLAUDE_MULTIPASS_DEBUG=1 dbg_run switch dbother
+check "a debug run does not pass the variable to Desktop" 0 "$(grep -c '^CLAUDE_MULTIPASS_DEBUG=' "$tmp/open-env" || true)"
+check "nor the caller's other variables" 0 "$(grep -c '^DBG_LEAK_PROBE=' "$tmp/open-env" || true)"
+check "and HOME reaches it" 1 "$(grep -c '^HOME=' "$tmp/open-env")"
+check "and USER is the macOS user" "$USER" "$(sed -n 's/^USER=//p' "$tmp/open-env")"
+check_true "through the stub, not a real open" grep -q 'open -a Claude' "$tmp/calls"
+check_true "and a write from the stub lands in the fixture Keychain" test "$(kc_get "Claude Code-credentials" "$USER" | jq -r .claudeAiOauth.refreshToken)" = rt-rotated
+unset DBG_LEAK_PROBE
 check "CLAUDE_MULTIPASS_DEBUG=1 turns it on for a switch" yes "$(dbg_logged 'quit done')"
 check "and keeps its lines off stderr, which the app shows as a warning" "" "$(grep -E '^debug: [0-9:]{8} ' <<< "$hs_err" || true)"
 check "the watch with it" 15 "$(dbg_polls)"
@@ -2030,16 +2080,25 @@ check "and a change warning still reaches stderr, for the app's row note" 1 "$(d
 rm "$tmp/dbg-at-open"
 
 cda switch beta --no-relaunch > /dev/null 2>&1
-dbg_at_open 'security delete-generic-password -a "$USER" -s "Claude Code-credentials"'
+dbg_at_open 'security delete-generic-password -a "$USER" -s "Claude Code-credentials"; exit 1'
 dbg_run switch dbother --debug
+check "a relaunch that fails keeps the exit code" 0 "$hs_rc"
+check_true "and warns" grep -q '^Claude did not relaunch; open it by hand$' <<< "$hs_err"
+check "and the watch still runs" 15 "$(dbg_polls)"
+check "and frees the run lock" absent "$([[ -L $CLAUDE_MULTIPASS_DIR/.run.lock ]] && echo present || echo absent)"
 check "a deleted item counts as one change" 1 "$(dbg_warned)"
+check_true "a deleted item is the same message" grep -q "^debug: the CLI login was cleared; run claude auth login, then save dbother$" <<< "$hs_err"
 rm "$tmp/dbg-at-open"
 
 cda switch beta --no-relaunch > /dev/null 2>&1
-dbg_put_item '{"claudeAiOauth":{"accessToken":"","refreshToken":"","expiresAt":0}}'
+dbg_put_item '{"claudeAiOauth":{"accessToken":"at-rotated","refreshToken":"","expiresAt":3}}'
+dbg_at_poll 5 "$(dbg_item_cmd '{"mcpOAuth":{"srv":"shared"}}')"
 dbg_run switch dbother --debug
-check "an emptied refresh token counts as a change" 1 "$(dbg_warned)"
+check "an emptied refresh token counts as a change" 1 "$(grep -c "^debug: the CLI login's token changed" <<< "$hs_err" || true)"
+check_true "an emptied refresh token alone stays the token message" grep -q "^debug: the CLI login's token changed on dbother" <<< "$hs_err"
+check "an item with no claudeAiOauth reads as cleared, not as a refresh" 1 "$(grep -c '^debug: the CLI login was cleared; run claude auth login, then save dbother$' <<< "$hs_err" || true)"
 rm "$tmp/dbg-at-open"
+kc_put "Claude Code-credentials" "$USER" '{"claudeAiOauth":{"accessToken":"at-rotated","refreshToken":"","expiresAt":3}}'
 
 # Reads that tell nothing skip their poll: an item that is not JSON, a failed read.
 cda switch beta --no-relaunch > /dev/null 2>&1
@@ -2050,6 +2109,7 @@ check "and skips each poll" 15 "$(dbg_polls)"
 check "and the log says nothing was checked" yes "$(dbg_logged 'could not read the CLI login in any of the 15 polls; nothing was checked')"
 check_true "and so does a warning" grep -q 'debug: could not read the CLI login in any of the 15 polls; nothing was checked' <<< "$hs_err"
 check "and does not call it unchanged" no "$(dbg_logged 'unchanged')"
+check "and never calls it cleared" 0 "$(grep -c 'was cleared' <<< "$hs_err" || true)"
 rm "$tmp/dbg-at-open"
 kc_put "Claude Code-credentials" "$USER" '{"claudeAiOauth":{"accessToken":"at-dbother","refreshToken":"rt-dbother","expiresAt":2}}'
 
@@ -2060,7 +2120,9 @@ dbg_run switch dbother --debug
 rm "$tmp/dbg-at-open"
 check "a read that fails does not change the exit code" 0 "$hs_rc"
 check_true "and a warning names how many failed" grep -q 'debug: could not read the CLI login in 7 of 15 polls' <<< "$hs_err"
+check "and the log has security's status for each" 7 "$(grep -c 'security exited 36 reading the CLI login' "$dbg_log")"
 check "and does not call it unchanged" no "$(dbg_logged 'unchanged')"
+check "and a read that tells nothing is never called cleared" 0 "$(grep -c 'was cleared' <<< "$hs_err" || true)"
 
 # The trap runs under set -e, so a failure inside the watch must not end it.
 touch "$tmp/dbg-sleep-fail"
@@ -2085,20 +2147,53 @@ check "and reads no Keychain item" 0 "$(wc -l < "$tmp/security-calls" | tr -d ' 
 CLAUDE_CONFIG_DIR=$tmp/dbg-config dbg_run switch dbother --debug --no-relaunch
 check "a blocked CLI part arms no watch" 0 "$(dbg_polls)"
 check "and logs why" yes "$(dbg_logged 'no watch: CLAUDE_CONFIG_DIR is set')"
-check "and no verdict on the login" no "$(dbg_logged 'CLI login changed\|CLI login unchanged')"
+check "and no verdict on the login" no "$(dbg_logged 'the CLI login was\|the CLI login went\|the CLI login.s token\|the CLI login is on\|CLI login unchanged')"
 
 # The arm: a login that did not follow the switch reads as that, not as stable.
 mv "$p/dbother/cli.json" "$tmp/dbother-cli.json"
+dbg_at_poll 3 "$(dbg_item_cmd '{"claudeAiOauth":{"accessToken":"at-off","refreshToken":"rt-off-target","expiresAt":3}}')"
 dbg_run switch dbother --debug --no-relaunch
 mv "$tmp/dbother-cli.json" "$p/dbother/cli.json"
-check_true "a CLI login left on another account warns at the arm" grep -q "debug: the CLI login is on $(jq -r .account "$p/beta/meta.json"), not dbother" <<< "$hs_err"
-check "and logs it" yes "$(dbg_logged "the CLI login is on $(jq -r .account "$p/beta/meta.json"), not dbother")"
+check_true "a CLI login left on another account warns at the arm, by profile name" grep -q "^debug: the CLI login is on beta, not dbother$" <<< "$hs_err"
+check "and logs it" yes "$(dbg_logged "the CLI login is on beta, not dbother")"
 check "and keeps watching" 15 "$(dbg_polls)"
+check "a refresh left on that account repeats it" 2 "$(grep -c "^debug: the CLI login is on beta, not dbother$" <<< "$hs_err" || true)"
+check "and nothing says it went back" 0 "$(grep -c 'went back' <<< "$hs_err" || true)"
 touch "$tmp/security-find-fail"
 dbg_run switch dbother --debug --no-relaunch
 rm "$tmp/security-find-fail"
 check_true "a read that fails at the arm warns" grep -q 'debug: could not read the CLI login; no watch' <<< "$hs_err"
 check "and watches nothing" 0 "$(dbg_polls)"
+cda switch beta --no-relaunch --force > /dev/null 2>&1
+
+# A clear already there at the arm: the claude that cli_verify runs clears the item.
+{
+  printf '#!/bin/sh\nPATH="%s/bin:$PATH"\n' "$tmp"
+  dbg_item_cmd '{"claudeAiOauth":{"accessToken":"","refreshToken":"","expiresAt":0}}'
+  printf 'echo %s\n' "'{\"loggedIn\":true,\"orgId\":\"org-other\"}'"
+} > "$tmp/bin/claude"
+chmod +x "$tmp/bin/claude"
+dbg_run switch dbother --debug --no-relaunch
+rm "$tmp/bin/claude"
+check "a login cleared before the arm says so once" 1 "$(dbg_warned)"
+check_true "with the cleared message" grep -q "^debug: the CLI login was cleared; run claude auth login, then save dbother$" <<< "$hs_err"
+check "and keeps watching" 15 "$(dbg_polls)"
+cda switch beta --no-relaunch --force > /dev/null 2>&1
+
+# A meta.json gone by the arm: no target, so no identity check. The claude that cli_verify runs moves it.
+{
+  printf '#!/bin/sh\nmv "%s/dbother/meta.json" "%s/dbother-meta.json"\n' "$p" "$tmp"
+  printf 'echo %s\n' "'{\"loggedIn\":true,\"orgId\":\"org-other\"}'"
+} > "$tmp/bin/claude"
+chmod +x "$tmp/bin/claude"
+dbg_at_poll 3 "jq '.oauthAccount.accountUuid = \"bbbbbbbb-flip\"' '$tmp/claude.json' > '$tmp/claude.json.new' && mv '$tmp/claude.json.new' '$tmp/claude.json'"
+dbg_run switch dbother --debug --no-relaunch
+rm "$tmp/bin/claude"
+mv "$tmp/dbother-meta.json" "$p/dbother/meta.json"
+check "a profile with no account id logs that" yes "$(dbg_logged 'dbother has no account id in its meta.json; no identity check')"
+check "and claims no identity mismatch" 0 "$(grep -c 'is on\|went back\|identity is gone' <<< "$hs_err" || true)"
+check "and a change is the token message" 1 "$(grep -c "^debug: the CLI login's token changed on dbother" <<< "$hs_err" || true)"
+check "and keeps watching" 15 "$(dbg_polls)"
 cda switch beta --no-relaunch --force > /dev/null 2>&1
 
 # save and add log, and watch nothing, and read the Keychain as often as without debug.
@@ -2127,8 +2222,13 @@ cp "$tmp/config-before-dbg-add" "$d/config.json"
 printf cookie-B > "$d/Cookies"
 
 # An LLMR switch moves no CLI login.
-dbg_run switch dbllmr --debug
+rm -f "$tmp/llmr-env"
+export DBG_LEAK_PROBE=1
+CLAUDE_MULTIPASS_DEBUG=1 dbg_run switch dbllmr --debug
 check "an LLMR switch under debug succeeds" 0 "$hs_rc"
+check "and does not pass the variable to llmr" 0 "$(grep -c '^CLAUDE_MULTIPASS_DEBUG=' "$tmp/llmr-env" || true)"
+check "and keeps the rest of the caller's environment" 1 "$(grep -c '^DBG_LEAK_PROBE=' "$tmp/llmr-env" || true)"
+unset DBG_LEAK_PROBE
 check "and logs" yes "$(dbg_logged 'quit done')"
 check "and watches nothing" 0 "$(dbg_polls)"
 rm -rf "$p/dbllmr" "$CLAUDE_MULTIPASS_DIR/active-llmr" "$tmp/llmr-up" "$tmp/claude-up"
@@ -2136,9 +2236,14 @@ rm -rf "$p/dbllmr" "$CLAUDE_MULTIPASS_DIR/active-llmr" "$tmp/llmr-up" "$tmp/clau
 # pick re-enters main for its switch, and pick itself logs nothing.
 printf '#!/bin/sh\ngrep "^dbother "\n' > "$tmp/bin/fzf"
 chmod +x "$tmp/bin/fzf"
-dbg_put_item '{"claudeAiOauth":{"accessToken":"at-rotated","refreshToken":"rt-rotated-3","expiresAt":3}}'
+# Its relaunch is also the run for a clear that lands after the arm.
+dbg_put_item '{"claudeAiOauth":{"accessToken":"","refreshToken":"","expiresAt":0}}'
 dbg_run pick --debug
 rm "$tmp/dbg-at-open"
+check_true "a cleared login says so and what to do" grep -q "^debug: the CLI login was cleared; run claude auth login, then save dbother$" <<< "$hs_err"
+check "once across all 15 polls" 1 "$(dbg_warned)"
+check "with no ordinary refresh message" 0 "$(grep -c 'usually an ordinary refresh' <<< "$hs_err" || true)"
+kc_put "Claude Code-credentials" "$USER" '{"claudeAiOauth":{"accessToken":"at-rotated","refreshToken":"rt-rotated-3","expiresAt":3}}'
 check "pick --debug succeeds" 0 "$hs_rc"
 check "and its switch logs" yes "$(dbg_logged 'switch dbother: claude-multipass')"
 check "and watches" 15 "$(dbg_polls)"
@@ -2158,7 +2263,7 @@ check_true "the tldr names it" grep -q 'claude-multipass switch {{name}} --debug
 hs_end
 rm -rf "$p/dbother" "$tmp/dbg-claude" "$dbg_log" "$tmp/bin/sleep"
 printf '#!/bin/sh\nexit 1\n' > "$tmp/bin/pgrep"
-printf '#!/bin/sh\necho "open $*" >> "%s/calls"\n' "$tmp" > "$tmp/bin/open"
+printf '#!/bin/sh\nexport PATH="%s/bin:$PATH"\necho "open $*" >> "%s/calls"\n' "$tmp" "$tmp" > "$tmp/bin/open"
 printf '#!/bin/sh\ngrep "^beta "\n' > "$tmp/bin/fzf"
 rm -f "$tmp/calls"
 

@@ -24,6 +24,52 @@ import Testing
   #expect(s.profiles[0].cliSaved == false)
 }
 
+@Test func terminalClauseSaysWhichAccountTheTerminalIsOn() {
+  let beta = Profile(name: "beta", account: "b", savedAt: nil, sessions: 0)
+  let alpha = Profile(name: "alpha", account: "a", savedAt: nil, sessions: 0)
+  func clause(_ cli: String?, current: String? = "beta") -> String? {
+    Snapshot(version: "0", signedIn: true, desktopRunning: true, current: current, profiles: [beta, alpha], cliAccount: cli).terminalClause
+  }
+  #expect(clause("b") == "terminal on this account")
+  #expect(clause("a") == "terminal on alpha")
+  #expect(clause("stranger") == "terminal on another account")
+  #expect(clause(nil) == nil)
+  #expect(clause("b", current: nil) == nil)
+}
+
+@Test func decodesCliAccountAndNull() throws {
+  let base = #"{"version":"0.13.0","signedIn":true,"desktopRunning":true,"current":"beta","profiles":[{"name":"beta","account":"b","savedAt":null,"sessions":1,"cliSaved":true}],"cliAccount":"#
+  let on = try MultipassJSON.decoder.decode(Snapshot.self, from: Data((base + #""b"}"#).utf8))
+  #expect(on.terminalClause == "terminal on this account")
+  let off = try MultipassJSON.decoder.decode(Snapshot.self, from: Data((base + "null}").utf8))
+  #expect(off.terminalClause == nil)
+}
+
+@Test func statusLineJoinsDesktopAndTerminal() {
+  let beta = Profile(name: "beta", account: "b", savedAt: nil, sessions: 0)
+  let alpha = Profile(name: "alpha", account: "a", savedAt: nil, sessions: 0)
+  func line(_ running: Bool, _ cli: String?) -> String {
+    Snapshot(version: "0", signedIn: true, desktopRunning: running, current: "beta", profiles: [beta, alpha], cliAccount: cli).statusLine
+  }
+  #expect(line(true, "b") == "Desktop running · terminal on this account")
+  #expect(line(false, "a") == "Desktop not running · terminal on alpha")
+  #expect(line(true, nil) == "Desktop running")
+}
+
+@Test func anLLMRCurrentHasNoTerminalClause() {
+  let gateway = Profile(name: "gateway", account: "", savedAt: nil, sessions: 0, kind: "llmr", llmrProfile: "work")
+  let alpha = Profile(name: "alpha", account: "a", savedAt: nil, sessions: 0)
+  let s = Snapshot(version: "0", signedIn: true, desktopRunning: true, current: "gateway", profiles: [gateway, alpha], cliAccount: "a")
+  #expect(s.terminalClause == nil)
+}
+
+@Test func aSnapshotFromAToolWithoutTheFieldHasNoClause() throws {
+  let json = #"{"version":"0.12.0","signedIn":true,"desktopRunning":false,"current":"beta","profiles":[{"name":"beta","account":"b","savedAt":null,"sessions":4,"cliSaved":true}]}"#
+  let s = try MultipassJSON.decoder.decode(Snapshot.self, from: Data(json.utf8))
+  #expect(s.cliAccount == nil)
+  #expect(s.terminalClause == nil)
+}
+
 @Test func decodesAnLLMRProfile() throws {
   let json = #"{"version":"0.11.0","signedIn":true,"desktopRunning":true,"current":"router","profiles":[{"name":"router","account":"","kind":"llmr","llmrProfile":"router-p","savedAt":"2026-01-01T00:00:00Z","sessions":0,"cliSaved":false},{"name":"beta","account":"b","savedAt":null,"sessions":4}]}"#
   let s = try MultipassJSON.decoder.decode(Snapshot.self, from: Data(json.utf8))

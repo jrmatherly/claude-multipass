@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Every relaunch of Desktop now uses the environment a Dock launch gets, so nothing from your terminal or the menu bar app, `CLAUDE_MULTIPASS_DEBUG` included, reaches Desktop or the sessions it spawns. An LLMR launch keeps the caller's environment and drops only that variable.
+- A relaunch of Desktop that fails now warns `Claude did not relaunch; open it by hand` and keeps the run's exit code, so a switch that worked is not reported as failed and its locks are freed.
+- The debug watch now says what happened to the CLI login and what to do: it was cleared, it went back to another account, or its token changed. It names saved profiles instead of account ids.
+- The popover now says which account the terminal is on, from `oauthAccount` in `~/.claude.json`, in place of "terminal login too", which only meant the profile held a saved login. It reads "terminal on this account", `terminal on <name>` or "terminal on another account". `list --json` has a new `cliAccount` field.
+
 ## 0.12.0 (2026-11-02)
 
 - `save`, `switch` and `add` pause a running Hindsight memory daemon (`hindsight-api`) while they read or write the terminal's Claude Code login, because a background `claude` it started on the old login can write that login back over the switched one. They wait up to 60 s for its running `claude` to finish, stop the daemon, and resume it before Desktop relaunches. A `claude` still running after 60 s can still write back, so the daemon stops anyway and the run warns. A run killed with SIGKILL leaves the daemon stopped until the next `save`, `switch` or `add` that gets past its refusals, and `doctor` warns while it is stopped.

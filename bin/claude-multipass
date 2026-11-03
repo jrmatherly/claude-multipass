@@ -239,7 +239,11 @@ ${bold}Commands${reset}
                        and how many Code sessions it has. A leading * marks the
                        account Desktop is signed in as right now. With --json,
                        one object: version, signedIn, desktopRunning, current
-                       (null when the login has no name) and profiles (name,
+                       (null when the login has no name), cliAccount (the
+                       account id in ~/.claude.json, which a cleared login
+                       keeps, or null when that file has no oauthAccount or
+                       is unreadable, or under CLAUDE_CONFIG_DIR or
+                       CLAUDE_SECURESTORAGE_CONFIG_DIR) and profiles (name,
                        account, savedAt, sessions, cliSaved, and kind "llmr"
                        plus llmrProfile for an LLMR profile, whose account
                        is ""). An LLMR profile's row reads "llmr <profile>",
@@ -531,37 +535,97 @@ cli_live_read() {
   return "$rc"
 }
 
-# The sha256 of the live item's refresh token, for the debug watch, through pipes
-# only and never kept beyond a comparison. An absent item or token hashes like any
-# other value, so a deletion reads as a change. It fails on a read that tells
-# nothing: another security status, or an item that is not JSON. The cache is
-# cleared because the watch exists to see what changed since the last read.
-cli_token_hash() {
+# A new read for the debug watch, which exists to see what changed since the last
+# one, so the cache is cleared. Status 44 is an answer; any other status tells nothing.
+cli_live_fresh() {
   local rc=0
   cli_live_rc=''
   cli_live_read || rc=$?
-  ((rc == 0 || rc == 44)) || return 1
+  ((rc == 0 || rc == 44)) && return 0
+  dbg "security exited $rc reading the CLI login"
+  return 1
+}
+
+# Whether the last read found the item absent, in Claude Code's cleared shape, or
+# holding no login at all. An item that is not JSON is none of these.
+cli_live_cleared() {
+  [[ $cli_live_rc == 44 ]] || cli_cleared "$cli_live" || printf '%s' "$cli_live" | jq -e '.claudeAiOauth == null' > /dev/null 2>&1
+}
+
+# The sha256 of the refresh token in $cli_live, for the debug watch, through pipes
+# only and never kept beyond a comparison. An absent item or token hashes like any
+# other value, so a deletion reads as a change. It fails on an item that is not JSON.
+cli_token_hash() {
   printf '%s' "$cli_live" | jq -r '.claudeAiOauth.refreshToken // empty' 2> /dev/null | shasum -a 256 | cut -c1-64
+}
+
+# The saved profile holding an account id, else the id, else unknown. An LLMR
+# profile has no account, so it never matches.
+account_label() {
+  local meta
+  if [[ -z $1 ]]; then
+    echo unknown
+    return 0
+  fi
+  for meta in "$store"/*/meta.json; do
+    [[ -f $meta ]] || continue
+    if [[ $(meta_account "$meta" 2> /dev/null) == "$1" ]]; then
+      basename "$(dirname "$meta")"
+      return 0
+    fi
+  done
+  echo "$1"
 }
 
 # "<refresh token hash> <CLI identity>", the login the watch compares against.
 cli_watch_pair=''
+# The trap has no access to main's locals.
+cli_watch_name='' cli_watch_want=''
+
+# What a change of the pair means. The token message names claude auth status
+# because a write-back can change the item a minute before the identity (measured).
+debug_report_login() {
+  local was=${cli_watch_pair#* }
+  cli_watch_pair="$1 $2"
+  if cli_live_cleared; then
+    dbg_warning "the CLI login was cleared; run claude auth login, then save $cli_watch_name"
+  elif [[ -z $cli_watch_want || $2 == "$cli_watch_want" ]]; then
+    dbg_warning "the CLI login's token changed on $cli_watch_name, usually an ordinary refresh; claude auth status shows the account it uses"
+  elif [[ -z $2 ]]; then
+    dbg_warning "the CLI login's identity is gone from ~/.claude.json; claude auth status shows the login"
+  elif [[ $2 == "$was" ]]; then
+    # A Desktop-only profile or a skipped restore leaves the login on that account,
+    # so a refresh must not send anyone to switch again.
+    dbg_warning "the CLI login is on $(account_label "$2"), not $cli_watch_name"
+  else
+    dbg_warning "the CLI login went back to $(account_label "$2") after the switch to $cli_watch_name; run claude-multipass switch $cli_watch_name"
+  fi
+  dbg_claude_procs
+}
+
 # The last step of a switch, with the CLI part done and Hindsight still stopped.
 debug_arm() {
   [[ -n $debug ]] || return 0
-  local name=$1 why hash now want
+  local name=$1 why hash now
   why=$(cli_blocker)
   if [[ -n $why ]]; then
     dbg "no watch: ${why//$'\n'/; }"
     return 0
   fi
-  if ! hash=$(cli_token_hash); then
+  if ! cli_live_fresh || ! hash=$(cli_token_hash); then
     dbg_warning "could not read the CLI login; no watch"
     return 0
   fi
   now=$(cli_signed_in_as)
-  want=$(jq -r '.account // empty' "$store/$name/meta.json" 2> /dev/null || true)
-  [[ $now == "$want" ]] || dbg_warning "the CLI login is on ${now:-unknown}, not $name"
+  cli_watch_name=$name
+  cli_watch_want=$(jq -r '.account // empty' "$store/$name/meta.json" 2> /dev/null || true)
+  [[ -n $cli_watch_want ]] || dbg "$name has no account id in its meta.json; no identity check"
+  # A clear can land before the arm, as early as cli_verify.
+  if cli_live_cleared; then
+    debug_report_login "$hash" "$now"
+    return 0
+  fi
+  [[ -z $cli_watch_want || $now == "$cli_watch_want" ]] || dbg_warning "the CLI login is on $(account_label "$now"), not $name"
   cli_watch_pair="$hash $now"
 }
 
@@ -574,21 +638,24 @@ debug_watch() {
   local i hash now failed=0 changed=''
   for ((i = 0; i < 15; i++)); do
     sleep 2
-    if ! hash=$(cli_token_hash); then
+    if ! cli_live_fresh || ! hash=$(cli_token_hash); then
       failed=$((failed + 1))
       continue
     fi
     now=$(cli_signed_in_as)
+    # A partial write of the identity file tells nothing.
+    if [[ -z $now ]] && ! jq -e . "$claude_json" > /dev/null 2>&1; then
+      failed=$((failed + 1))
+      continue
+    fi
     [[ "$hash $now" != "$cli_watch_pair" ]] || continue
-    cli_watch_pair="$hash $now"
     changed=1
-    dbg_warning "CLI login changed after the switch (now ${now:-unknown}); see $root/debug.log"
-    dbg_claude_procs
+    debug_report_login "$hash" "$now"
   done
   if ((failed == 15)); then
     dbg_warning "could not read the CLI login in any of the 15 polls; nothing was checked"
   elif ((failed > 0)); then
-    dbg_warning "could not read the CLI login in $failed of 15 polls; see $root/debug.log"
+    dbg_warning "could not read the CLI login in $failed of 15 polls"
   elif [[ -z $changed ]]; then
     dbg "CLI login unchanged for 30 s"
   fi
@@ -942,7 +1009,13 @@ desktop_launch() {
   # A closed stdout must not cost the relaunch: set -e holds in the EXIT trap.
   info "Launching Claude" 2> /dev/null || flush_failed_write
   dbg "launching Claude"
-  open -a Claude
+  # open hands the caller's whole environment to the app, and Desktop to every
+  # session it spawns, so launch as the Dock does. env -i drops PATH, so resolve
+  # open first. USER comes from $cli_account (falls back to id -un), because an
+  # unset USER would trip set -u and lose the relaunch.
+  local open_bin
+  open_bin=$(command -v open) || open_bin=/usr/bin/open
+  env -i HOME="$HOME" USER="$cli_account" "$open_bin" -a Claude
 }
 
 # A profile's LLMR profile name, or nothing for a claude.ai profile.
@@ -1586,7 +1659,7 @@ list_profiles() {
 # One JSON object for the menu bar app; [inputs] gathers the bare objects
 # into an array, [] when there are none
 list_json() {
-  local meta account profiles='' signed_in=false running=false cli_saved current
+  local meta account profiles='' signed_in=false running=false cli_saved current cli_now=''
   for meta in "$store"/*/meta.json; do
     [[ -f $meta ]] || continue
     # An empty account keeps the row decodable by an app that predates kind.
@@ -1606,9 +1679,10 @@ list_json() {
   desktop_running && running=true
   current=$(llmr_current)
   [[ -n $current ]] || current=$(active_profile)
+  [[ -n $(cli_blocker) ]] || cli_now=$(cli_signed_in_as)
   printf '%s' "$profiles" | jq -n --arg v "$version" --argjson signedIn "$signed_in" --argjson running "$running" \
-    --arg current "$current" \
-    '{version: $v, signedIn: $signedIn, desktopRunning: $running, current: (if $current == "" then null else $current end), profiles: [inputs]}'
+    --arg current "$current" --arg cli "$cli_now" \
+    '{version: $v, signedIn: $signedIn, desktopRunning: $running, current: (if $current == "" then null else $current end), cliAccount: (if $cli == "" then null else $cli end), profiles: [inputs]}'
 }
 
 require_profile() {
@@ -1907,8 +1981,9 @@ main() {
   # The trap goes in before the quit, so a signal or a failed quit relaunches, and
   # before the first debug line, which a closed stderr turns into a SIGPIPE. That
   # signal is ignored inside the trap, where a second one would end it before the
-  # relaunch.
-  if [[ -n $relaunch ]]; then trap 'trap "" PIPE; flush_failed_write; hindsight_resume; cli_unlock; [[ -n $llmr_launched ]] || desktop_launch; debug_watch || true; run_unlock' EXIT; else trap 'trap "" PIPE; flush_failed_write; hindsight_resume; cli_unlock; debug_watch || true; run_unlock' EXIT; fi
+  # relaunch. A failed relaunch only warns, since set -e holds in the trap and the
+  # switch may have worked: the watch and the unlock still run.
+  if [[ -n $relaunch ]]; then trap 'trap "" PIPE; flush_failed_write; hindsight_resume; cli_unlock; [[ -n $llmr_launched ]] || desktop_launch || warning "Claude did not relaunch; open it by hand" || flush_failed_write; debug_watch || true; run_unlock' EXIT; else trap 'trap "" PIPE; flush_failed_write; hindsight_resume; cli_unlock; debug_watch || true; run_unlock' EXIT; fi
   [[ -z $debug ]] || dbg "$cmd $name: claude-multipass $version, Claude $(defaults read /Applications/Claude.app/Contents/Info.plist CFBundleShortVersionString 2> /dev/null || echo unknown)"
   dbg "quitting Claude"
   desktop_quit
@@ -1941,7 +2016,7 @@ main() {
         hindsight_resume
         cli_unlock
         info "Launching Claude through LLMR profile $target_llmr"
-        "$llmr" "$target_llmr" app < /dev/null || fail "llmr $target_llmr app exited $?; relaunching the claude.ai login"
+        env -u CLAUDE_MULTIPASS_DEBUG "$llmr" "$target_llmr" app < /dev/null || fail "llmr $target_llmr app exited $?; relaunching the claude.ai login"
         llmr_wait_up || fail "Claude did not start through llmr $target_llmr within 10 s; relaunching the claude.ai login"
         llmr_launched=1
         printf '%s\n' "$name" > "$llmr_marker"
