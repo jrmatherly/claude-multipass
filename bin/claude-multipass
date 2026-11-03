@@ -942,7 +942,13 @@ desktop_launch() {
   # A closed stdout must not cost the relaunch: set -e holds in the EXIT trap.
   info "Launching Claude" 2> /dev/null || flush_failed_write
   dbg "launching Claude"
-  open -a Claude
+  # open hands the caller's whole environment to the app, and Desktop to every
+  # session it spawns, so launch as the Dock does. env -i drops PATH, so find
+  # open first. cli_account, since a caller with no USER must not lose the
+  # relaunch to set -u.
+  local open_bin
+  open_bin=$(command -v open)
+  env -i HOME="$HOME" USER="$cli_account" "$open_bin" -a Claude
 }
 
 # A profile's LLMR profile name, or nothing for a claude.ai profile.
@@ -1941,7 +1947,7 @@ main() {
         hindsight_resume
         cli_unlock
         info "Launching Claude through LLMR profile $target_llmr"
-        "$llmr" "$target_llmr" app < /dev/null || fail "llmr $target_llmr app exited $?; relaunching the claude.ai login"
+        env -u CLAUDE_MULTIPASS_DEBUG "$llmr" "$target_llmr" app < /dev/null || fail "llmr $target_llmr app exited $?; relaunching the claude.ai login"
         llmr_wait_up || fail "Claude did not start through llmr $target_llmr within 10 s; relaunching the claude.ai login"
         llmr_launched=1
         printf '%s\n' "$name" > "$llmr_marker"

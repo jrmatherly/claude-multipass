@@ -152,6 +152,8 @@ A `security find-generic-password -s claude-multipass` that prints nothing after
 
 `save`, `switch`, `add` and `pick` take `--debug`. A non-empty `CLAUDE_MULTIPASS_DEBUG` does the same without the timestamped `debug: <local time>` lines on stderr, because the menu bar app shows a switch's stderr as a warning. The watch's warnings still reach stderr on purpose, so the app shows them as a row note. In the menu bar app, Settings, General, "Debug log for switches" sets that variable for the app's runs, with no relaunch. Every other command accepts the flag and writes nothing.
 
+Neither the flag nor the variable reaches Desktop. A switch launches Desktop with the environment a Dock launch gets, not the caller's, so nothing from your terminal or the menu bar app travels down to Desktop and the sessions it spawns. An LLMR launch keeps the caller's environment, since `llmr` needs its tools on `PATH`, and drops only `CLAUDE_MULTIPASS_DEBUG`.
+
 Each line goes to `debug.log` beside `profiles/` as `<UTC time> <pid> <message>`, and under `--debug` to stderr as `debug: <local time> <message>`. The log is mode 0600, and a run trims it to its last 2000 lines before it adds to it. It holds:
 
 - The command, the tool's version and Desktop's version.

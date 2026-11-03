@@ -24,13 +24,18 @@ hs_pids=''
 trap '[[ -z $hs_pids ]] || kill -9 $hs_pids 2> /dev/null || true; rm -rf "$tmp"' EXIT
 
 export CLAUDE_DESKTOP_DIR="$tmp/desktop" CLAUDE_MULTIPASS_DIR="$tmp/multipass"
+export TERM=dumb
+unset CLAUDE_MULTIPASS_DEBUG
 d=$CLAUDE_DESKTOP_DIR p=$CLAUDE_MULTIPASS_DIR/profiles b=$CLAUDE_MULTIPASS_DIR/backups s=$CLAUDE_DESKTOP_DIR/claude-code-sessions
 mkdir -p "$tmp/bin"
 # pgrep says "not running" so quit is a no-op; the other three only log.
 printf '#!/bin/sh\nexit 1\n' > "$tmp/bin/pgrep"
-for stub in osascript pkill open; do
+for stub in osascript pkill; do
   printf '#!/bin/sh\necho "%s $*" >> "%s/calls"\n' "$stub" "$tmp" > "$tmp/bin/$stub"
 done
+# desktop_launch runs open under env -i, so every open stub sets PATH itself: a
+# security call in one must find the stub, not the real Keychain tool.
+printf '#!/bin/sh\nPATH="%s/bin:$PATH"\necho "open $*" >> "%s/calls"\n' "$tmp" "$tmp" > "$tmp/bin/open"
 printf '#!/bin/sh\necho /Library/Developer/CommandLineTools\n' > "$tmp/bin/xcode-select"
 # A stateful security stub. Every call and every `-i` stdin line goes to
 # $tmp/security-calls, so the log tells the stdin route from the argv one the
@@ -136,11 +141,11 @@ kc_put() { printf 'add-generic-password -U -a "%s" -s "%s" -X %s\n' "$2" "$1" "$
 kc_delete() { security delete-generic-password -a "$2" -s "$1" > /dev/null 2>&1 || true; }
 chmod +x "$tmp"/bin/*
 export PATH="$tmp/bin:$PATH"
-# llmr logs its argv (to llmr-calls and calls) and exits with the status in
+# llmr records its environment in llmr-env, logs its argv (to llmr-calls and calls) and exits with the status in
 # llmr-fail, if any; on success it marks its Desktop up (llmr-up and
 # claude-up) unless llmr-no-desktop exists.
 mkdir -p "$tmp/llmr-bin"
-printf '#!/bin/sh\necho "llmr $*" >> "%s/llmr-calls"\n[ ! -f "%s/llmr-fail" ] || { echo "llmr: no such profile" >&2; exit "$(cat "%s/llmr-fail")"; }\necho "llmr $*" >> "%s/calls"\n[ -e "%s/llmr-no-desktop" ] || touch "%s/llmr-up" "%s/claude-up"\n' "$tmp" "$tmp" "$tmp" "$tmp" "$tmp" "$tmp" "$tmp" > "$tmp/llmr-bin/llmr"
+printf '#!/bin/sh\n/usr/bin/env > "%s/llmr-env"\necho "llmr $*" >> "%s/llmr-calls"\n[ ! -f "%s/llmr-fail" ] || { echo "llmr: no such profile" >&2; exit "$(cat "%s/llmr-fail")"; }\necho "llmr $*" >> "%s/calls"\n[ -e "%s/llmr-no-desktop" ] || touch "%s/llmr-up" "%s/claude-up"\n' "$tmp" "$tmp" "$tmp" "$tmp" "$tmp" "$tmp" "$tmp" "$tmp" > "$tmp/llmr-bin/llmr"
 chmod +x "$tmp/llmr-bin/llmr"
 export CLAUDE_MULTIPASS_LLMR="$tmp/llmr-bin/llmr"
 export CLAUDE_CLI_CONFIG="$tmp/claude.json" CLAUDE_CLI_HOME="$tmp/claude-home" CLAUDE_MULTIPASS_BIN="$script"
@@ -1606,7 +1611,7 @@ case "$*" in
   *) exit 1 ;;
 esac
 EOF
-printf '#!/bin/sh\necho "open $*" >> "%s/calls"\n[ ! -f "%s-pid" ] || ps -o state= -p "$(cat "%s-pid")" >> "%s-at-open"\n' "$tmp" "$hs_file" "$hs_file" "$hs_file" > "$tmp/bin/open"
+printf '#!/bin/sh\nPATH="%s/bin:$PATH"\necho "open $*" >> "%s/calls"\n[ ! -f "%s-pid" ] || ps -o state= -p "$(cat "%s-pid")" >> "%s-at-open"\n' "$tmp" "$tmp" "$hs_file" "$hs_file" "$hs_file" > "$tmp/bin/open"
 printf '#!/bin/sh\nps -o state= -p "$(cat "%s-pid")" > "%s-at-llmr"\ntouch "%s-llmr-up"\n' "$hs_file" "$hs_file" "$hs_file" > "$tmp/hs-llmr"
 chmod +x "$tmp/hs-llmr"
 # Quitting a Desktop that came back clears it, and records what had been written by then.
@@ -1885,7 +1890,11 @@ hs_end
 rm -rf "$p/hsother"
 printf '#!/bin/sh\nexit 1\n' > "$tmp/bin/pgrep"
 printf '#!/bin/sh\necho "osascript $*" >> "%s/calls"\n' "$tmp" > "$tmp/bin/osascript"
-printf '#!/bin/sh\necho "open $*" >> "%s/calls"\n' "$tmp" > "$tmp/bin/open"
+printf '#!/bin/sh\nPATH="%s/bin:$PATH"\necho "open $*" >> "%s/calls"\n' "$tmp" "$tmp" > "$tmp/bin/open"
+rm -f "$tmp/calls"
+
+check "a caller with no USER can still switch" 0 "$(exit_code env -u USER "$script" switch beta)"
+check_true "and Desktop still relaunches" grep -q 'open -a Claude' "$tmp/calls"
 rm -f "$tmp/calls"
 
 # Debug mode. pgrep names a real background process as a running claude, with a
@@ -1908,7 +1917,7 @@ case "\$*" in
   *) exit 1 ;;
 esac
 EOF
-printf '#!/bin/sh\necho "open $*" >> "%s/calls"\n[ ! -f "%s/dbg-at-open" ] || . "%s/dbg-at-open"\n' "$tmp" "$tmp" "$tmp" > "$tmp/bin/open"
+printf '#!/bin/sh\nPATH="%s/bin:$PATH"\necho "open $*" >> "%s/calls"\n/usr/bin/env > "%s/open-env"\n[ ! -f "%s/dbg-at-open" ] || . "%s/dbg-at-open"\n' "$tmp" "$tmp" "$tmp" "$tmp" "$tmp" > "$tmp/bin/open"
 printf '#!/bin/sh\ncase "$1" in 2) [ ! -e "%s/dbg-sleep-fail" ] || exit 1; echo poll >> "%s/dbg-polls"; at="%s/dbg-at-poll-$(wc -l < "%s/dbg-polls" | tr -d " ")"; [ ! -f "$at" ] || . "$at"; exit 0 ;; 0.5 | 1) exit 0 ;; esac\nexec /bin/sleep "$@"\n' "$tmp" "$tmp" "$tmp" "$tmp" > "$tmp/bin/sleep"
 chmod +x "$tmp/bin/sleep"
 hs_background /bin/sh -c 'while :; do /bin/sleep 1; done' "$(printf 'a%.0s' {1..200})rt-argv-leak"
@@ -2021,8 +2030,16 @@ check "and logs the changes" yes "$(dbg_logged 'CLI login changed after the swit
 check "and does not call it stable" no "$(dbg_logged 'CLI login unchanged')"
 
 cda switch beta --no-relaunch > /dev/null 2>&1
-dbg_put_item '{"claudeAiOauth":{"accessToken":"at-rotated","refreshToken":"rt-rotated-2","expiresAt":3}}'
+dbg_put_item '{"claudeAiOauth":{"accessToken":"at-rotated","refreshToken":"rt-rotated","expiresAt":3}}'
+rm -f "$tmp/calls"
+export DBG_LEAK_PROBE=1
 CLAUDE_MULTIPASS_DEBUG=1 dbg_run switch dbother
+check "a debug run does not pass the variable to Desktop" 0 "$(grep -c '^CLAUDE_MULTIPASS_DEBUG=' "$tmp/open-env" || true)"
+check "nor the caller's other variables" 0 "$(grep -c '^DBG_LEAK_PROBE=' "$tmp/open-env" || true)"
+check "and HOME reaches it" 1 "$(grep -c '^HOME=' "$tmp/open-env")"
+check_true "through the stub, not a real open" grep -q 'open -a Claude' "$tmp/calls"
+check_true "and a write from the stub lands in the fixture Keychain" test "$(kc_get "Claude Code-credentials" "$USER" | jq -r .claudeAiOauth.refreshToken)" = rt-rotated
+unset DBG_LEAK_PROBE
 check "CLAUDE_MULTIPASS_DEBUG=1 turns it on for a switch" yes "$(dbg_logged 'quit done')"
 check "and keeps its lines off stderr, which the app shows as a warning" "" "$(grep -E '^debug: [0-9:]{8} ' <<< "$hs_err" || true)"
 check "the watch with it" 15 "$(dbg_polls)"
@@ -2127,8 +2144,10 @@ cp "$tmp/config-before-dbg-add" "$d/config.json"
 printf cookie-B > "$d/Cookies"
 
 # An LLMR switch moves no CLI login.
-dbg_run switch dbllmr --debug
+rm -f "$tmp/llmr-env"
+CLAUDE_MULTIPASS_DEBUG=1 dbg_run switch dbllmr --debug
 check "an LLMR switch under debug succeeds" 0 "$hs_rc"
+check "and does not pass the variable to llmr" 0 "$(grep -c '^CLAUDE_MULTIPASS_DEBUG=' "$tmp/llmr-env" || true)"
 check "and logs" yes "$(dbg_logged 'quit done')"
 check "and watches nothing" 0 "$(dbg_polls)"
 rm -rf "$p/dbllmr" "$CLAUDE_MULTIPASS_DIR/active-llmr" "$tmp/llmr-up" "$tmp/claude-up"
@@ -2158,7 +2177,7 @@ check_true "the tldr names it" grep -q 'claude-multipass switch {{name}} --debug
 hs_end
 rm -rf "$p/dbother" "$tmp/dbg-claude" "$dbg_log" "$tmp/bin/sleep"
 printf '#!/bin/sh\nexit 1\n' > "$tmp/bin/pgrep"
-printf '#!/bin/sh\necho "open $*" >> "%s/calls"\n' "$tmp" > "$tmp/bin/open"
+printf '#!/bin/sh\nPATH="%s/bin:$PATH"\necho "open $*" >> "%s/calls"\n' "$tmp" "$tmp" > "$tmp/bin/open"
 printf '#!/bin/sh\ngrep "^beta "\n' > "$tmp/bin/fzf"
 rm -f "$tmp/calls"
 
