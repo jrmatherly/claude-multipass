@@ -30,6 +30,36 @@ shellcheck --severity=warning "${shell_scripts[@]}"
 prettier --log-level warn --ignore-unknown --check "**/*.{js,cjs,ts,md,json,sh}" "bin/*" ".github/**/*.yml"
 # bin/claude-multipass against a fixture Desktop folder (never the real one)
 bash test/claude-multipass.sh > /dev/null
+# its filter: which sections a filter selects (setup, the name or the text, their
+# needs), that a selection runs, and that a miss, a setup-only match or two filters exit 2
+filter_selects() {
+  local got
+  got=$(SELF_CHECK_DRY_RUN=1 bash test/claude-multipass.sh "$1")
+  if [[ $got != "sections: $2" ]]; then
+    echo "check: the self-check's filter $1 selected $got, not $2" >&2
+    exit 1
+  fi
+}
+filter_selects prune 'setup prune'
+filter_selects refusals 'setup refusals'
+filter_selects 'list marks beta active' 'setup switch list'
+filter_selects doctor 'setup switch list add args usage doctor'
+filtered=$(bash test/claude-multipass.sh prune)
+if ! grep -q '^ok: login backups pruned to ten$' <<< "$filtered"; then
+  echo "check: the self-check's filter prune did not run that section" >&2
+  exit 1
+fi
+filter_refuses() {
+  local rc=0
+  SELF_CHECK_DRY_RUN=1 bash test/claude-multipass.sh "$@" > /dev/null 2>&1 || rc=$?
+  if [[ $rc != 2 ]]; then
+    echo "check: the self-check's filter $* exited $rc, not 2" >&2
+    exit 1
+  fi
+}
+filter_refuses no-such-section
+filter_refuses 'security stub decodes'
+filter_refuses prune switch
 # scripts/make-appcast.sh and scripts/verify-appcast.sh
 bash test/appcast.sh > /dev/null
 # the codesign retry in scripts/sign-mac-app.sh

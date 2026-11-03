@@ -6,16 +6,27 @@
 #
 # `test/claude-multipass.sh`
 #
+# - While iterating, run setup and one section by name, or each section whose text
+#   holds a string (a case's name as the file writes it), with the sections they need:
+#
+# `test/claude-multipass.sh hindsight`
+#
+# - Print what a filter selects, without running it:
+#
+# `SELF_CHECK_DRY_RUN=1 test/claude-multipass.sh hindsight`
+#
 # ---
 # Never touches the real Claude Desktop folder: CLAUDE_DESKTOP_DIR and
 # CLAUDE_MULTIPASS_DIR point into a temp dir, and pgrep, osascript, pkill,
-# open, fzf, security, xcode-select and curl are stubbed on PATH so no app is
+# open, fzf, security, xcode-select, curl, claude and sleep are stubbed on PATH so no app is
 # quit or launched and no Keychain or network is touched. CLAUDE_MULTIPASS_LLMR
 # points at an llmr stub, so the real llm-router never runs.
 #
 # License: MIT
 
 set -euo pipefail
+# The curl stub reads stdin, so an open one (a terminal, an agent's shell) hangs the gateway cases.
+exec < /dev/null
 
 script="$(cd "$(dirname "$0")/.." && pwd -P)/bin/claude-multipass"
 tmp=$(mktemp -d)
@@ -37,6 +48,11 @@ done
 # security call in one must find the stub, not the real Keychain tool.
 printf '#!/bin/sh\nexport PATH="%s/bin:$PATH"\necho "open $*" >> "%s/calls"\n' "$tmp" "$tmp" > "$tmp/bin/open"
 printf '#!/bin/sh\necho /Library/Developer/CommandLineTools\n' > "$tmp/bin/xcode-select"
+# The script's waits at fixture speed: no 1 s lock retries, and a lock toucher
+# that ticks every 0.3 s, not 3 s. stat's mtime has 1 s steps, so the lock cases
+# wait past a second and a tick. A case that writes its own stub removes it.
+fast_sleep() { printf '#!/bin/sh\ncase "$1" in\n  1) exit 0 ;;\n  3) exec /bin/sleep 0.3 ;;\nesac\nexec /bin/sleep "$@"\n' > "$tmp/bin/sleep"; }
+fast_sleep
 # A stateful security stub. Every call and every `-i` stdin line goes to
 # $tmp/security-calls, so the log tells the stdin route from the argv one the
 # script takes for an item too large for a security -i line. The "Claude Safe
@@ -75,10 +91,10 @@ run() {
     find-generic-password)
       if [[ $s == 'Claude Safe Storage' ]]; then printf %s "$pw"; return 0; fi
       # A slow read of the CLI item, for the lock keep-alive case: record the
-      # named lock dir's mtime before and after a 4 s hold.
+      # named lock dir's mtime before and after a 2 s hold.
       if [[ -n ${SECURITY_HOLD:-} && $s == 'Claude Code-credentials' ]]; then
         stat -f %m "$SECURITY_HOLD" > "${kc%/*}/lock-mtime-before"
-        sleep 4
+        /bin/sleep 2
         stat -f %m "$SECURITY_HOLD" > "${kc%/*}/lock-mtime-after"
       fi
       # A read held open, as by a Keychain prompt, for the run lock case: it
@@ -141,7 +157,8 @@ kc_put() { printf 'add-generic-password -U -a "%s" -s "%s" -X %s\n' "$2" "$1" "$
 kc_delete() { security delete-generic-password -a "$2" -s "$1" > /dev/null 2>&1 || true; }
 chmod +x "$tmp"/bin/*
 # Not the caller's PATH: a real claude reads the real login and rewrites ~/.claude.json.
-noclaude="$tmp/bin:$(dirname "$(command -v jq)"):/usr/bin:/bin"
+# /usr/bin first: a version-manager shim in jq's folder costs about 30 ms a call, and a fixture switch makes hundreds.
+noclaude="$tmp/bin:/usr/bin:/bin:$(dirname "$(command -v jq)")"
 export PATH="$noclaude"
 # llmr records its environment in llmr-env, logs its argv (to llmr-calls and
 # calls) and exits with the status in llmr-fail, if any; on success it marks its
@@ -187,6 +204,61 @@ check_true() {
 exit_code() {
   "$@" > /dev/null 2>&1 && echo 0 || echo $?
 }
+# The sections are the #@ lines, each `#@ <name>` or `#@ <name> needs <earlier sections>`.
+if [[ $# -gt 1 ]]; then
+  echo "one filter at a time" >&2
+  exit 2
+fi
+if [[ $# -eq 1 ]]; then
+  awk -v want="$1" '
+    /^#@ / {
+      n++
+      name[n] = $2
+      if (seen[$2]++ || (NF > 2 && $3 != "needs")) bad = bad " " $2
+      for (i = 4; i <= NF; i++) {
+        if (!seen[$i]) bad = bad " " $i
+        needs[n] = needs[n] " " $i " "
+      }
+      if ($2 == want) exact = n
+      next
+    }
+    n {
+      body[n] = body[n] $0 "\n"
+      if (index($0, want)) {
+        hit[n] = 1
+        if (n > 1) found = 1
+      }
+    }
+    END {
+      if (bad) {
+        print "bad #@ line for:" bad > "/dev/stderr"
+        exit 2
+      }
+      if (exact) {
+        delete hit
+        hit[exact] = 1
+      } else if (!found) {
+        for (i = 1; i <= n; i++) list = list " " name[i]
+        print "no section past setup holds \"" want "\"; sections:" list > "/dev/stderr"
+        exit 2
+      }
+      hit[1] = 1
+      for (i = n; i > 1; i--) if (hit[i]) for (j = 1; j < i; j++) if (index(needs[i], " " name[j] " ")) hit[j] = 1
+      printf "# sections:"
+      for (i = 1; i <= n; i++) if (hit[i]) printf " %s", name[i]
+      print ""
+      for (i = 1; i <= n; i++) if (hit[i]) printf "%s", body[i]
+    }
+  ' "$0" > "$tmp/selected"
+  sed -n '1s/^# //p' "$tmp/selected"
+  [[ -z ${SELF_CHECK_DRY_RUN:-} ]] || exit 0
+  # shellcheck disable=SC1091
+  . "$tmp/selected"
+  echo "Filtered claude-multipass checks passed"
+  exit 0
+fi
+
+#@ setup
 check_true "the no-claude PATH has no claude" test -z "$(PATH=$noclaude command -v claude || true)"
 
 kc_put t u 'a "b" c'"'"'d'
@@ -289,12 +361,13 @@ touch -t 202001010000 "$s/bbbbbbbb-2222/org-b/local_s5.json"
 # Same mtime, different content: the mtime prefilter must not hide a newer lastActivityAt
 touch -t 202101010000 "$s/aaaaaaaa-1111/org-a/local_s2.json" "$s/bbbbbbbb-2222/org-b/local_s2.json"
 
+#@ switch
 # A token refresh since the save, which switch must keep by re-saving alpha
 before=$(jq --tab '.["oauth:tokenCacheV2"] = "enc-A2-new"' "$d/config.json")
 printf '%s' "$before" > "$d/config.json"
 
 : > "$tmp/security-calls"
-# The CLI item is read once per run, so the switch waits 4 s once while holding the locks.
+# The CLI item is read once per run, so the switch waits 2 s once while holding the locks.
 export SECURITY_HOLD=$tmp/claude.json.lock
 out=$(cda switch beta --no-relaunch 2> "$tmp/switch-err" | tee "$tmp/switch-out")
 unset SECURITY_HOLD
@@ -334,7 +407,7 @@ check "switch backs up the previous identity" aaaaaaaa-1111 "$(jq -r .oauthAccou
 check "switch re-saves the outgoing CLI login" at-alpha "$(kc_get claude-multipass alpha | jq -r .claudeAiOauth.accessToken)"
 check "switch releases the CLI locks" 0 "$(ls -d "$tmp"/claude.json.lock "$tmp"/claude-home/.oauth_refresh.lock "$tmp"/claude-home.lock 2> /dev/null | wc -l | tr -d ' ')"
 check_true "the config lock is touched while held" test "$(cat "$tmp/lock-mtime-after")" -gt "$(cat "$tmp/lock-mtime-before")"
-sleep 4
+/bin/sleep 1
 check_true "no toucher outlives the switch" test ! -e "$tmp/claude.json.lock" -a ! -e "$tmp/claude-home/.oauth_refresh.lock" -a ! -e "$tmp/claude-home.lock"
 check "a matching org raises no warning" 0 "$(grep -c 'different org' "$tmp/switch-err")"
 check "the CLI locks are released before claude auth status runs" 0 "$(cat "$tmp/locks-at-verify")"
@@ -545,7 +618,7 @@ check_true "and Desktop's config is untouched" cmp -s "$d/config.json" "$tmp/con
 check "and oauthAccount too" aaaaaaaa-1111 "$(jq -r .oauthAccount.accountUuid "$tmp/claude.json")"
 check_true "and the tool's own locks are released" test ! -e "$tmp/claude-home/.oauth_refresh.lock" -a ! -e "$tmp/claude-home.lock"
 rmdir "$tmp/claude.json.lock"
-sleep 4
+/bin/sleep 1
 check_true "and no toucher outlives the failed switch" test ! -e "$tmp/claude-home/.oauth_refresh.lock" -a ! -e "$tmp/claude-home.lock"
 # Each of the other two locks, held fresh, fails the switch the same way
 cp "$d/config.json" "$tmp/config-locked"
@@ -561,19 +634,37 @@ for lock in "$tmp/claude-home/.oauth_refresh.lock" "$tmp/claude-home.lock"; do
   check_true "and the tool's own locks are released" test ! -e "$tmp/claude-home/.oauth_refresh.lock" -a ! -e "$tmp/claude-home.lock" -a ! -e "$tmp/claude.json.lock"
 done
 
+# A lock freed during the retries does not fail the switch. The toucher's sleep
+# outlasts the run, so the caller's pipe closes in time only if the toucher left
+# it behind: the app and Raycast read this script's pipes to EOF.
+printf '#!/bin/sh\ncase "$1" in\n  1) rmdir "%s/claude.json.lock"; exit 0 ;;\n  3) exec /bin/sleep 8 ;;\nesac\nexec /bin/sleep "$@"\n' "$tmp" > "$tmp/bin/sleep"
+mkdir "$tmp/claude.json.lock"
+start=$SECONDS
+rc=0
+out=$(cda switch beta --no-relaunch 2>&1) || rc=$?
+check "a lock freed during the retries does not fail the switch" 0 "$rc"
+check_true "a toucher does not hold the caller's pipes" test "$((SECONDS - start))" -lt 8
+fast_sleep
+cda switch alpha --no-relaunch > /dev/null 2>&1
+
 # A tool killed outright (the app's watchdog sends SIGKILL 2 s after SIGTERM) runs no
 # trap, so the loop must notice on its own or it pins the CLI's locks for good.
 export SECURITY_HOLD=$tmp/claude.json.lock
+rm -f "$tmp/lock-mtime-before"
 # The script itself, not cda: a function's & job is a subshell, and killing that would leave the script running.
 "$script" switch beta --no-relaunch > /dev/null 2>&1 &
 pid=$!
-sleep 2
+# The stub writes this during the hold, so the locks and their touchers are up.
+for ((i = 0; i < 200; i++)); do
+  [[ ! -e $tmp/lock-mtime-before ]] || break
+  /bin/sleep 0.05
+done
 kill -9 "$pid"
 wait "$pid" 2> /dev/null || true
 unset SECURITY_HOLD
-sleep 4
+/bin/sleep 1
 m1=$(stat -f %m "$tmp/claude.json.lock")
-sleep 4
+/bin/sleep 1.5
 check "a toucher stops when the tool is killed outright" "$m1" "$(stat -f %m "$tmp/claude.json.lock")"
 rm -rf "$tmp/claude.json.lock" "$tmp/claude-home/.oauth_refresh.lock" "$tmp/claude-home.lock"
 
@@ -609,6 +700,7 @@ check "the CLI follows Desktop back to beta" bbbbbbbb-2222 "$(jq -r .oauthAccoun
 # The switches away re-saved beta; the list and show cases below expect its hand-written save time.
 jq '.savedAt = "2026-01-01T00:00:00Z"' "$p/beta/meta.json" > "$tmp/meta.new" && mv "$tmp/meta.new" "$p/beta/meta.json"
 
+#@ list needs switch
 # list marks the active profile
 list=$(cda list)
 check_true "list marks beta active" grep -Eq '^\* beta +bbbbbbbb  2026-01-01T00:00:00Z  4 sessions$' <<< "$list"
@@ -701,6 +793,7 @@ check "a switch and a rename pass the CLI login through pipes" 0 "$(grep -c 'Reg
 check_true "and the log saw those pipes" grep -q '^cat Fifo File' "$tmp/stdin-types"
 check "the script has no here-string, and one heredoc (the --help page)" 1 "$(grep -c '<<' "$script" || true)"
 
+#@ runlock
 # Two runs at once: the second refuses before it quits Desktop, so its EXIT
 # trap never relaunches Desktop while the first still writes config.json.
 touch "$tmp/wait"
@@ -739,6 +832,7 @@ check "a pid reused by another program does not block" 0 "$(exit_code cda switch
 kill "$other"
 rm -f "$tmp/calls"
 
+#@ desktop needs switch
 # Run from a shell inside Desktop (the Code tab's terminal): BSD pgrep excludes
 # its own ancestors, so plain pgrep says "not running" while pgrep -a finds it.
 printf '#!/bin/sh\ncase "$1" in -a*) exit 0 ;; esac\nexit 1\n' > "$tmp/bin/pgrep"
@@ -782,6 +876,7 @@ rm "$tmp/bin/sleep"
 printf '#!/bin/sh\nexit 1\n' > "$tmp/bin/pgrep"
 printf '#!/bin/sh\necho "pkill $*" >> "%s/calls"\n' "$tmp" > "$tmp/bin/pkill"
 
+#@ add needs switch
 # add re-saves the active login and signs out locally
 out=$(cda add gamma --no-relaunch)
 check "add clears the auth keys" '["theme","windowBounds","zeta"]' "$(jq -c keys_unsorted "$d/config.json")"
@@ -809,6 +904,7 @@ cda rename home2 home > /dev/null
 cda rename legacy2 legacy > /dev/null
 check "rename onto an existing name fails" 1 "$(exit_code cda rename home beta)"
 check "rename needs two names" 1 "$(exit_code cda rename home)"
+#@ args needs switch add
 # Each argument error exits 1 and names itself; err_of keeps only stderr.
 err_of() { { TERM=dumb "$@" > /dev/null; } 2>&1 || true; }
 check "an unknown option fails" 1 "$(exit_code cda list --bogus)"
@@ -850,6 +946,7 @@ check "and --help lists --force on save, switch and add only" 1 "$(cda --help | 
 check "and gives remove no --no-relaunch, since it never quits Desktop" 1 "$(cda --help | grep -cx '  claude-multipass remove <name>')"
 cp -R "$b"/profile-home-* "$p/alpha"
 check "--force outside sync or switch fails" 1 "$(exit_code cda list --force)"
+#@ refusals
 # an unsaved login must not be switched away from silently
 printf '{"oauth:tokenCacheV2":"enc-Z","lastKnownAccountUuid":"zzzzzzzz-9999"}' > "$d/config.json"
 check "list --json current is null when not saved" null "$(cda list --json | jq -r .current)"
@@ -929,6 +1026,7 @@ check "sync with no pointers says so" "No Code tab sessions to sync" "$(cda sync
 check "list with no profiles explains" "No saved accounts yet: run claude-multipass save <name> for the signed-in one, add <name> for another" "$(CLAUDE_MULTIPASS_DIR="$tmp/empty" cda list)"
 check "list --json with no profiles is an empty array" "[]" "$(CLAUDE_MULTIPASS_DIR="$tmp/empty" cda list --json | jq -c .profiles)"
 
+#@ prune
 # backups prune to the newest ten
 for i in $(seq 1 12); do
   mkdir -p "$b/login-2020010100000$i-1"
@@ -984,6 +1082,7 @@ err=$(SECURITY_FAIL_DELETE=1 CLAUDE_MULTIPASS_DIR=$spaced cda add zed --no-relau
 check_true "a prune whose Keychain delete fails warns" grep -q "could not delete the Keychain item for $spaced/backups/login-" <<< "$err"
 check "and still prunes the folder" 10 "$(find "$spaced/backups" -mindepth 1 -maxdepth 1 -type d -name 'login-*' | wc -l | tr -d ' ')"
 
+#@ usage needs switch
 # usage: a fixture token cache encrypted the way the app does; security and
 # curl are stubs on PATH, so no Keychain and no network
 mkdir -p "$p/usagey" "$p/stale"
@@ -1225,6 +1324,7 @@ done
 check "switch fails before quitting Desktop, so no login is backed up" "$n_login" "$(find "$b" -mindepth 1 -maxdepth 1 -name 'login-*' | wc -l | tr -d ' ')"
 cp "$tmp/usagey-meta" "$p/usagey/meta.json"
 
+#@ doctor needs list args usage
 # doctor: one line per check, exit 1 on any fail:, no Keychain, no network
 rm -f "$tmp/calls"
 touch "$tmp/calls"
@@ -1412,6 +1512,7 @@ done
 cp "$tmp/config-before-bad-read" "$d/config.json"
 printf '#!/bin/sh\nexit 1\n' > "$tmp/bin/pgrep"
 
+#@ llmr needs list usage
 # An LLMR profile. The cases start from beta, whose CLI login matches Desktop's,
 # with Desktop quit. In this block Claude runs while claude-up exists and LLMR's
 # Desktop while llmr-up does (llmr makes both); the quit removes both.
@@ -1593,6 +1694,7 @@ check "rename moves an LLMR profile" router-p "$(jq -r .llmrProfile "$p/router2/
 check "without a Keychain call" 0 "$(wc -l < "$tmp/security-calls" | tr -d ' ')"
 rm -rf "$p/router2" "$tmp/calls"
 
+#@ hindsight
 # Hindsight's memory daemon. The daemon and its claude are real background
 # sleeps, so the script's kill builtin really stops and resumes them; the pgrep
 # stub names them as hindsight-api and its claude child. Desktop counts as quit.
@@ -1919,6 +2021,7 @@ check "a caller with no USER can still switch" 0 "$(exit_code env -u USER "$scri
 check_true "and Desktop still relaunches" grep -q 'open -a Claude' "$tmp/calls"
 rm -f "$tmp/calls"
 
+#@ debug needs hindsight
 # Debug mode. pgrep names a real background process as a running claude, with a
 # token past the 160 characters of its command the log keeps. The open stub runs
 # $tmp/dbg-at-open, a late writer of the CLI item. The sleep stub counts the
@@ -2267,6 +2370,7 @@ printf '#!/bin/sh\nexport PATH="%s/bin:$PATH"\necho "open $*" >> "%s/calls"\n' "
 printf '#!/bin/sh\ngrep "^beta "\n' > "$tmp/bin/fzf"
 rm -f "$tmp/calls"
 
+#@ migration needs switch
 # the dotfiles-era store moves into the default location once, backups too
 # (XDG_CONFIG_HOME, not HOME: tools on PATH may read their own config from HOME)
 mkdir -p "$tmp/home/.config/dotfiles/claude-desktop-accounts/old" "$tmp/home/.config/dotfiles/claude-desktop-accounts-backups/login-1"
@@ -2285,4 +2389,5 @@ env -u CLAUDE_MULTIPASS_DIR XDG_CONFIG_HOME="$tmp/home2/.config" "$script" list 
 check_true "migration warns when the new backups folder already exists" grep -q "Left $tmp/home2/.config/dotfiles/claude-desktop-accounts-backups in place" "$tmp/migrate-err2"
 check_true "and leaves the legacy backups where they were" test -d "$tmp/home2/.config/dotfiles/claude-desktop-accounts-backups"
 
-echo "All claude-multipass checks passed"
+#@ done
+[[ $# -gt 0 ]] || echo "All claude-multipass checks passed"
