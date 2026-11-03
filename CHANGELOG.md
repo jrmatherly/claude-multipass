@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Every relaunch of Desktop now uses the environment a Dock launch gets, so nothing from your terminal or the menu bar app, `CLAUDE_MULTIPASS_DEBUG` included, reaches Desktop or the sessions it spawns. An LLMR launch keeps the caller's environment and drops only that variable.
+- A relaunch of Desktop that fails now warns `Claude did not relaunch; open it by hand` and keeps the run's exit code, so a switch that worked is not reported as failed and its locks are freed.
 - The debug watch now says what happened to the CLI login and what to do: it was cleared, it went back to another account, or its token changed. It names saved profiles instead of account ids.
 - The popover now says which account the terminal is on, from `oauthAccount` in `~/.claude.json`, in place of "terminal login too", which only meant the profile held a saved login. It reads "terminal on this account", `terminal on <name>` or "terminal on another account". `list --json` has a new `cliAccount` field.
 

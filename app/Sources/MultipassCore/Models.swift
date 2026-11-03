@@ -26,7 +26,7 @@ public struct Snapshot: Decodable, Equatable {
   public var desktopRunning: Bool
   public var current: String?
   public var profiles: [Profile]
-  /// The account the terminal's claude is signed in as (tools after 0.12.0); nil when signed out or unknown.
+  /// The account id in the terminal's ~/.claude.json, which a cleared login keeps; nil when there is none or the tool does not send it.
   public var cliAccount: String?
 
   public init(version: String, signedIn: Bool, desktopRunning: Bool, current: String?, profiles: [Profile], cliAccount: String? = nil) {
@@ -44,6 +44,11 @@ public struct Snapshot: Decodable, Equatable {
     if cliAccount == here.account { return "terminal on this account" }
     if let other = profiles.first(where: { $0.account == cliAccount }) { return "terminal on \(other.name)" }
     return "terminal on another account"
+  }
+
+  /// The popover's line under the account name.
+  public var statusLine: String {
+    (desktopRunning ? "Desktop running" : "Desktop not running") + (terminalClause.map { " · \($0)" } ?? "")
   }
 }
 
