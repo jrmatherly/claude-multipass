@@ -37,7 +37,7 @@ self_check_exit() {
   local rc=$?
   [[ -z $hs_pids ]] || kill -9 $hs_pids 2> /dev/null || true
   rm -rf "$tmp"
-  # Those strings exist only in fixtures, so a real login never matches. An absolute path, since the fixture stubs tools.
+  # These two strings appear only in this file's fixtures, so a real login never matches. /usr/bin/grep because the script replaces PATH with stubs.
   if /usr/bin/grep -qE 'dev-alpha|"srv": ?"shared"' "$creds" 2> /dev/null; then
     echo "FAILED: $creds holds this self-check's fixture. A real claude reached the security stub. Remove the file." >&2
     exit 1
@@ -1359,16 +1359,18 @@ check "doctor never calls security" "$n_sec" "$(wc -l < "$tmp/security-calls" | 
 check_true "doctor names a profile without a CLI login" grep -q '^warn: legacy: no CLI login saved' <<< "$(cda doctor)"
 check_true "doctor warns on CLAUDE_CONFIG_DIR" grep -q '^warn: CLAUDE_CONFIG_DIR is set; the CLI login is not saved or switched' <<< "$(CLAUDE_CONFIG_DIR=/x cda doctor)"
 check_true "doctor warns on CLAUDE_SECURESTORAGE_CONFIG_DIR" grep -q '^warn: CLAUDE_SECURESTORAGE_CONFIG_DIR is set; the CLI login is not saved or switched' <<< "$(CLAUDE_SECURESTORAGE_CONFIG_DIR=/x cda doctor)"
+out=$(CLAUDE_CODE_USE_BEDROCK=x CLAUDE_CODE_USE_VERTEX=x CLAUDE_CODE_USE_FOUNDRY=x ANTHROPIC_AUTH_TOKEN=x ANTHROPIC_API_KEY=x CLAUDE_CODE_OAUTH_TOKEN=x ANTHROPIC_PROFILE=x cda doctor)
 for var in CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_PROFILE; do
-  check_true "doctor warns on $var" grep -q "^warn: $var is set; it overrides the terminal login" <<< "$(env "$var=x" "$script" doctor)"
+  check_true "doctor warns on $var" grep -q "^warn: $var is set; it overrides the terminal login" <<< "$out"
 done
 printf '{"apiKeyHelper":"/x/helper"}' > "$CLAUDE_CLI_HOME/settings.json"
 check_true "doctor warns on apiKeyHelper" grep -qF "warn: apiKeyHelper is set in $CLAUDE_CLI_HOME/settings.json; it overrides the terminal login" <<< "$(cda doctor)"
+check "doctor prints the overrides in Claude Code's order" "ANTHROPIC_API_KEY apiKeyHelper CLAUDE_CODE_OAUTH_TOKEN" "$(ANTHROPIC_API_KEY=x CLAUDE_CODE_OAUTH_TOKEN=x cda doctor | sed -n 's/^warn: \([A-Za-z_]*\) is set.*/\1/p' | xargs)"
 printf '{"apiKeyHelper":""}' > "$CLAUDE_CLI_HOME/settings.json"
 check "an empty apiKeyHelper does not warn" 0 "$(cda doctor | grep -c '^warn: apiKeyHelper')"
 printf 'not json' > "$CLAUDE_CLI_HOME/settings.json"
 check "an unreadable settings.json does not warn" 0 "$(cda doctor | grep -c '^warn: apiKeyHelper')"
-check "or fail doctor" 0 "$(exit_code cda doctor)"
+check "an unreadable settings.json does not fail doctor" 0 "$(exit_code cda doctor)"
 rm -f "$CLAUDE_CLI_HOME/settings.json"
 check_true "doctor warns when claude is not on PATH" grep -q '^warn: claude: not on PATH; the terminal login is not verified after a switch' <<< "$(PATH=$noclaude cda doctor)"
 printf '{"claudeAiOauth":{"accessToken":"at-secret-in-file"}}' > "$CLAUDE_CLI_HOME/.credentials.json"
@@ -2407,6 +2409,9 @@ printf '{"oauthAccount":{"accountUuid":"%s"}}' "$(jq -r .account "$p/alpha/meta.
 USER='first last' cda switch alpha --force > /dev/null 2>&1
 check "a user name Claude Code rejects writes the item it reads" at-name "$(kc_get "Claude Code-credentials" claude-code-user | jq -r .claudeAiOauth.accessToken)"
 check "and Desktop still launches with the real user name" 'USER=first last' "$(grep '^USER=' "$tmp/open-env")"
+kc_delete "Claude Code-credentials" claude-code-user
+USER='josé' cda switch alpha --force > /dev/null 2>&1
+check "a non-ASCII user name counts as rejected" at-name "$(kc_get "Claude Code-credentials" claude-code-user | jq -r .claudeAiOauth.accessToken)"
 kc_delete "Claude Code-credentials" claude-code-user
 printf '#!/bin/sh\nexport PATH="%s/bin:$PATH"\necho "open $*" >> "%s/calls"\n' "$tmp" "$tmp" > "$tmp/bin/open"
 cda switch beta --no-relaunch --force > /dev/null 2>&1

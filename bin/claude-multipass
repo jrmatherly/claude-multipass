@@ -176,8 +176,11 @@ llmr_marker="$root/active-llmr"
 cli_service='Claude Code-credentials'
 macos_user=${USER:-$(id -un)}
 # Claude Code's own rule for its Keychain account, so both name the same item.
+# Spelled out because a range can match non-ASCII letters in a UTF-8 locale.
 cli_account=$macos_user
-printf %s "$cli_account" | LC_ALL=C grep -Eq '^[a-zA-Z0-9._-]+$' || cli_account=claude-code-user
+case $cli_account in
+  *[!abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-]*) cli_account=claude-code-user ;;
+esac
 mp_service=claude-multipass
 # A global, set here and not in main: pick calls main again for its switch.
 debug=${CLAUDE_MULTIPASS_DEBUG:+1}
@@ -1545,10 +1548,15 @@ doctor_report() {
   [[ -z $unchecked ]] || echo "warn: profiles: saved tokens not checked without jq"
   [[ -z ${CLAUDE_CONFIG_DIR:-} ]] || echo "warn: CLAUDE_CONFIG_DIR is set; the CLI login is not saved or switched"
   [[ -z ${CLAUDE_SECURESTORAGE_CONFIG_DIR:-} ]] || echo "warn: CLAUDE_SECURESTORAGE_CONFIG_DIR is set; the CLI login is not saved or switched"
-  for var in CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_PROFILE; do
-    [[ -z ${!var:-} ]] || echo "warn: $var is set; it overrides the terminal login"
+  for var in CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY apiKeyHelper CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_PROFILE; do
+    if [[ $var == apiKeyHelper ]]; then
+      if [[ -n $jq_works ]] && jq -e '.apiKeyHelper | type == "string" and length > 0' "$cli_home/settings.json" > /dev/null 2>&1; then
+        echo "warn: apiKeyHelper is set in $cli_home/settings.json; it overrides the terminal login"
+      fi
+    elif [[ -n ${!var:-} ]]; then
+      echo "warn: $var is set; it overrides the terminal login"
+    fi
   done
-  [[ -z $jq_works ]] || ! jq -e '.apiKeyHelper | type == "string" and length > 0' "$cli_home/settings.json" > /dev/null 2>&1 || echo "warn: apiKeyHelper is set in $cli_home/settings.json; it overrides the terminal login"
   command -v claude > /dev/null || echo "warn: claude: not on PATH; the terminal login is not verified after a switch"
   [[ ! -e $cli_home/.credentials.json ]] || echo "warn: credentials file: $cli_home/.credentials.json exists; Claude Code reads it when the Keychain has no item or is locked, and a switch does not move it"
   # A glob, not ls or find, which fail under pipefail when nothing matches.
