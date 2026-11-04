@@ -2386,6 +2386,19 @@ printf '#!/bin/sh\nexport PATH="%s/bin:$PATH"\necho "open $*" >> "%s/calls"\n' "
 printf '#!/bin/sh\ngrep "^beta "\n' > "$tmp/bin/fzf"
 rm -f "$tmp/calls"
 
+#@ account-name needs switch
+# Claude Code answers for "claude-code-user" when USER fails its rule, so that is the item it reads.
+printf '#!/bin/sh\nexport PATH="%s/bin:$PATH"\n/usr/bin/env > "%s/open-env"\n' "$tmp" "$tmp" > "$tmp/bin/open"
+kc_put claude-multipass alpha '{"claudeAiOauth":{"accessToken":"at-name","refreshToken":"rt-name","expiresAt":2}}'
+printf '{"oauthAccount":{"accountUuid":"%s"}}' "$(jq -r .account "$p/alpha/meta.json")" > "$p/alpha/cli.json"
+USER='first last' cda switch alpha --force > /dev/null 2>&1
+check "a user name Claude Code rejects writes the item it reads" at-name "$(kc_get "Claude Code-credentials" claude-code-user | jq -r .claudeAiOauth.accessToken)"
+check "and Desktop still launches with the real user name" 'USER=first last' "$(grep '^USER=' "$tmp/open-env")"
+kc_delete "Claude Code-credentials" claude-code-user
+printf '#!/bin/sh\nexport PATH="%s/bin:$PATH"\necho "open $*" >> "%s/calls"\n' "$tmp" "$tmp" > "$tmp/bin/open"
+cda switch beta --no-relaunch --force > /dev/null 2>&1
+rm -f "$tmp/calls"
+
 #@ migration needs switch
 # the dotfiles-era store moves into the default location once, backups too
 # (XDG_CONFIG_HOME, not HOME: tools on PATH may read their own config from HOME)

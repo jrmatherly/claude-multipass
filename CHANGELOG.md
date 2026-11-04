@@ -4,6 +4,7 @@
 
 - `doctor` now warns when `~/.claude/.credentials.json` exists. Claude Code reads that file when the Keychain has no item or is locked, and a switch does not move it.
 - `doctor` now names every documented login override, not only `ANTHROPIC_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN`: `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`, `CLAUDE_CODE_USE_FOUNDRY`, `ANTHROPIC_AUTH_TOKEN`, `apiKeyHelper` in `settings.json` and `ANTHROPIC_PROFILE`.
+- A user name with a space or another character Claude Code rejects no longer strands the terminal login. The tool now writes the Keychain item Claude Code reads for that name, `claude-code-user`.
 
 ## 0.13.0 (2026-11-03)
 

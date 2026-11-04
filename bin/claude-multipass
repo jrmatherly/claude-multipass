@@ -166,7 +166,7 @@ cookies=$desktop_dir
 [[ -d $desktop_dir/Network ]] && cookies=$desktop_dir/Network
 auth_keys='["oauth:tokenCache","oauth:tokenCacheV2","lastKnownAccountUuid"]'
 # The Claude Code CLI keeps its own login: a login-Keychain item (service
-# "Claude Code-credentials", account the macOS user name) with the OAuth
+# "Claude Code-credentials", account named below) with the OAuth
 # tokens, and the oauthAccount object in ~/.claude.json naming the account
 # and org. A profile's copy of the tokens is a Keychain item under the tool's
 # own service, named after the profile; only the identity goes on disk.
@@ -174,7 +174,10 @@ claude_json="${CLAUDE_CLI_CONFIG:-$HOME/.claude.json}"
 cli_home="${CLAUDE_CLI_HOME:-$HOME/.claude}"
 llmr_marker="$root/active-llmr"
 cli_service='Claude Code-credentials'
-cli_account=${USER:-$(id -un)}
+macos_user=${USER:-$(id -un)}
+# Claude Code's own rule for its Keychain account, so both name the same item.
+cli_account=$macos_user
+printf %s "$cli_account" | LC_ALL=C grep -Eq '^[a-zA-Z0-9._-]+$' || cli_account=claude-code-user
 mp_service=claude-multipass
 # A global, set here and not in main: pick calls main again for its switch.
 debug=${CLAUDE_MULTIPASS_DEBUG:+1}
@@ -1015,11 +1018,11 @@ desktop_launch() {
   dbg "launching Claude"
   # open hands the caller's whole environment to the app, and Desktop to every
   # session it spawns, so launch as the Dock does. env -i drops PATH, so resolve
-  # open first. USER comes from $cli_account (falls back to id -un), because an
+  # open first. USER comes from $macos_user (falls back to id -un), because an
   # unset USER would trip set -u and lose the relaunch.
   local open_bin
   open_bin=$(command -v open) || open_bin=/usr/bin/open
-  env -i HOME="$HOME" USER="$cli_account" "$open_bin" -a Claude
+  env -i HOME="$HOME" USER="$macos_user" "$open_bin" -a Claude
 }
 
 # A profile's LLMR profile name, or nothing for a claude.ai profile.
