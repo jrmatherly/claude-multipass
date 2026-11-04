@@ -300,6 +300,8 @@ printf journal-A > "$d/Cookies-journal"
 jq -n '{numStartups: 3, nested: {a: [1, 2], b: {c: "d"}}, k1: 1, k2: 2, k3: 3, k4: 4, k5: 5, k6: 6, k7: 7, k8: 8, k9: 9, k10: 10, k11: 11, k12: 12, k13: 13, k14: 14, k15: 15, k16: 16, k17: 17, k18: 18,
   oauthAccount: {accountUuid: "aaaaaaaa-1111", emailAddress: "a@example.com", organizationUuid: "org-alpha", organizationRole: "admin"}}' > "$tmp/claude.json"
 live_item='{"claudeAiOauth":{"accessToken":"at-alpha","refreshToken":"rt-alpha","expiresAt":1,"scopes":["a"],"subscriptionType":"max"},"mcpOAuth":{"srv":"shared"},"trustedDeviceToken":"dev-alpha","trustedDeviceEnrolledAfterRefusalAtMs":5}'
+check_true "the leak guard's first string is in the fixture" grep -qF dev-alpha <<< "$live_item"
+check_true "and its second" grep -qF '"srv":"shared"' <<< "$live_item"
 kc_put "Claude Code-credentials" "$USER" "$live_item"
 
 # save captures exactly the three keys and the cookie files
@@ -1141,6 +1143,10 @@ check "usage reports rate limiting" "usagey           rate limited" "$(cda usage
 write_curl
 printf '{"oauth:tokenCacheV2":"djEwbm90IHJlYWxseSBlbmNyeXB0ZWQgYnl0ZXM="}' > "$p/stale/config.json"
 check "usage says when a cache will not decrypt" "stale            cannot decrypt (the profile was saved on another Mac, or the app changed its key)" "$(cda usage stale)"
+jq -n --arg v "$(encrypt '{}')" '{"oauth:tokenCacheV2":$v}' > "$p/stale/config.json"
+check "usage tells a cache with no token for the account from a lapsed one" "stale            no token saved, sign in and re-save" "$(cda usage stale)"
+printf '{}' > "$p/stale/config.json"
+check "usage says the same for a profile with no cache" "stale            no token saved, sign in and re-save" "$(cda usage stale)"
 enc=$(encrypt "${plain//PAST/$past}")
 jq -n --arg v "$enc" '{"oauth:tokenCacheV2":$v}' > "$p/stale/config.json"
 check "usage lists every saved account in order" "stale            token lapsed, use it in Desktop to renew
@@ -1380,6 +1386,12 @@ check "doctor prints nothing from the credentials file" 0 "$(grep -c at-secret-i
 check "a credentials file does not fail doctor" 0 "$(exit_code cda doctor)"
 rm -f "$CLAUDE_CLI_HOME/.credentials.json"
 check "doctor is quiet with no credentials file" 0 "$(cda doctor | grep -c '^warn: credentials file:')"
+mkdir -p "$tmp/other-home"
+: > "$tmp/other-home/.credentials.json"
+check_true "doctor looks in CLAUDE_CONFIG_DIR" grep -qF "warn: credentials file: $tmp/other-home/.credentials.json exists" <<< "$(CLAUDE_CONFIG_DIR=$tmp/other-home cda doctor)"
+check_true "and in CLAUDE_SECURESTORAGE_CONFIG_DIR, which outranks it" grep -qF "warn: credentials file: $tmp/other-home/.credentials.json exists" <<< "$(CLAUDE_CONFIG_DIR=/x CLAUDE_SECURESTORAGE_CONFIG_DIR=$tmp/other-home cda doctor)"
+check "an empty CLAUDE_SECURESTORAGE_CONFIG_DIR selects the default" 0 "$(CLAUDE_CONFIG_DIR=$tmp/other-home CLAUDE_SECURESTORAGE_CONFIG_DIR='' cda doctor | grep -c '^warn: credentials file:')"
+rm -rf "$tmp/other-home"
 mkdir -p "$tmp/has-claude"
 printf '#!/bin/sh\n' > "$tmp/has-claude/claude"
 chmod +x "$tmp/has-claude/claude"
@@ -1468,6 +1480,10 @@ check_doctor_without_jq() {
   check "and calls no profile ok" 0 "$(grep -c '^ok: usagey' <<< "$out")"
   check "and says once that it skipped the check" 1 "$(grep -c '^warn: profiles: saved tokens not checked without jq' <<< "$out")"
 }
+printf '{"apiKeyHelper":"/x/helper"}' > "$CLAUDE_CLI_HOME/settings.json"
+check_true "doctor without jq says it did not check settings.json" grep -qF "warn: apiKeyHelper: $CLAUDE_CLI_HOME/settings.json not checked without jq" <<< "$(PATH=$nojq cda doctor || true)"
+rm -f "$CLAUDE_CLI_HOME/settings.json"
+check "and is quiet with no settings.json" 0 "$( (PATH=$nojq cda doctor || true) | grep -c '^warn: apiKeyHelper')"
 check_doctor_without_jq "$nojq"
 # A jq that runs and fails, as a stale version-manager shim does (exit 1), must
 # not read as signed out either.
