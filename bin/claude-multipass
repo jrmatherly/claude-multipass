@@ -347,8 +347,11 @@ ${bold}Commands${reset}
                        the backups count, whether Desktop runs, which profiles
                        hold no CLI login, whether claude is on PATH, whether
                        ~/.claude/.credentials.json exists, whether
-                       CLAUDE_CONFIG_DIR, CLAUDE_SECURESTORAGE_CONFIG_DIR,
-                       ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN is set.
+                       CLAUDE_CONFIG_DIR or CLAUDE_SECURESTORAGE_CONFIG_DIR is
+                       set, and which login overrides are set, in Claude Code's
+                       order: CLAUDE_CODE_USE_BEDROCK, _VERTEX or _FOUNDRY,
+                       ANTHROPIC_AUTH_TOKEN, ANTHROPIC_API_KEY, apiKeyHelper in
+                       settings.json, CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_PROFILE.
                        One ok:, warn: or fail: line per check; exits 1 on any
                        fail:. Reads no Keychain and no network. Without a
                        working jq it skips the config and token checks and
@@ -1481,7 +1484,7 @@ usage_object() {
 # One line per check, in a fixed order, no Keychain and no network. Exits 1
 # when any fail: line was printed.
 doctor_report() {
-  local status=0 tool mode meta dir name file logins set_aside legacy pid unchecked='' jq_works=''
+  local status=0 tool mode meta dir name file logins set_aside legacy pid var unchecked='' jq_works=''
   jq -n 1 > /dev/null 2>&1 && jq_works=1
   if [[ ! -f $config ]]; then
     echo "fail: config: no $config (open Claude Desktop once first)"
@@ -1539,8 +1542,10 @@ doctor_report() {
   [[ -z $unchecked ]] || echo "warn: profiles: saved tokens not checked without jq"
   [[ -z ${CLAUDE_CONFIG_DIR:-} ]] || echo "warn: CLAUDE_CONFIG_DIR is set; the CLI login is not saved or switched"
   [[ -z ${CLAUDE_SECURESTORAGE_CONFIG_DIR:-} ]] || echo "warn: CLAUDE_SECURESTORAGE_CONFIG_DIR is set; the CLI login is not saved or switched"
-  [[ -z ${ANTHROPIC_API_KEY:-} ]] || echo "warn: ANTHROPIC_API_KEY is set; it overrides the terminal login"
-  [[ -z ${CLAUDE_CODE_OAUTH_TOKEN:-} ]] || echo "warn: CLAUDE_CODE_OAUTH_TOKEN is set; it overrides the terminal login"
+  for var in CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_PROFILE; do
+    [[ -z ${!var:-} ]] || echo "warn: $var is set; it overrides the terminal login"
+  done
+  [[ -z $jq_works ]] || ! jq -e '.apiKeyHelper | type == "string" and length > 0' "$cli_home/settings.json" > /dev/null 2>&1 || echo "warn: apiKeyHelper is set in $cli_home/settings.json; it overrides the terminal login"
   command -v claude > /dev/null || echo "warn: claude: not on PATH; the terminal login is not verified after a switch"
   [[ ! -e $cli_home/.credentials.json ]] || echo "warn: credentials file: $cli_home/.credentials.json exists; Claude Code reads it when the Keychain has no item or is locked, and a switch does not move it"
   # A glob, not ls or find, which fail under pipefail when nothing matches.

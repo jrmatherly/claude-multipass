@@ -1346,8 +1346,17 @@ check "doctor never calls security" "$n_sec" "$(wc -l < "$tmp/security-calls" | 
 check_true "doctor names a profile without a CLI login" grep -q '^warn: legacy: no CLI login saved' <<< "$(cda doctor)"
 check_true "doctor warns on CLAUDE_CONFIG_DIR" grep -q '^warn: CLAUDE_CONFIG_DIR is set; the CLI login is not saved or switched' <<< "$(CLAUDE_CONFIG_DIR=/x cda doctor)"
 check_true "doctor warns on CLAUDE_SECURESTORAGE_CONFIG_DIR" grep -q '^warn: CLAUDE_SECURESTORAGE_CONFIG_DIR is set; the CLI login is not saved or switched' <<< "$(CLAUDE_SECURESTORAGE_CONFIG_DIR=/x cda doctor)"
-check_true "doctor warns on ANTHROPIC_API_KEY" grep -q '^warn: ANTHROPIC_API_KEY is set; it overrides the terminal login' <<< "$(ANTHROPIC_API_KEY=x cda doctor)"
-check_true "doctor warns on CLAUDE_CODE_OAUTH_TOKEN" grep -q '^warn: CLAUDE_CODE_OAUTH_TOKEN is set; it overrides the terminal login' <<< "$(CLAUDE_CODE_OAUTH_TOKEN=x cda doctor)"
+for var in CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_PROFILE; do
+  check_true "doctor warns on $var" grep -q "^warn: $var is set; it overrides the terminal login" <<< "$(env "$var=x" "$script" doctor)"
+done
+printf '{"apiKeyHelper":"/x/helper"}' > "$CLAUDE_CLI_HOME/settings.json"
+check_true "doctor warns on apiKeyHelper" grep -qF "warn: apiKeyHelper is set in $CLAUDE_CLI_HOME/settings.json; it overrides the terminal login" <<< "$(cda doctor)"
+printf '{"apiKeyHelper":""}' > "$CLAUDE_CLI_HOME/settings.json"
+check "an empty apiKeyHelper does not warn" 0 "$(cda doctor | grep -c '^warn: apiKeyHelper')"
+printf 'not json' > "$CLAUDE_CLI_HOME/settings.json"
+check "an unreadable settings.json does not warn" 0 "$(cda doctor | grep -c '^warn: apiKeyHelper')"
+check "or fail doctor" 0 "$(exit_code cda doctor)"
+rm -f "$CLAUDE_CLI_HOME/settings.json"
 check_true "doctor warns when claude is not on PATH" grep -q '^warn: claude: not on PATH; the terminal login is not verified after a switch' <<< "$(PATH=$noclaude cda doctor)"
 printf '{"claudeAiOauth":{"accessToken":"at-secret-in-file"}}' > "$CLAUDE_CLI_HOME/.credentials.json"
 out=$(cda doctor)
