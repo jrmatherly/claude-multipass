@@ -32,7 +32,19 @@ script="$(cd "$(dirname "$0")/.." && pwd -P)/bin/claude-multipass"
 tmp=$(mktemp -d)
 # A failed Hindsight case must not leave a stopped sleep behind for good.
 hs_pids=''
-trap '[[ -z $hs_pids ]] || kill -9 $hs_pids 2> /dev/null || true; rm -rf "$tmp"' EXIT
+creds="${SELF_CHECK_REAL_HOME:-$HOME}/.claude/.credentials.json"
+self_check_exit() {
+  local rc=$?
+  [[ -z $hs_pids ]] || kill -9 $hs_pids 2> /dev/null || true
+  rm -rf "$tmp"
+  # Those strings exist only in fixtures, so a real login never matches. An absolute path, since the fixture stubs tools.
+  if /usr/bin/grep -qE 'dev-alpha|"srv": ?"shared"' "$creds" 2> /dev/null; then
+    echo "FAILED: $creds holds this self-check's fixture. A real claude reached the security stub. Remove the file." >&2
+    exit 1
+  fi
+  exit "$rc"
+}
+trap self_check_exit EXIT
 
 export CLAUDE_DESKTOP_DIR="$tmp/desktop" CLAUDE_MULTIPASS_DIR="$tmp/multipass"
 export TERM=dumb
@@ -260,6 +272,7 @@ fi
 
 #@ setup
 check_true "the no-claude PATH has no claude" test -z "$(PATH=$noclaude command -v claude || true)"
+check "security resolves to the stub" "$tmp/bin/security" "$(command -v security)"
 
 kc_put t u 'a "b" c'"'"'d'
 check "security stub decodes a hex value" 'a "b" c'"'"'d' "$(kc_get t u)"
