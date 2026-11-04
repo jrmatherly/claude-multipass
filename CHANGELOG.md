@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.14.0 (2026-11-03)
 
 - `doctor` now warns when `~/.claude/.credentials.json` exists. Claude Code reads that file when the Keychain has no item or is locked, and a switch does not move it.
 - `doctor` now names every documented login override, not only `ANTHROPIC_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN`. `--help` lists them.
