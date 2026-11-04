@@ -15,13 +15,14 @@
 Labels: **M** measured on this Mac on 2026-11-03, **B** read in the Claude Code 2.1.318 binary, **O** Claude Code's docs, **S** read in this repo, **I** inferred.
 
 1. **M.** `~/.claude/.credentials.json` held the self-check's fixture. Its `mcpOAuth`, `trustedDeviceToken`, `trustedDeviceEnrolledAfterRefusalAtMs`, `scopes` and `subscriptionType` all equalled `live_item` at `test/claude-multipass.sh:289`, and both tokens were empty. It was dated Oct 29 08:48. Jason removed it on 2026-11-03 and `claude auth status` still answered `loggedIn: true`.
-2. **I.** How it got there is not established. The likeliest route is a real `claude` that found the stubbed `security`, cleared the fixture's dead login, and fell back to the file when the stub refused the write. The file's date did not move through later self-check runs, so it does not recur on every run. The `CLAUDE_MULTIPASS_BIN` wrapper from `190bcfe` closed one route on Nov 3, but no Homebrew `claude` exists today, so that route is not shown to be the cause.
-3. **S.** The tool never looks at that file (`grep credentials.json bin/claude-multipass` finds only comments). Claude Code reads the Keychain first and the file when the Keychain has no item (`.claude/rules/desktop-internals.md`). A switch moves only the Keychain item, so a real login in the file stays behind.
-4. **S.** `access_token` (`bin/claude-multipass:1306`) prints nothing when the profile's access token has passed `expiresAt`, and `usage_fetch` (`:1418`) then says `token expired, sign in and re-save`. A 401 (`:1431`) says the same. The first case is a lapsed access token beside a refresh token that may still work, so the advice can cost an email code for nothing.
+2. **I.** How it got there is not established. The likeliest route is a real `claude` that found the stubbed `security`, cleared the fixture's dead login, and fell back to the file when the stub refused the write. Claude Code's code allows that route (finding 3), but none of the 8 transcripts in this project from that hour mention the file, so what ran stays unknown. The file's date did not move through later self-check runs, so it does not recur on every run. The `CLAUDE_MULTIPASS_BIN` wrapper from `190bcfe` closed one route on Nov 3, but no Homebrew `claude` exists today, so that route is not shown to be the cause.
+3. **B, S.** The tool never looks at that file (`grep -c 'credentials\.json' bin/claude-multipass` prints 0). Claude Code's store (function `O`, `keychain-with-plaintext-fallback` in 2.1.318) reads the Keychain first and the file when that read returns nothing, and a `security` exit 36, a locked keychain, also returns nothing by default. It writes the file only when the Keychain write fails for a non-transient reason, and deletes the file only after a good Keychain write that found no item before it. So a stray file outlives every ordinary token refresh, which is why the fixture lasted from Oct 29 to Nov 3. A switch moves only the Keychain item, so a real login in the file stays behind.
+4. **S.** `access_token` (`bin/claude-multipass:1306`) prints nothing when the profile's access token has passed `expiresAt`, and `usage_fetch` (`:1418`) then says `token expired, sign in and re-save`. A 401 (`:1431`) says the same. The first case is a lapsed access token beside a refresh token that may still work, so the advice can cost an email code for nothing. **M:** this should be rare. Each account's `oauth:tokenCacheV2` hash stayed the same across `backups/login-*` and its saved profile, from Oct 28 to Nov 3 for spoons, Oct 29 to Nov 2 for matherly-gmail, and Nov 1 to Nov 3 for matherly. The message change is still worth its few lines, but no one has seen the case on this Mac.
 5. **B.** Claude Code's Keychain account is `process.env.USER || os.userInfo().username`, replaced by `claude-code-user` when it fails `/^[a-zA-Z0-9._-]+$/` or when reading it throws (function `R0` in 2.1.318). The tool uses `${USER:-$(id -un)}` (`:177`) with no such rule.
 6. **S.** `desktop_launch` passes `USER="$cli_account"` to `open` (`:1018`), so `cli_account` cannot simply take the Claude Code rule.
 7. **O.** Claude Code's authentication precedence is `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX` or `CLAUDE_CODE_USE_FOUNDRY`, then `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, `apiKeyHelper`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_PROFILE` when named, then `/login`. `doctor` checks only `ANTHROPIC_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN` (`:1541-1542`).
 8. **S.** `SELF_CHECK_DRY_RUN=1 bash test/claude-multipass.sh runlock` prints `sections: setup runlock`. A filtered run skips `#@ done` and exits right after its sections, so a check placed there would not run on a filtered run.
+9. **S.** `CHANGELOG.md` has no `## Unreleased` heading today. Its first section is `## 0.13.0 (2026-11-03)`, and `/release` turns `## Unreleased` into the version heading.
 
 Decisions, with reasons:
 
@@ -30,25 +31,27 @@ Decisions, with reasons:
 - Bedrock's siblings seen in the binary (`CLAUDE_CODE_USE_ANTHROPIC_AWS`, `CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD`, `CLAUDE_CODE_USE_MANTLE`, `CLAUDE_CODE_USE_GATEWAY`) stay out, because the precedence doc does not list them. Managed and project-level `apiKeyHelper` stay out too: one needs root-owned paths and the other depends on the working directory.
 - The account name test runs under `LC_ALL=C`, because the self-check and many shells set a UTF-8 locale, where a bash range can match non-ASCII letters and Claude Code's JavaScript range does not.
 - A `CLAUDE_CODE_USE_*` variable warns on any non-empty value, as the existing checks do, so `=0` also warns. Claude Code's own truthiness test was not read, and a false warning here costs one line.
-- The new messages can wrap where the old one fit. Task 4 renders them to check.
+- A user whose name fails the rule keeps an orphan item from earlier versions, under the raw name, which nothing reads. The tool leaves it, since it cannot tell whose it is and it holds no live login once a switch writes the right one.
+- The new lapsed message is 6 characters longer than the old one. It needs no render: no shot fixture holds a usage error, and both places that draw it, `AccountPanel.swift:72` and `PopoverView.swift:115`, are `Text` with no line limit.
+- `usage` keeps reading the signed-in account's saved copy, not `config.json`. A prototype that read the live login passed its own case and broke the Raycast fixture at `test/claude-multipass.sh:1401`, and finding 4's hashes show the saved copy not going stale, so the change has no measured benefit.
 
-Corrected by the `interrogate` review on 2026-11-03 (Opus and Sonnet; the Fable seat hit its usage limit). The corrected Task 3 section and the Task 5 guard were run on a scratch copy: a full self-check passed with 1034 `ok` lines, and the guard failed on a fixture file and stayed quiet on a real-looking one.
+Corrected by the `interrogate` review on 2026-11-03 (Opus and Sonnet; the Fable seat hit its usage limit), then by a second pass the same day. On a scratch copy, Tasks 1 to 3, Task 4's messages and the Task 5 guard as written here passed a full self-check with 1034 `ok` lines and ShellCheck. Task 5's Steps 3 and 4 printed the outcomes they expect. The Swift suite and the doc edits have not been run.
 
 ## Global Constraints
 
 - Follow `CLAUDE.md` Custom Notes: a worktree and branch for this change, then `pnpm install` in it. This PR goes against `main`, and merging is Jason's call.
 - `doctor` makes no Keychain and no network call, and prints no contents of the credentials file.
 - bash 3.2: no `<<<` or heredoc carrying a secret, `/usr/bin/stat -f`, indirect expansion as `${!name:-}` so `set -u` holds.
-- `CHANGELOG.md` gets a user-visible line under `## Unreleased` for Tasks 1, 2, 3 and 4. Task 5 is tooling and adds none.
+- `CHANGELOG.md` gets a user-visible line under `## Unreleased` for Tasks 1, 2, 3 and 4. Task 1 creates that heading above `## 0.13.0`. Task 5 is tooling and adds none.
 - Prose has no em-dashes, sentence-case headings and straight quotes. Run prettier in a separate call before committing, since the commit gate checks the tree before the command runs.
-- Before each commit run `/simplify` and `/code-review` on that commit's diff, per J mode.
+- Before each commit run `/simplify` and `/code-review` on that commit's diff, and `/no-comments` before review, per J mode.
 
 ## Review Focus
 
 1. A credentials file with a real token in it: `doctor` must warn and print none of its contents. Pinned in Task 1.
 2. A `USER` that fails the rule, on a switch: the Keychain write goes to `claude-code-user` while Desktop still launches with the real `USER`. Pinned in Task 3.
 3. A `settings.json` that `jq` cannot read, or `apiKeyHelper` set to an empty string: no warning and no crash under `set -e`. Pinned in Task 2.
-4. The current account with a lapsed token, Desktop closed overnight: the message must still make sense when there is nothing to switch to. Its wording, "use it in Desktop", covers that. No fixture pins it, because the row's text does not depend on which account is current.
+4. The current account with a lapsed token: the message must still make sense when there is nothing to switch to. Its wording, "use it in Desktop", covers that. No fixture pins it, because the row's text does not depend on which account is current.
 5. A real login in the credentials file during a self-check: the gate must not fail or read it out. A self-check that fails an assertion must keep its message and exit code. Both pinned in Task 5.
 
 ---
@@ -65,14 +68,14 @@ Corrected by the `interrogate` review on 2026-11-03 (Opus and Sonnet; the Fable 
 **Interfaces:**
 
 - Consumes: `cli_home`, which the fixture points at `$tmp/claude-home` through `CLAUDE_CLI_HOME`.
-- Produces: the line `warn: credentials file: <path> exists; Claude Code reads it when the Keychain has no item, and a switch does not move it`.
+- Produces: the line `warn: credentials file: <path> exists; Claude Code reads it when the Keychain has no item or is locked, and a switch does not move it`.
 
 - [ ] **Step 1: Write the failing tests**
 
 ```bash
 printf '{"claudeAiOauth":{"accessToken":"at-secret-in-file"}}' > "$CLAUDE_CLI_HOME/.credentials.json"
 out=$(cda doctor)
-check_true "doctor warns about the credentials file" grep -qF "warn: credentials file: $CLAUDE_CLI_HOME/.credentials.json exists; Claude Code reads it when the Keychain has no item, and a switch does not move it" <<< "$out"
+check_true "doctor warns about the credentials file" grep -qF "warn: credentials file: $CLAUDE_CLI_HOME/.credentials.json exists; Claude Code reads it when the Keychain has no item or is locked, and a switch does not move it" <<< "$out"
 check "doctor prints nothing from the credentials file" 0 "$(grep -c at-secret-in-file <<< "$out")"
 check "a credentials file does not fail doctor" 0 "$(exit_code cda doctor)"
 rm -f "$CLAUDE_CLI_HOME/.credentials.json"
@@ -95,7 +98,7 @@ In the `docs/claude-multipass.md` troubleshooting list, add a bullet with this c
 security find-generic-password -s "Claude Code-credentials" > /dev/null && echo "Keychain item exists"
 ```
 
-When the item exists, Claude Code does not read the file while the Keychain answers, so the file is a leftover and can be moved aside. When it does not, the file may hold the only login, so run `claude auth login` first. Add finding 1 and the existence check to `.claude/rules/desktop-internals.md`, labelled M.
+When the item exists, Claude Code does not read the file while the Keychain is unlocked and answers, so the file is a leftover and can be moved aside. When it does not, the file may hold the only login, so run `claude auth login` first. Add finding 1 (M) and finding 3's read and write rules (M, in the 2.1.318 binary) to `.claude/rules/desktop-internals.md`, in the bullet that says the CLI reads the Keychain before the file.
 
 - [ ] **Step 5: Run the section and confirm it passes**
 
@@ -240,20 +243,16 @@ Split `docs/claude-multipass.md:140` into one bullet per message. The lapsed one
 
 Run: `bash test/claude-multipass.sh usage && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --package-path app` Expected: `Filtered claude-multipass checks passed`, then all Swift tests pass.
 
-- [ ] **Step 5: Render the popover**
-
-Run: `pnpm shots`, then read the account panel PNG from `.shots/`, zoomed with `magick <png> -scale 400% <out> 2>/dev/null`. Expected: the longer message wraps inside the panel, in light and dark. If no fixture renders an error row, say so in the PR instead of adding one.
-
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add bin/claude-multipass test/claude-multipass.sh docs/claude-multipass.md CHANGELOG.md app/Tests/MultipassCoreTests/AppStateTests.swift app/Tests/MultipassCoreTests/ModelsTests.swift
 git commit -m "Tell a lapsed usage token from a refused one"
 ```
 
-- [ ] **Step 7: Note the real-Mac check for Jason**
+- [ ] **Step 6: Note the real-Mac check for Jason**
 
-Add to the PR's test plan: "When an idle account shows `token lapsed`, switch to it and confirm its figures return with no email code." This proves the new message's claim, which no fixture can. Agents do not run it, because `switch` and `usage` are on the ask list.
+Add to the PR's test plan: "If an account ever shows `token lapsed`, switch to it and confirm its figures return with no email code." This proves the new message's claim, which no fixture can, and finding 4 says it may be a long wait. Agents do not run it, because `switch` and `usage` are on the ask list.
 
 ### Task 5: Fail the self-check when the fixture reaches the real credentials file
 
@@ -274,7 +273,24 @@ check "security resolves to the stub" "$tmp/bin/security" "$(command -v security
 
 - [ ] **Step 2: Add the guard to the `EXIT` trap**
 
-Before the `trap`, set `creds="${SELF_CHECK_REAL_HOME:-$HOME}/.claude/.credentials.json"`. In the trap, capture `$?` first and do the existing cleanup. Then, if `/usr/bin/grep -qE 'dev-alpha|"srv": ?"shared"'` matches `$creds`, print `FAILED: <path> holds this self-check's fixture. A real claude reached the security stub. Remove the file.` to stderr and exit 1. Otherwise exit with the captured status. Those two strings appear only in fixtures, so a real login never matches, and `grep -q` prints nothing from the file. A leftover from an earlier run fails every run until it is removed, which is what we want. Use the absolute path because the fixture may stub tools.
+Replace the one-line `trap` with a function, since the message's apostrophe does not survive a single-quoted trap string:
+
+```bash
+creds="${SELF_CHECK_REAL_HOME:-$HOME}/.claude/.credentials.json"
+self_check_exit() {
+  local rc=$?
+  [[ -z $hs_pids ]] || kill -9 $hs_pids 2> /dev/null || true
+  rm -rf "$tmp"
+  if /usr/bin/grep -qE 'dev-alpha|"srv": ?"shared"' "$creds" 2> /dev/null; then
+    echo "FAILED: $creds holds this self-check's fixture. A real claude reached the security stub. Remove the file." >&2
+    exit 1
+  fi
+  exit "$rc"
+}
+trap self_check_exit EXIT
+```
+
+Those two strings appear only in fixtures, so a real login never matches, and `grep -q` prints nothing from the file. A leftover from an earlier run fails every run until it is removed, which is what we want. The path is absolute because the fixture may stub tools.
 
 - [ ] **Step 3: Prove all four outcomes against a scratch home**
 
