@@ -166,7 +166,7 @@ cookies=$desktop_dir
 [[ -d $desktop_dir/Network ]] && cookies=$desktop_dir/Network
 auth_keys='["oauth:tokenCache","oauth:tokenCacheV2","lastKnownAccountUuid"]'
 # The Claude Code CLI keeps its own login: a login-Keychain item (service
-# "Claude Code-credentials", account the macOS user name) with the OAuth
+# "Claude Code-credentials", account named below) with the OAuth
 # tokens, and the oauthAccount object in ~/.claude.json naming the account
 # and org. A profile's copy of the tokens is a Keychain item under the tool's
 # own service, named after the profile; only the identity goes on disk.
@@ -174,7 +174,13 @@ claude_json="${CLAUDE_CLI_CONFIG:-$HOME/.claude.json}"
 cli_home="${CLAUDE_CLI_HOME:-$HOME/.claude}"
 llmr_marker="$root/active-llmr"
 cli_service='Claude Code-credentials'
-cli_account=${USER:-$(id -un)}
+macos_user=${USER:-$(id -un)}
+# Claude Code's own rule for its Keychain account, so both name the same item.
+# Spelled out because a range can match non-ASCII letters in a UTF-8 locale.
+cli_account=$macos_user
+case $cli_account in
+  *[!abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-]*) cli_account=claude-code-user ;;
+esac
 mp_service=claude-multipass
 # A global, set here and not in main: pick calls main again for its switch.
 debug=${CLAUDE_MULTIPASS_DEBUG:+1}
@@ -346,8 +352,12 @@ ${bold}Commands${reset}
                        PATH, the store and profile modes, each profile's token,
                        the backups count, whether Desktop runs, which profiles
                        hold no CLI login, whether claude is on PATH, whether
-                       CLAUDE_CONFIG_DIR, CLAUDE_SECURESTORAGE_CONFIG_DIR,
-                       ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN is set.
+                       ~/.claude/.credentials.json exists, whether
+                       CLAUDE_CONFIG_DIR or CLAUDE_SECURESTORAGE_CONFIG_DIR is
+                       set, and which login overrides are set, in Claude Code's
+                       order: CLAUDE_CODE_USE_BEDROCK, _VERTEX or _FOUNDRY,
+                       ANTHROPIC_AUTH_TOKEN, ANTHROPIC_API_KEY, apiKeyHelper in
+                       settings.json, CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_PROFILE.
                        One ok:, warn: or fail: line per check; exits 1 on any
                        fail:. Reads no Keychain and no network. Without a
                        working jq it skips the config and token checks and
@@ -1011,11 +1021,11 @@ desktop_launch() {
   dbg "launching Claude"
   # open hands the caller's whole environment to the app, and Desktop to every
   # session it spawns, so launch as the Dock does. env -i drops PATH, so resolve
-  # open first. USER comes from $cli_account (falls back to id -un), because an
+  # open first. USER comes from $macos_user (falls back to id -un), because an
   # unset USER would trip set -u and lose the relaunch.
   local open_bin
   open_bin=$(command -v open) || open_bin=/usr/bin/open
-  env -i HOME="$HOME" USER="$cli_account" "$open_bin" -a Claude
+  env -i HOME="$HOME" USER="$macos_user" "$open_bin" -a Claude
 }
 
 # A profile's LLMR profile name, or nothing for a claude.ai profile.
@@ -1304,16 +1314,25 @@ safe_storage_key() {
 # Prints the account's newest unexpired profile-scoped access token from a
 # config.json; "cannot decrypt" when the cache does not open with this key.
 access_token() {
-  local key=$1 cfg=$2 account=$3 plain
-  plain=$(jq -r '.["oauth:tokenCacheV2"] // empty' "$cfg" | base64 -d | tail -c +4 \
+  local key=$1 cfg=$2 account=$3 cache plain
+  cache=$(jq -r '.["oauth:tokenCacheV2"] // empty' "$cfg") || {
+    echo "cannot decrypt"
+    return 0
+  }
+  [[ -n $cache ]] || {
+    echo "no token"
+    return 0
+  }
+  plain=$(printf '%s' "$cache" | base64 -d | tail -c +4 \
     | openssl enc -d -aes-128-cbc -K "$key" -iv 20202020202020202020202020202020 2> /dev/null) \
     || {
       echo "cannot decrypt"
       return 0
     }
   printf '%s' "$plain" | jq -r --arg a "acct:$account|" --argjson now "$(date +%s)000" '
-      [to_entries[] | select(.key | startswith($a) and contains("user:profile"))
-       | select(.value.expiresAt > $now)] | max_by(.value.expiresAt) | .value.token // empty'
+      [to_entries[] | select(.key | startswith($a) and contains("user:profile"))]
+      | if length == 0 then "no token"
+        else map(select(.value.expiresAt > $now)) | max_by(.value.expiresAt) | .value.token // empty end'
 }
 
 # Shared by both formatters, so one odd field never sinks the report.
@@ -1415,7 +1434,9 @@ usage_fetch() {
   local key=$1 cfg=$2 account=$3 token code body plan msg=''
   token=$(access_token "$key" "$cfg" "$account")
   if [[ -z $token ]]; then
-    msg='token expired, sign in and re-save'
+    msg='token lapsed, use it in Desktop to renew'
+  elif [[ $token == "no token" ]]; then
+    msg='no token saved, sign in and re-save'
   elif [[ $token == "cannot decrypt" ]]; then
     msg='cannot decrypt (the profile was saved on another Mac, or the app changed its key)'
   # The bearer header goes in on stdin so the token never sits in argv.
@@ -1428,7 +1449,7 @@ usage_fetch() {
     body=${body%$'\n'*}
     case $code in
       200) ;;
-      401) msg='token expired, sign in and re-save' ;;
+      401) msg='token refused, sign in and re-save' ;;
       429) msg='rate limited' ;;
       *) msg="unavailable (HTTP $code)" ;;
     esac
@@ -1480,7 +1501,7 @@ usage_object() {
 # One line per check, in a fixed order, no Keychain and no network. Exits 1
 # when any fail: line was printed.
 doctor_report() {
-  local status=0 tool mode meta dir name file logins set_aside legacy pid unchecked='' jq_works=''
+  local status=0 tool mode meta dir name file logins set_aside legacy pid var creds_home unchecked='' jq_works=''
   jq -n 1 > /dev/null 2>&1 && jq_works=1
   if [[ ! -f $config ]]; then
     echo "fail: config: no $config (open Claude Desktop once first)"
@@ -1538,9 +1559,22 @@ doctor_report() {
   [[ -z $unchecked ]] || echo "warn: profiles: saved tokens not checked without jq"
   [[ -z ${CLAUDE_CONFIG_DIR:-} ]] || echo "warn: CLAUDE_CONFIG_DIR is set; the CLI login is not saved or switched"
   [[ -z ${CLAUDE_SECURESTORAGE_CONFIG_DIR:-} ]] || echo "warn: CLAUDE_SECURESTORAGE_CONFIG_DIR is set; the CLI login is not saved or switched"
-  [[ -z ${ANTHROPIC_API_KEY:-} ]] || echo "warn: ANTHROPIC_API_KEY is set; it overrides the terminal login"
-  [[ -z ${CLAUDE_CODE_OAUTH_TOKEN:-} ]] || echo "warn: CLAUDE_CODE_OAUTH_TOKEN is set; it overrides the terminal login"
+  for var in CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY apiKeyHelper CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_PROFILE; do
+    if [[ $var == apiKeyHelper ]]; then
+      if [[ -z $jq_works ]]; then
+        [[ ! -e $cli_home/settings.json ]] || echo "warn: apiKeyHelper: $cli_home/settings.json not checked without jq"
+      elif jq -e '.apiKeyHelper | type == "string" and length > 0' "$cli_home/settings.json" > /dev/null 2>&1; then
+        echo "warn: apiKeyHelper is set in $cli_home/settings.json; it overrides the terminal login"
+      fi
+    elif [[ -n ${!var:-} ]]; then
+      echo "warn: $var is set; it overrides the terminal login"
+    fi
+  done
   command -v claude > /dev/null || echo "warn: claude: not on PATH; the terminal login is not verified after a switch"
+  # Defined and empty, the storage variable selects the default, as Claude Code does.
+  creds_home=${CLAUDE_SECURESTORAGE_CONFIG_DIR-${CLAUDE_CONFIG_DIR:-}}
+  creds_home=${creds_home:-$cli_home}
+  [[ ! -e $creds_home/.credentials.json ]] || echo "warn: credentials file: $creds_home/.credentials.json exists; Claude Code reads it when the Keychain has no item or is locked, and a switch does not move it"
   # A glob, not ls or find, which fail under pipefail when nothing matches.
   logins=("$backups"/login-*/)
   [[ -d ${logins[0]} ]] || logins=()

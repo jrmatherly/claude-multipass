@@ -88,13 +88,13 @@ import Testing
 }
 
 @Test func decodesUsageEntries() throws {
-  let json = #"{"profiles":[{"name":"usagey","fiveHour":{"utilization":42.6,"resetsAt":"2026-10-23T19:45:00Z"},"sevenDay":{"utilization":18}},{"name":"stale","error":"token expired, sign in and re-save"}]}"#
+  let json = #"{"profiles":[{"name":"usagey","fiveHour":{"utilization":42.6,"resetsAt":"2026-10-23T19:45:00Z"},"sevenDay":{"utilization":18}},{"name":"stale","error":"token lapsed, use it in Desktop to renew"}]}"#
   let r = try MultipassJSON.decoder.decode(UsageReport.self, from: Data(json.utf8))
   #expect(r.profiles[0].fiveHour?.utilization == 42.6)
   #expect(r.profiles[0].fiveHour?.resetsAt == Date(timeIntervalSince1970: 1_792_784_700))
   #expect(r.profiles[0].sevenDay?.resetsAt == nil)
   #expect(r.profiles[0].id == "usagey")
-  #expect(r.profiles[1].error == "token expired, sign in and re-save")
+  #expect(r.profiles[1].error == "token lapsed, use it in Desktop to renew")
   #expect(r.profiles[1].fiveHour == nil)
 }
 

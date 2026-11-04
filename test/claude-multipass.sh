@@ -32,7 +32,19 @@ script="$(cd "$(dirname "$0")/.." && pwd -P)/bin/claude-multipass"
 tmp=$(mktemp -d)
 # A failed Hindsight case must not leave a stopped sleep behind for good.
 hs_pids=''
-trap '[[ -z $hs_pids ]] || kill -9 $hs_pids 2> /dev/null || true; rm -rf "$tmp"' EXIT
+creds="${SELF_CHECK_REAL_HOME:-$HOME}/.claude/.credentials.json"
+self_check_exit() {
+  local rc=$?
+  [[ -z $hs_pids ]] || kill -9 $hs_pids 2> /dev/null || true
+  rm -rf "$tmp"
+  # These two strings appear only in this file's fixtures, so a real login never matches. /usr/bin/grep because the script replaces PATH with stubs.
+  if /usr/bin/grep -qE 'dev-alpha|"srv": ?"shared"' "$creds" 2> /dev/null; then
+    echo "FAILED: $creds holds this self-check's fixture. A real claude reached the security stub. Remove the file." >&2
+    exit 1
+  fi
+  exit "$rc"
+}
+trap self_check_exit EXIT
 
 export CLAUDE_DESKTOP_DIR="$tmp/desktop" CLAUDE_MULTIPASS_DIR="$tmp/multipass"
 export TERM=dumb
@@ -260,6 +272,7 @@ fi
 
 #@ setup
 check_true "the no-claude PATH has no claude" test -z "$(PATH=$noclaude command -v claude || true)"
+check "security resolves to the stub" "$tmp/bin/security" "$(command -v security)"
 
 kc_put t u 'a "b" c'"'"'d'
 check "security stub decodes a hex value" 'a "b" c'"'"'d' "$(kc_get t u)"
@@ -287,6 +300,8 @@ printf journal-A > "$d/Cookies-journal"
 jq -n '{numStartups: 3, nested: {a: [1, 2], b: {c: "d"}}, k1: 1, k2: 2, k3: 3, k4: 4, k5: 5, k6: 6, k7: 7, k8: 8, k9: 9, k10: 10, k11: 11, k12: 12, k13: 13, k14: 14, k15: 15, k16: 16, k17: 17, k18: 18,
   oauthAccount: {accountUuid: "aaaaaaaa-1111", emailAddress: "a@example.com", organizationUuid: "org-alpha", organizationRole: "admin"}}' > "$tmp/claude.json"
 live_item='{"claudeAiOauth":{"accessToken":"at-alpha","refreshToken":"rt-alpha","expiresAt":1,"scopes":["a"],"subscriptionType":"max"},"mcpOAuth":{"srv":"shared"},"trustedDeviceToken":"dev-alpha","trustedDeviceEnrolledAfterRefusalAtMs":5}'
+check_true "the leak guard's first string is in the fixture" grep -qF dev-alpha <<< "$live_item"
+check_true "and its second" grep -qF '"srv":"shared"' <<< "$live_item"
 kc_put "Claude Code-credentials" "$USER" "$live_item"
 
 # save captures exactly the three keys and the cookie files
@@ -1117,20 +1132,24 @@ check_true "usage reads its config from stdin" grep -q -- ' -K - ' "$tmp/curl-ar
 check_true "usage sends the beta header and the endpoint" grep -q 'anthropic-beta: oauth-2025-04-20 https://api.anthropic.com/api/oauth/usage' "$tmp/curl-args"
 check_true "usage passes the bearer token on stdin, not argv" grep -qx 'header = "Authorization: Bearer tok-u"' "$tmp/curl-args"
 check "usage never puts the token on a command line" 0 "$(grep -c 'curl .*tok-u' "$tmp/curl-args")"
-check "usage reports an expired token" "stale            token expired, sign in and re-save" "$(cda usage stale)"
+check "usage reports a lapsed token" "stale            token lapsed, use it in Desktop to renew" "$(cda usage stale)"
 check "usage for an unknown name fails loudly" 1 "$(exit_code cda usage nope)"
 cp -R "$p/usagey" "$tmp/outside"
 check_true "usage rejects a path as a name" grep -q 'Give a name' <<< "$(cda usage ../outside 2>&1)"
 printf '#!/bin/sh\ncat > /dev/null; printf "{}\\n401"\n' > "$tmp/bin/curl"
-check "usage reports a rejected token" "usagey           token expired, sign in and re-save" "$(cda usage usagey)"
+check "usage reports a refused token" "usagey           token refused, sign in and re-save" "$(cda usage usagey)"
 printf '#!/bin/sh\ncat > /dev/null; printf "{}\\n429"\n' > "$tmp/bin/curl"
 check "usage reports rate limiting" "usagey           rate limited" "$(cda usage usagey)"
 write_curl
 printf '{"oauth:tokenCacheV2":"djEwbm90IHJlYWxseSBlbmNyeXB0ZWQgYnl0ZXM="}' > "$p/stale/config.json"
 check "usage says when a cache will not decrypt" "stale            cannot decrypt (the profile was saved on another Mac, or the app changed its key)" "$(cda usage stale)"
+jq -n --arg v "$(encrypt '{}')" '{"oauth:tokenCacheV2":$v}' > "$p/stale/config.json"
+check "usage tells a cache with no token for the account from a lapsed one" "stale            no token saved, sign in and re-save" "$(cda usage stale)"
+printf '{}' > "$p/stale/config.json"
+check "usage says the same for a profile with no cache" "stale            no token saved, sign in and re-save" "$(cda usage stale)"
 enc=$(encrypt "${plain//PAST/$past}")
 jq -n --arg v "$enc" '{"oauth:tokenCacheV2":$v}' > "$p/stale/config.json"
-check "usage lists every saved account in order" "stale            token expired, sign in and re-save
+check "usage lists every saved account in order" "stale            token lapsed, use it in Desktop to renew
 usagey           $expected" "$(cda usage | grep -E '^(stale|usagey) ')"
 check "usage never prints a token" 0 "$(cda usage | grep -c 'tok-u')"
 out=$(cda usage --json)
@@ -1138,7 +1157,7 @@ check "usage --json good entry" usagey "$(jq -r '.profiles[] | select(.fiveHour)
 check "usage --json 5h utilization" 42.6 "$(jq -r '.profiles[] | select(.name=="usagey").fiveHour.utilization' <<< "$out")"
 check "usage --json normalises resetsAt" 2026-10-23T19:45:00Z "$(jq -r '.profiles[] | select(.name=="usagey").fiveHour.resetsAt' <<< "$out")"
 check "usage --json 7d resetsAt" 2026-10-27T13:00:00Z "$(jq -r '.profiles[] | select(.name=="usagey").sevenDay.resetsAt' <<< "$out")"
-check "usage --json error entry" "token expired, sign in and re-save" "$(jq -r '.profiles[] | select(.name=="stale").error' <<< "$out")"
+check "usage --json error entry" "token lapsed, use it in Desktop to renew" "$(jq -r '.profiles[] | select(.name=="stale").error' <<< "$out")"
 check "usage --json never puts the token on a command line" 0 "$(grep -c 'curl .*tok-u' "$tmp/curl-args")"
 check "usage --json never prints a token" 0 "$(grep -c tok-u <<< "$out")"
 cp "$tmp/usage.json" "$tmp/usage-full.json"
@@ -1346,9 +1365,33 @@ check "doctor never calls security" "$n_sec" "$(wc -l < "$tmp/security-calls" | 
 check_true "doctor names a profile without a CLI login" grep -q '^warn: legacy: no CLI login saved' <<< "$(cda doctor)"
 check_true "doctor warns on CLAUDE_CONFIG_DIR" grep -q '^warn: CLAUDE_CONFIG_DIR is set; the CLI login is not saved or switched' <<< "$(CLAUDE_CONFIG_DIR=/x cda doctor)"
 check_true "doctor warns on CLAUDE_SECURESTORAGE_CONFIG_DIR" grep -q '^warn: CLAUDE_SECURESTORAGE_CONFIG_DIR is set; the CLI login is not saved or switched' <<< "$(CLAUDE_SECURESTORAGE_CONFIG_DIR=/x cda doctor)"
-check_true "doctor warns on ANTHROPIC_API_KEY" grep -q '^warn: ANTHROPIC_API_KEY is set; it overrides the terminal login' <<< "$(ANTHROPIC_API_KEY=x cda doctor)"
-check_true "doctor warns on CLAUDE_CODE_OAUTH_TOKEN" grep -q '^warn: CLAUDE_CODE_OAUTH_TOKEN is set; it overrides the terminal login' <<< "$(CLAUDE_CODE_OAUTH_TOKEN=x cda doctor)"
+out=$(CLAUDE_CODE_USE_BEDROCK=x CLAUDE_CODE_USE_VERTEX=x CLAUDE_CODE_USE_FOUNDRY=x ANTHROPIC_AUTH_TOKEN=x ANTHROPIC_API_KEY=x CLAUDE_CODE_OAUTH_TOKEN=x ANTHROPIC_PROFILE=x cda doctor)
+for var in CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_PROFILE; do
+  check_true "doctor warns on $var" grep -q "^warn: $var is set; it overrides the terminal login" <<< "$out"
+done
+printf '{"apiKeyHelper":"/x/helper"}' > "$CLAUDE_CLI_HOME/settings.json"
+check_true "doctor warns on apiKeyHelper" grep -qF "warn: apiKeyHelper is set in $CLAUDE_CLI_HOME/settings.json; it overrides the terminal login" <<< "$(cda doctor)"
+check "doctor prints the overrides in Claude Code's order" "ANTHROPIC_API_KEY apiKeyHelper CLAUDE_CODE_OAUTH_TOKEN" "$(ANTHROPIC_API_KEY=x CLAUDE_CODE_OAUTH_TOKEN=x cda doctor | sed -n 's/^warn: \([A-Za-z_]*\) is set.*/\1/p' | xargs)"
+printf '{"apiKeyHelper":""}' > "$CLAUDE_CLI_HOME/settings.json"
+check "an empty apiKeyHelper does not warn" 0 "$(cda doctor | grep -c '^warn: apiKeyHelper')"
+printf 'not json' > "$CLAUDE_CLI_HOME/settings.json"
+check "an unreadable settings.json does not warn" 0 "$(cda doctor | grep -c '^warn: apiKeyHelper')"
+check "an unreadable settings.json does not fail doctor" 0 "$(exit_code cda doctor)"
+rm -f "$CLAUDE_CLI_HOME/settings.json"
 check_true "doctor warns when claude is not on PATH" grep -q '^warn: claude: not on PATH; the terminal login is not verified after a switch' <<< "$(PATH=$noclaude cda doctor)"
+printf '{"claudeAiOauth":{"accessToken":"at-secret-in-file"}}' > "$CLAUDE_CLI_HOME/.credentials.json"
+out=$(cda doctor)
+check_true "doctor warns about the credentials file" grep -qF "warn: credentials file: $CLAUDE_CLI_HOME/.credentials.json exists; Claude Code reads it when the Keychain has no item or is locked, and a switch does not move it" <<< "$out"
+check "doctor prints nothing from the credentials file" 0 "$(grep -c at-secret-in-file <<< "$out")"
+check "a credentials file does not fail doctor" 0 "$(exit_code cda doctor)"
+rm -f "$CLAUDE_CLI_HOME/.credentials.json"
+check "doctor is quiet with no credentials file" 0 "$(cda doctor | grep -c '^warn: credentials file:')"
+mkdir -p "$tmp/other-home"
+: > "$tmp/other-home/.credentials.json"
+check_true "doctor looks in CLAUDE_CONFIG_DIR" grep -qF "warn: credentials file: $tmp/other-home/.credentials.json exists" <<< "$(CLAUDE_CONFIG_DIR=$tmp/other-home cda doctor)"
+check_true "and in CLAUDE_SECURESTORAGE_CONFIG_DIR, which outranks it" grep -qF "warn: credentials file: $tmp/other-home/.credentials.json exists" <<< "$(CLAUDE_CONFIG_DIR=/x CLAUDE_SECURESTORAGE_CONFIG_DIR=$tmp/other-home cda doctor)"
+check "an empty CLAUDE_SECURESTORAGE_CONFIG_DIR selects the default" 0 "$(CLAUDE_CONFIG_DIR=$tmp/other-home CLAUDE_SECURESTORAGE_CONFIG_DIR='' cda doctor | grep -c '^warn: credentials file:')"
+rm -rf "$tmp/other-home"
 mkdir -p "$tmp/has-claude"
 printf '#!/bin/sh\n' > "$tmp/has-claude/claude"
 chmod +x "$tmp/has-claude/claude"
@@ -1437,6 +1480,10 @@ check_doctor_without_jq() {
   check "and calls no profile ok" 0 "$(grep -c '^ok: usagey' <<< "$out")"
   check "and says once that it skipped the check" 1 "$(grep -c '^warn: profiles: saved tokens not checked without jq' <<< "$out")"
 }
+printf '{"apiKeyHelper":"/x/helper"}' > "$CLAUDE_CLI_HOME/settings.json"
+check_true "doctor without jq says it did not check settings.json" grep -qF "warn: apiKeyHelper: $CLAUDE_CLI_HOME/settings.json not checked without jq" <<< "$(PATH=$nojq cda doctor || true)"
+rm -f "$CLAUDE_CLI_HOME/settings.json"
+check "and is quiet with no settings.json" 0 "$( (PATH=$nojq cda doctor || true) | grep -c '^warn: apiKeyHelper')"
 check_doctor_without_jq "$nojq"
 # A jq that runs and fails, as a stale version-manager shim does (exit 1), must
 # not read as signed out either.
@@ -2368,6 +2415,22 @@ rm -rf "$p/dbother" "$tmp/dbg-claude" "$dbg_log" "$tmp/bin/sleep"
 printf '#!/bin/sh\nexit 1\n' > "$tmp/bin/pgrep"
 printf '#!/bin/sh\nexport PATH="%s/bin:$PATH"\necho "open $*" >> "%s/calls"\n' "$tmp" "$tmp" > "$tmp/bin/open"
 printf '#!/bin/sh\ngrep "^beta "\n' > "$tmp/bin/fzf"
+rm -f "$tmp/calls"
+
+#@ account-name needs switch
+# Claude Code answers for "claude-code-user" when USER fails its rule, so that is the item it reads.
+printf '#!/bin/sh\nexport PATH="%s/bin:$PATH"\n/usr/bin/env > "%s/open-env"\n' "$tmp" "$tmp" > "$tmp/bin/open"
+kc_put claude-multipass alpha '{"claudeAiOauth":{"accessToken":"at-name","refreshToken":"rt-name","expiresAt":2}}'
+printf '{"oauthAccount":{"accountUuid":"%s"}}' "$(jq -r .account "$p/alpha/meta.json")" > "$p/alpha/cli.json"
+USER='first last' cda switch alpha --force > /dev/null 2>&1
+check "a user name Claude Code rejects writes the item it reads" at-name "$(kc_get "Claude Code-credentials" claude-code-user | jq -r .claudeAiOauth.accessToken)"
+check "and Desktop still launches with the real user name" 'USER=first last' "$(grep '^USER=' "$tmp/open-env")"
+kc_delete "Claude Code-credentials" claude-code-user
+USER='josé' cda switch alpha --force > /dev/null 2>&1
+check "a non-ASCII user name counts as rejected" at-name "$(kc_get "Claude Code-credentials" claude-code-user | jq -r .claudeAiOauth.accessToken)"
+kc_delete "Claude Code-credentials" claude-code-user
+printf '#!/bin/sh\nexport PATH="%s/bin:$PATH"\necho "open $*" >> "%s/calls"\n' "$tmp" "$tmp" > "$tmp/bin/open"
+cda switch beta --no-relaunch --force > /dev/null 2>&1
 rm -f "$tmp/calls"
 
 #@ migration needs switch
