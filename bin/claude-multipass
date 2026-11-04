@@ -346,6 +346,7 @@ ${bold}Commands${reset}
                        PATH, the store and profile modes, each profile's token,
                        the backups count, whether Desktop runs, which profiles
                        hold no CLI login, whether claude is on PATH, whether
+                       ~/.claude/.credentials.json exists, whether
                        CLAUDE_CONFIG_DIR, CLAUDE_SECURESTORAGE_CONFIG_DIR,
                        ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN is set.
                        One ok:, warn: or fail: line per check; exits 1 on any
@@ -1541,6 +1542,7 @@ doctor_report() {
   [[ -z ${ANTHROPIC_API_KEY:-} ]] || echo "warn: ANTHROPIC_API_KEY is set; it overrides the terminal login"
   [[ -z ${CLAUDE_CODE_OAUTH_TOKEN:-} ]] || echo "warn: CLAUDE_CODE_OAUTH_TOKEN is set; it overrides the terminal login"
   command -v claude > /dev/null || echo "warn: claude: not on PATH; the terminal login is not verified after a switch"
+  [[ ! -e $cli_home/.credentials.json ]] || echo "warn: credentials file: $cli_home/.credentials.json exists; Claude Code reads it when the Keychain has no item or is locked, and a switch does not move it"
   # A glob, not ls or find, which fail under pipefail when nothing matches.
   logins=("$backups"/login-*/)
   [[ -d ${logins[0]} ]] || logins=()

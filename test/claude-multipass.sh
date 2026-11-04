@@ -1349,6 +1349,13 @@ check_true "doctor warns on CLAUDE_SECURESTORAGE_CONFIG_DIR" grep -q '^warn: CLA
 check_true "doctor warns on ANTHROPIC_API_KEY" grep -q '^warn: ANTHROPIC_API_KEY is set; it overrides the terminal login' <<< "$(ANTHROPIC_API_KEY=x cda doctor)"
 check_true "doctor warns on CLAUDE_CODE_OAUTH_TOKEN" grep -q '^warn: CLAUDE_CODE_OAUTH_TOKEN is set; it overrides the terminal login' <<< "$(CLAUDE_CODE_OAUTH_TOKEN=x cda doctor)"
 check_true "doctor warns when claude is not on PATH" grep -q '^warn: claude: not on PATH; the terminal login is not verified after a switch' <<< "$(PATH=$noclaude cda doctor)"
+printf '{"claudeAiOauth":{"accessToken":"at-secret-in-file"}}' > "$CLAUDE_CLI_HOME/.credentials.json"
+out=$(cda doctor)
+check_true "doctor warns about the credentials file" grep -qF "warn: credentials file: $CLAUDE_CLI_HOME/.credentials.json exists; Claude Code reads it when the Keychain has no item or is locked, and a switch does not move it" <<< "$out"
+check "doctor prints nothing from the credentials file" 0 "$(grep -c at-secret-in-file <<< "$out")"
+check "a credentials file does not fail doctor" 0 "$(exit_code cda doctor)"
+rm -f "$CLAUDE_CLI_HOME/.credentials.json"
+check "doctor is quiet with no credentials file" 0 "$(cda doctor | grep -c '^warn: credentials file:')"
 mkdir -p "$tmp/has-claude"
 printf '#!/bin/sh\n' > "$tmp/has-claude/claude"
 chmod +x "$tmp/has-claude/claude"

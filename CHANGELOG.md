@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- `doctor` now warns when `~/.claude/.credentials.json` exists. Claude Code reads that file when the Keychain has no item or is locked, and a switch does not move it.
+
 ## 0.13.0 (2026-11-03)
 
 - Every relaunch of Desktop now uses the environment a Dock launch gets, so nothing from your terminal or the menu bar app, `CLAUDE_MULTIPASS_DEBUG` included, reaches Desktop or the sessions it spawns. An LLMR launch keeps the caller's environment and drops only that variable.
