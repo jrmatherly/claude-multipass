@@ -491,9 +491,9 @@ private func enabledUsage(_ s: AppState) -> AppSettings {
 
 @Test @MainActor func usageErrorEntryKept() async {
   let (s, r) = await readyState()
-  r.answer("usage", #"{"profiles":[{"name":"alpha","error":"token expired, sign in and re-save"},{"name":"beta","fiveHour":{"utilization":42.6}}]}"#)
+  r.answer("usage", #"{"profiles":[{"name":"alpha","error":"token lapsed, use it in Desktop to renew"},{"name":"beta","fiveHour":{"utilization":42.6}}]}"#)
   await s.apply(enabledUsage(s))
-  #expect(s.usage["alpha"]?.error == "token expired, sign in and re-save")
+  #expect(s.usage["alpha"]?.error == "token lapsed, use it in Desktop to renew")
   #expect(s.usage["alpha"]?.fiveHour == nil)
   #expect(s.usage["beta"]?.fiveHour?.utilization == 42.6)
   #expect(s.lastError == nil)

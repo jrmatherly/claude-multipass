@@ -1117,12 +1117,12 @@ check_true "usage reads its config from stdin" grep -q -- ' -K - ' "$tmp/curl-ar
 check_true "usage sends the beta header and the endpoint" grep -q 'anthropic-beta: oauth-2025-04-20 https://api.anthropic.com/api/oauth/usage' "$tmp/curl-args"
 check_true "usage passes the bearer token on stdin, not argv" grep -qx 'header = "Authorization: Bearer tok-u"' "$tmp/curl-args"
 check "usage never puts the token on a command line" 0 "$(grep -c 'curl .*tok-u' "$tmp/curl-args")"
-check "usage reports an expired token" "stale            token expired, sign in and re-save" "$(cda usage stale)"
+check "usage reports a lapsed token" "stale            token lapsed, use it in Desktop to renew" "$(cda usage stale)"
 check "usage for an unknown name fails loudly" 1 "$(exit_code cda usage nope)"
 cp -R "$p/usagey" "$tmp/outside"
 check_true "usage rejects a path as a name" grep -q 'Give a name' <<< "$(cda usage ../outside 2>&1)"
 printf '#!/bin/sh\ncat > /dev/null; printf "{}\\n401"\n' > "$tmp/bin/curl"
-check "usage reports a rejected token" "usagey           token expired, sign in and re-save" "$(cda usage usagey)"
+check "usage reports a refused token" "usagey           token refused, sign in and re-save" "$(cda usage usagey)"
 printf '#!/bin/sh\ncat > /dev/null; printf "{}\\n429"\n' > "$tmp/bin/curl"
 check "usage reports rate limiting" "usagey           rate limited" "$(cda usage usagey)"
 write_curl
@@ -1130,7 +1130,7 @@ printf '{"oauth:tokenCacheV2":"djEwbm90IHJlYWxseSBlbmNyeXB0ZWQgYnl0ZXM="}' > "$p
 check "usage says when a cache will not decrypt" "stale            cannot decrypt (the profile was saved on another Mac, or the app changed its key)" "$(cda usage stale)"
 enc=$(encrypt "${plain//PAST/$past}")
 jq -n --arg v "$enc" '{"oauth:tokenCacheV2":$v}' > "$p/stale/config.json"
-check "usage lists every saved account in order" "stale            token expired, sign in and re-save
+check "usage lists every saved account in order" "stale            token lapsed, use it in Desktop to renew
 usagey           $expected" "$(cda usage | grep -E '^(stale|usagey) ')"
 check "usage never prints a token" 0 "$(cda usage | grep -c 'tok-u')"
 out=$(cda usage --json)
@@ -1138,7 +1138,7 @@ check "usage --json good entry" usagey "$(jq -r '.profiles[] | select(.fiveHour)
 check "usage --json 5h utilization" 42.6 "$(jq -r '.profiles[] | select(.name=="usagey").fiveHour.utilization' <<< "$out")"
 check "usage --json normalises resetsAt" 2026-10-23T19:45:00Z "$(jq -r '.profiles[] | select(.name=="usagey").fiveHour.resetsAt' <<< "$out")"
 check "usage --json 7d resetsAt" 2026-10-27T13:00:00Z "$(jq -r '.profiles[] | select(.name=="usagey").sevenDay.resetsAt' <<< "$out")"
-check "usage --json error entry" "token expired, sign in and re-save" "$(jq -r '.profiles[] | select(.name=="stale").error' <<< "$out")"
+check "usage --json error entry" "token lapsed, use it in Desktop to renew" "$(jq -r '.profiles[] | select(.name=="stale").error' <<< "$out")"
 check "usage --json never puts the token on a command line" 0 "$(grep -c 'curl .*tok-u' "$tmp/curl-args")"
 check "usage --json never prints a token" 0 "$(grep -c tok-u <<< "$out")"
 cp "$tmp/usage.json" "$tmp/usage-full.json"

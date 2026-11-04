@@ -1422,7 +1422,7 @@ usage_fetch() {
   local key=$1 cfg=$2 account=$3 token code body plan msg=''
   token=$(access_token "$key" "$cfg" "$account")
   if [[ -z $token ]]; then
-    msg='token expired, sign in and re-save'
+    msg='token lapsed, use it in Desktop to renew'
   elif [[ $token == "cannot decrypt" ]]; then
     msg='cannot decrypt (the profile was saved on another Mac, or the app changed its key)'
   # The bearer header goes in on stdin so the token never sits in argv.
@@ -1435,7 +1435,7 @@ usage_fetch() {
     body=${body%$'\n'*}
     case $code in
       200) ;;
-      401) msg='token expired, sign in and re-save' ;;
+      401) msg='token refused, sign in and re-save' ;;
       429) msg='rate limited' ;;
       *) msg="unavailable (HTTP $code)" ;;
     esac
