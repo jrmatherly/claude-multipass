@@ -245,7 +245,7 @@ Expected: `[5, 0]`.
 
 ## Follow-ups, not part of this plan
 
-- **`.prettierignore` does not list `.claude/skill-stack.json`.** `pnpm check` runs `prettier --check` over `**/*.json`, and `claude-stack apply` writes that file in a style prettier rejects. The commit gate failed on it on 2026-11-15 until `node_modules/.bin/prettier --write .claude/skill-stack.json` ran. The fix is one line in `.prettierignore`, which is tooling in this repo and needs its own branch and PR.
+- **`.prettierignore` does not list `.claude/skill-stack.json`.** `pnpm check` runs `prettier --check` over `**/*.json`, and `claude-stack apply` writes that file in a style prettier rejects. The commit gate failed on it on 2026-11-15 until `node_modules/.bin/prettier --write .claude/skill-stack.json` ran. Fixed on 2026-11-15: `.prettierignore` now lists `.claude/skill-stack.json` and `.claude/rules/skill-stack.md`, the two files `claude-stack apply` rewrites. With the JSON file compacted by `jq -c`, the gate's prettier command failed before the change and passed after it. Jason asked for this one to go straight to `main`.
 - **`claude-stack` refuses three enabled plugins.** `claude-stack scan --off voltagent-qa-sec@voltagent-subagents --off plugin-dev@claude-plugins-official --off microsoft-docs@claude-plugins-official` prints "not selectable (not in [stack.signals], or off at user scope)". The cause was not traced. It belongs to the dotfiles repo, so this plan only notes it.
 
 ## Owner decisions, not tasks
@@ -262,10 +262,11 @@ Checks 0, 2, 8 and 9 of `/doctor` found nothing to change: one native install on
 ## Results (2026-11-15)
 
 - **Task 1: done.** `.claude/settings.local.json` went from 21 to 35 `enabledPlugins` keys. `~/.claude/settings.json` has the same checksum before and after.
-- **Task 2: written, not yet confirmed.** `skillOverrides` holds the 10 names. Whether the listing drops them needs a new session.
+- **Task 2: done, confirmed.** `skillOverrides` holds the 10 names. A session started at 16:59 after the change lists none of the ten, while it lists the other skills in `~/.claude/skills` (`archify`, `sentry-cli`, `siderolabs` and more). So `skillOverrides` in the local file does reach user skills.
 - **Task 3: done** in `2eed3d7`. `CLAUDE.md` is 18,174 bytes, down from 20,446.
 - **Task 4: finding.** A plugin's `false` in the local file does stop its server. `claude mcp list` at the repo root shows one plugin server, `chrome-devtools`, and none of `logfire`, `sentry`, `cloudflare`, `microsoft-docs` or `browser-use`. The Code tab session that listed the first three at 16:08 had started in a spare folder outside the project (its scratchpad path named `claude-spares`), and it dropped all three when it resumed inside the project at 16:41. That the spare start is the cause is inferred from those two paths, not tested.
-- **Task 5: step 3 done.** `~/.claude/settings.json` reads `[5, 0]` and `disabledMcpServers` in `~/.claude.json` is still absent. Steps 1 and 2 need a new session. No `/context` baseline was taken before Task 1, so the saving can be read only as an absolute figure.
+- **Task 5: step 3 done.** `~/.claude/settings.json` reads `[5, 0]` and `disabledMcpServers` in `~/.claude.json` is still absent. No `/context` baseline was taken before Task 1, so the saving can be read only as an absolute figure.
+- **Task 5: step 2 done, with one gap.** The 16:59 session lists no `plugin-dev:`, `commit-commands:` or `agent-sdk-dev:` skill, no `voltagent-qa-sec:` agent type, and none of `doc-coauthoring`, `find-skills` and `mcp-builder`. It does list the MCP tools of `logfire`, `sentry`, `cloudflare` and `microsoft-docs`, four plugins the local file turns off. Its scratchpad path names `claude-spares`, as the 16:08 session's did, so this is a second sighting of the Task 4 pattern: a Code tab session that starts in a spare folder connects the plugin servers before it reaches the project. The cause is still inferred. Step 1 (`/context`) is Jason's.
 
 ## Review (2026-11-15)
 

@@ -5,8 +5,11 @@
 CLAUDE.md
 .serena/
 # Machine-local, also git-ignored: Claude Code's per-machine permission
-# approvals, Remember plugin memory, private notes and run logs
+# approvals, the claude-stack selection (rewritten by `claude-stack apply`),
+# Remember plugin memory, private notes and run logs
 .claude/settings.local.json
+.claude/skill-stack.json
+.claude/rules/skill-stack.md
 .remember/
 private/
 logs/
