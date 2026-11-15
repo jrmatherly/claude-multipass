@@ -20,6 +20,8 @@ Three Raycast script commands in `raycast/` call the tool by name (`CLAUDE_MULTI
 
 ## Architecture
 
+The app is two Swift targets in `app/`: `MultipassCore` (models, CLI runner, formatting, settings, state) imports only Foundation and is the unit-tested part, and `ClaudeMultipass` is the AppKit and SwiftUI shell over it. Keep UI frameworks out of `MultipassCore`.
+
 Storage model:
 
 - A Desktop login is three `config.json` keys (`oauth:tokenCache`, `oauth:tokenCacheV2`, `lastKnownAccountUuid`) plus the `Cookies` and `Cookies-journal` files (in `Network/` when that folder exists), all under `~/Library/Application Support/Claude` (`CLAUDE_DESKTOP_DIR` overrides). The app encrypts them with its "Claude Safe Storage" login-Keychain key; the tool copies them as opaque bytes.

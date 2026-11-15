@@ -266,3 +266,12 @@ Checks 0, 2, 8 and 9 of `/doctor` found nothing to change: one native install on
 - **Task 3: done** in `2eed3d7`. `CLAUDE.md` is 18,174 bytes, down from 20,446.
 - **Task 4: finding.** A plugin's `false` in the local file does stop its server. `claude mcp list` at the repo root shows one plugin server, `chrome-devtools`, and none of `logfire`, `sentry`, `cloudflare`, `microsoft-docs` or `browser-use`. The Code tab session that listed the first three at 16:08 had started in a spare folder outside the project (its scratchpad path named `claude-spares`), and it dropped all three when it resumed inside the project at 16:41. That the spare start is the cause is inferred from those two paths, not tested.
 - **Task 5: step 3 done.** `~/.claude/settings.json` reads `[5, 0]` and `disabledMcpServers` in `~/.claude.json` is still absent. Steps 1 and 2 need a new session. No `/context` baseline was taken before Task 1, so the saving can be read only as an absolute figure.
+
+## Review (2026-11-15)
+
+A fresh reviewer checked `f37472b..b865507` and the local settings file. It found no critical issue and two things to correct.
+
+- **A design rule had lived only in the removed tree.** No other agent doc said that `MultipassCore` imports only Foundation and `ClaudeMultipass` is the UI shell. `CLAUDE.md` now states it in one sentence under `## Architecture`.
+- **Task 4's finding rests on `claude mcp list` alone.** The reviewer ran as a subagent of the session that did Task 1, and it still listed the tools, skills and agents of the plugins that Task 1 turned off. A subagent takes its parent's loaded plugins, and the parent loaded them before Task 1, so this neither confirms nor contradicts the finding. The same subagent did not list the ten skills of Task 2, which is weak evidence that `skillOverrides` works from the local file. Task 5 steps 1 and 2 stay open until a session that starts after the change is checked.
+
+The step checkboxes above were not ticked during the run. The Results section is the record of what ran.
