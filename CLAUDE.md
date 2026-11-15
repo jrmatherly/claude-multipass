@@ -20,21 +20,6 @@ Three Raycast script commands in `raycast/` call the tool by name (`CLAUDE_MULTI
 
 ## Architecture
 
-```text
-bin/claude-multipass     the tool, one bash script; its header comment is the tldr page
-test/check.sh            pnpm check
-test/claude-multipass.sh fixture self-check
-test/appcast.sh          scripts/make-appcast.sh and scripts/verify-appcast.sh
-test/sign-mac-app.sh     the codesign retry in scripts/sign-mac-app.sh
-raycast/                 claude-account.sh (inline, current name), claude-account-usage.sh (inline, opt-in), switch-claude-account.sh (argument, confirmation)
-app/                     the menu bar app, a Swift package: Sources/MultipassCore (models, CLI runner, formatting, settings, state; Foundation only, unit tested), Sources/ClaudeMultipass (AppKit/SwiftUI shell), Tests/
-scripts/                 build-app.sh (swift build, bundle, sign, optional DMG), compile-icon.sh (app/AppIcon.icon to Assets.car and AppIcon.icns with actool), sign-mac-app.sh (copied from ai-kb), make-appcast.sh (the Sparkle feed for one release), verify-appcast.sh (the public key in the app accepts that feed's signature), rehearse-update.sh (a real Sparkle update under a throwaway bundle id and key, on localhost)
-docs/                    claude-multipass.md (how it works, for users), research.md (scrubbed research digest), superpowers/ (specs and plans)
-.claude/                 settings.json (permissions, hooks), hooks/ (lint and commit gate with self-checks), rules/, skills/, agents/
-.github/workflows/       check.yml (pnpm check and an unsigned scripts/build-app.sh on PRs and main), release.yml (on v* tags: build, sign, notarize, write the appcast, check the app inside the DMG, upload)
-private/                 git-ignored research and notes, never published
-```
-
 Storage model:
 
 - A Desktop login is three `config.json` keys (`oauth:tokenCache`, `oauth:tokenCacheV2`, `lastKnownAccountUuid`) plus the `Cookies` and `Cookies-journal` files (in `Network/` when that folder exists), all under `~/Library/Application Support/Claude` (`CLAUDE_DESKTOP_DIR` overrides). The app encrypts them with its "Claude Safe Storage" login-Keychain key; the tool copies them as opaque bytes.
@@ -70,7 +55,7 @@ Keep these when changing the script. The rules a reviewer rejects a change for a
 
 ## Release
 
-`git tag -a vX.Y.Z` after updating `CHANGELOG.md`, `version=` in `bin/claude-multipass` and `package.json` (the gate fails when the two differ), then `git push --follow-tags`; the tag runs `release.yml`, which publishes the DMG and `appcast.xml`. It needs six secrets, `SPARKLE_ED_KEY` (the EdDSA seed, in that one step's `env` only) among them. The Homebrew formula lives in `github.com/jrmatherly/homebrew-tap` as `Formula/claude-multipass.rb` and needs the new tag's tarball `url` and `sha256`; the cask `Casks/claude-multipass-app.rb` then needs the new `version` and the DMG's `sha256` from the release asset, and `appcast.xml` in the tap root is the release's asset. That tap commit is the announcement, and `git revert` of it stops new offers. The exact steps are in `.claude/skills/release/SKILL.md`.
+The release steps are in `.claude/skills/release/SKILL.md`. The gate fails when `version=` in `bin/claude-multipass` and `package.json` differ. The tap commit is the announcement, and `git revert` of it stops new offers.
 
 ## Path-scoped rules
 
