@@ -258,3 +258,11 @@ Expected: `[5, 0]`.
 - **`ccd_turn` (12%) and the `jstack` plugin (26%).** `ccd_turn` is the desktop app's built-in task list and has no setting. The `jstack` share is the work run under it, and this project uses it.
 
 Checks 0, 2, 8 and 9 of `/doctor` found nothing to change: one native install on PATH, every settings file parses, auto mode is already the default, and the denials in the window were `automode-unavailable`, which no allow rule fixes safely.
+
+## Results (2026-11-15)
+
+- **Task 1: done.** `.claude/settings.local.json` went from 21 to 35 `enabledPlugins` keys. `~/.claude/settings.json` has the same checksum before and after.
+- **Task 2: written, not yet confirmed.** `skillOverrides` holds the 10 names. Whether the listing drops them needs a new session.
+- **Task 3: done** in `2eed3d7`. `CLAUDE.md` is 18,174 bytes, down from 20,446.
+- **Task 4: finding.** A plugin's `false` in the local file does stop its server. `claude mcp list` at the repo root shows one plugin server, `chrome-devtools`, and none of `logfire`, `sentry`, `cloudflare`, `microsoft-docs` or `browser-use`. The Code tab session that listed the first three at 16:08 had started in a spare folder outside the project (its scratchpad path named `claude-spares`), and it dropped all three when it resumed inside the project at 16:41. That the spare start is the cause is inferred from those two paths, not tested.
+- **Task 5: step 3 done.** `~/.claude/settings.json` reads `[5, 0]` and `disabledMcpServers` in `~/.claude.json` is still absent. Steps 1 and 2 need a new session. No `/context` baseline was taken before Task 1, so the saving can be read only as an absolute figure.
