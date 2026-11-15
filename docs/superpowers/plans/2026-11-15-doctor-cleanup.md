@@ -2,194 +2,73 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Turn off the Claude Code add-ons that `/doctor` found unused on 2026-11-15, and trim two blocks of `CLAUDE.md` that a session can rebuild from the repo, so every session in this project starts with up to 6k fewer estimated tokens of context.
+**Goal:** Turn off, in this project only, the Claude Code add-ons that `/doctor` found unused on 2026-11-15, and trim two blocks of `CLAUDE.md` that a session can rebuild from the repo, so every session in this project starts with up to 5k fewer estimated tokens of context.
 
-**Architecture:** Every change is a setting or a deletion in `CLAUDE.md`. Plugins are turned off with the CLI's own `claude plugin disable`. The two keys that have no CLI command are written with `jq` through a temp file that `jq empty` has parsed. Each task ends with a `jq` or `grep` check. Nothing is uninstalled, so each task is undone by flipping its setting back.
+**Architecture:** Every change is inside this repo. Two files change: `.claude/settings.local.json` (git-ignored, read only by sessions in this project) and `CLAUDE.md`. Plugins are turned off with the CLI's own `claude plugin disable --scope local`. The skill overrides are written with `jq` through a temp file that `jq empty` has parsed. Nothing is uninstalled, so each task is undone by flipping its setting back.
 
-**Tech stack:** the `claude` CLI, `jq`, `git`, `claude-catalog` and `claude-config` from `~/dev/dotfiles/bin`, the `/context` command.
+**Tech stack:** the `claude` CLI, `jq`, `git`, the `/context` command.
 
 **Spec:** None. The `/doctor` report of 2026-11-15 is the source, and the Evidence section below carries every figure the tasks use.
 
 ## Global constraints
 
-- No plugin, skill or MCP server is uninstalled or removed. Never run `claude mcp remove`, which deletes the server config and its OAuth tokens.
-- Read settings files by key only (`jq '.enabledPlugins'`). `~/.claude/settings.json` and `~/.claude.json` hold secrets in `env` and `headers`. Never print a whole file.
-- User-scope edits go to `~/.claude/settings.json`. Project-scope edits go to `.claude/settings.local.json` (git-ignored) and the project entry in `~/.claude.json`. Never edit `.claude/settings.json` for this plan.
-- Never restore an old copy of `~/.claude.json`. The file holds `oauthAccount`, the CLI identity that `claude-multipass switch` moves, and a stale copy would put back the identity of a previous account. Undo a change to it by deleting the one key.
-- Do not run `claude-stack apply` for this plan. It refuses the three plugins of Task 4 (see Follow-ups), and its output file fails the commit gate's prettier check.
+- **Project-local only (Jason, 2026-11-15).** No task writes a file outside `/Users/jason/dev/claude-multipass`. That rules out `~/.claude/settings.json`, `~/.claude.json`, `~/.claude/` in general and the dotfiles repo. Every other project keeps its current setup.
+- No plugin, skill or MCP server is uninstalled or removed.
+- Read settings files by key only (`jq '.enabledPlugins'`). `~/.claude/settings.json` and `~/.claude.json` hold secrets in `env` and `headers`. The checks below read two keys from the first file and never write it.
+- Never edit `.claude/settings.json` (checked in) for this plan.
+- Do not run `claude-stack apply` for this plan. It refuses three of the plugins in Task 1 (see Follow-ups), and its output file fails the commit gate's prettier check. `claude-stack` keeps a `false` that it did not write and keeps keys other than `enabledPlugins`, so a later `claude-stack apply` leaves this plan's settings in place (`merge_settings` in `~/dev/dotfiles/agents/catalog/stack.py`).
 - This plan's only tracked change is `CLAUDE.md`, which is Markdown, so it commits and pushes on `main` with no branch or PR. Run `git commit` and `git push` in separate calls. The commit gate runs `pnpm check` (56 s typical) before the commit.
 - Token figures are estimates (characters divided by 4). The skill listing in this project is already over its budget and shows many skills without a description, so the measured saving can be lower than the sum.
-- The key names `skillOverrides` and `disabledMcpServers` come from the `/doctor` command text. No local copy of the Claude Code docs was found to confirm them, so Task 8 confirms each one by observing a new session.
+- The key name `skillOverrides` comes from the `/doctor` command text, which places it in `.claude/settings.local.json` for a project skill. Whether that file can also turn off a skill installed in `~/.claude/skills` is not confirmed. Task 5 confirms it by observing a new session.
 
 ## Review focus
 
-1. A running Claude session rewrites `~/.claude.json` and drops the Task 3 edit. Expected: the key is still there 60 seconds later and in a new session. Task 3 step 4 checks the first, Task 8 the second.
-2. A write leaves a settings file that does not parse, and Claude Code then ignores the whole file. Expected: no file is replaced before `jq empty` passes on the temp copy. Each `jq` write step does this.
-3. A plugin or skill turned off everywhere is one that another project's `skill-stack.md` picks. Expected: that name is dropped from the list. Task 1 step 1 and Task 2 step 1 check. The check already removed `commit-commands` (see Evidence).
-4. `claude plugin disable --scope local` writes its `false` somewhere other than `.claude/settings.local.json`. Expected: that file gains three keys and `~/.claude/settings.json` gains none. Task 4 step 3 checks both.
-5. The release pointer in `CLAUDE.md` drops a fact that `.claude/skills/release/SKILL.md` does not hold. Expected: each removed fact is found in the skill first. Task 5 step 3 checks.
+1. `claude plugin disable --scope local` writes its `false` to user scope and turns a plugin off in every project. Expected: `.claude/settings.local.json` gains 14 keys and `~/.claude/settings.json` gains none. Task 1 step 3 checks both and says how to put a leak back.
+2. A write leaves `.claude/settings.local.json` unparseable, and Claude Code then ignores the whole file, which turns the 21 plugins `claude-stack` disabled back on. Expected: the file is not replaced before `jq empty` passes on the temp copy. Task 2 step 1 does this.
+3. `skillOverrides` in the local file does not reach a skill in `~/.claude/skills`. Expected: the ten skills are absent from a new session's listing. Task 5 step 2 checks. If they are still listed, Task 2 is reverted and reported, not moved to user scope.
+4. A plugin turned off here is one that this project's `skill-stack.md` picks. Expected: none of the 14 is picked. Task 1 step 1 checks.
+5. The release pointer in `CLAUDE.md` drops a fact that `.claude/skills/release/SKILL.md` does not hold. Expected: each removed fact is found in the skill first. Task 3 step 3 checks.
 
 ## Evidence
 
-Scan of 1,306 sessions in the 30 days to 2026-11-15, plus the lifetime counters in `~/.claude.json`.
+Scan of 1,306 sessions in the 30 days to 2026-11-15, plus the lifetime counters in `~/.claude.json`. The counters cover every project on this Mac.
 
-| Item | Scope | Lifetime uses | Calls in 30 days | Est. resident tokens |
-| --- | --- | --- | --- | --- |
-| 10 plugins in Task 1 | user | 0 each | 0 | about 1.4k together |
-| 10 skills in Task 2 | user | 0 each | 0 | about 1k together |
-| 5 MCP servers in Task 3 | user | no counter | 0 | about 0.5k of server instructions |
-| `voltagent-qa-sec` | user | 1 | 1 | about 1k |
-| `plugin-dev` | user | 5 | 8 | about 0.9k |
-| `microsoft-docs` | user | 58 | 51, last on 2026-10-24 | about 0.4k |
-| `CLAUDE.md` tree block | checked in | n/a | n/a | about 420 (1,684 bytes) |
-| `CLAUDE.md` release section | checked in | n/a | n/a | about 150 saved (809 bytes become about 220) |
+| Item | Lifetime uses | Calls in 30 days | Est. resident tokens |
+| --- | --- | --- | --- |
+| 11 never-used plugins in Task 1 | 0 each | 0 | about 1.5k together |
+| `voltagent-qa-sec` | 1 | 1 | about 1k |
+| `plugin-dev` | 5 | 8 | about 0.9k |
+| `microsoft-docs` | 58 | 51, last on 2026-10-24 | about 0.4k |
+| 10 skills in Task 2 | 0 each | 0 | about 1k together |
+| `CLAUDE.md` tree block | n/a | n/a | about 420 (1,684 bytes) |
+| `CLAUDE.md` release section | n/a | n/a | about 150 saved (809 bytes become about 220) |
 
 Kept on purpose:
 
-- `commit-commands` has 0 uses, but `~/dev/career-ops/.claude/rules/skill-stack.md` line 21 picks `/commit-commands:commit`.
 - `voltagent-lang` has 0 uses, but this project's `skill-stack.md` picks its Swift agent.
 - `coderabbit` was installed on 2026-11-09, which is too recent to judge.
-- The MCP servers `hindsight`, `codegraph`, `serena`, `rea`, `siderolabs-docs`, `better-auth` and `scrapling` were all called in the window.
 
 ## Before you start
 
 - [ ] **Jason runs `/context` in a new session in this project and keeps the figures**
 
-Task 8 compares against them. Without this reading the saving cannot be measured.
+Task 5 compares against them. Without this reading the saving cannot be measured.
 
 ---
 
-### Task 1: Turn off 10 never-used plugins everywhere
+### Task 1: Turn off 14 plugins in this project
 
 **Files:**
 
-- Modify: `~/.claude/settings.json` (key `enabledPlugins`, written by the CLI)
-
-- [ ] **Step 1: Check that no other project picks these plugins**
-
-```bash
-grep -n -E 'agent-sdk-dev|claude-md-management|code-simplifier|mcp-server-dev|modern-web-guidance|session-report|superdesign|browser-use|rust-analyzer-lsp|lua-lsp' ~/dev/*/.claude/rules/skill-stack.md
-```
-
-Expected: no output (verified on 2026-11-15). A printed line under "Tools chosen for this project" names a plugin to drop from step 3. A line under "Plugins turned off here" is no reason to drop it.
-
-- [ ] **Step 2: Record the starting state**
-
-```bash
-jq '[.enabledPlugins | to_entries[] | select(.value == true)] | length' ~/.claude/settings.json
-```
-
-Expected: 62.
-
-- [ ] **Step 3: Disable the 10 plugins at user scope**
-
-```bash
-for p in agent-sdk-dev@claude-plugins-official claude-md-management@claude-plugins-official code-simplifier@claude-plugins-official mcp-server-dev@claude-plugins-official modern-web-guidance@claude-plugins-official session-report@claude-plugins-official superdesign@claude-plugins-official browser-use@claude-plugins-official rust-analyzer-lsp@claude-plugins-official lua-lsp@claude-plugins-official; do claude plugin disable "$p" --scope user || echo "FAILED $p"; done
-```
-
-Expected: one confirmation line per plugin and no `FAILED` line. On a `FAILED` line, stop and report the CLI's message.
-
-- [ ] **Step 4: Verify**
-
-```bash
-jq '[.enabledPlugins | to_entries[] | select(.value == true)] | length' ~/.claude/settings.json
-```
-
-Expected: 52 (62 minus 10, or one more for each name step 1 dropped).
-
-```bash
-jq empty ~/.claude/settings.json && echo ok
-```
-
-Expected: `ok`.
-
-Undo: `claude plugin enable <key> --scope user`.
-
-### Task 2: Turn off 10 never-used personal skills everywhere
-
-**Files:**
-
-- Modify: `~/.claude/settings.json` (key `skillOverrides`, absent today)
-
-Each key is the skill's frontmatter `name`, which equals its folder name under `~/.claude/skills` for all ten (verified on 2026-11-15). The folders are symlinks into `~/.agents/skills` and stay installed.
-
-- [ ] **Step 1: Check that no other project names these skills**
-
-```bash
-grep -n -E 'doc-coauthoring|find-skills|internal-comms|mcp-builder|theme-factory|web-artifacts-builder|supabase-prompts|organization-best-practices|email-and-password-best-practices|two-factor-authentication-best-practices' ~/dev/*/.claude/rules/skill-stack.md ~/dev/*/CLAUDE.md
-```
-
-Expected: no output (verified on 2026-11-15). Drop any skill that a printed line tells its sessions to use.
-
-- [ ] **Step 2: Add the overrides**
-
-```bash
-tmp=$(mktemp) && jq '.skillOverrides = ((.skillOverrides // {}) + {"doc-coauthoring": "off", "find-skills": "off", "internal-comms": "off", "mcp-builder": "off", "theme-factory": "off", "web-artifacts-builder": "off", "supabase-prompts": "off", "organization-best-practices": "off", "email-and-password-best-practices": "off", "two-factor-authentication-best-practices": "off"})' ~/.claude/settings.json > "$tmp" && jq empty "$tmp" && cat "$tmp" > ~/.claude/settings.json
-rm -f "$tmp"
-```
-
-`cat` into the file keeps its mode (0600).
-
-- [ ] **Step 3: Verify**
-
-```bash
-jq '.skillOverrides | length' ~/.claude/settings.json
-```
-
-Expected: 10.
-
-Undo: write the file the same way with `del(.skillOverrides["<name>"])` for one skill, or `del(.skillOverrides)` for all.
-
-### Task 3: Disable 5 idle MCP servers in this project
-
-**Files:**
-
-- Modify: `~/.claude.json` (key `.projects["/Users/jason/dev/claude-multipass"].disabledMcpServers`, absent today)
-
-The servers stay configured at user scope and stay on in every other project. `claude mcp` has no `disable` subcommand, so the two routes are the `/mcp` command inside a terminal session and a hand edit.
+- Modify: `/Users/jason/dev/claude-multipass/.claude/settings.local.json` (key `enabledPlugins`, written by the CLI)
 
 - [ ] **Step 1: Record the starting state**
 
 ```bash
-jq '.projects["/Users/jason/dev/claude-multipass"].disabledMcpServers' ~/.claude.json
+grep -n -E 'agent-sdk-dev|claude-md-management|code-simplifier|commit-commands|mcp-server-dev|modern-web-guidance|session-report|superdesign|browser-use|rust-analyzer-lsp|lua-lsp|voltagent-qa-sec|plugin-dev|microsoft-docs' .claude/rules/skill-stack.md
 ```
 
-Expected: `null`.
-
-- [ ] **Step 2: Add the list**
-
-Preferred route: Jason runs `claude` in a terminal at the repo root and types `/mcp disable <server>` for each of `agent-browser`, `astro-docs`, `jean`, `mise` and `snippetslab`. Claude Code then writes the key itself, under its own locks. The Code tab has no `/mcp` dialog, so an agent there cannot take this route.
-
-Fallback, by hand. `.claude/rules/safety-and-terms.md` forbids the tool from writing `~/.claude.json` outside the CLI's locks. That rule governs `bin/claude-multipass`, not this one-off edit, but the race it guards against is the same one. Run the command only while no Claude session in this project is mid-turn and no `claude-multipass switch` is running, because both save `~/.claude.json`.
-
-```bash
-tmp=$(mktemp) && jq '.projects["/Users/jason/dev/claude-multipass"].disabledMcpServers = ["agent-browser", "astro-docs", "jean", "mise", "snippetslab"]' ~/.claude.json > "$tmp" && jq empty "$tmp" && cat "$tmp" > ~/.claude.json
-rm -f "$tmp"
-```
-
-- [ ] **Step 3: Verify**
-
-```bash
-jq '.projects["/Users/jason/dev/claude-multipass"].disabledMcpServers | length' ~/.claude.json
-```
-
-Expected: 5.
-
-- [ ] **Step 4: Verify that the edit survives**
-
-Wait 60 seconds with a session open, then run the step 3 command again. Expected: 5. If it prints `null`, a session overwrote the file. Quit Claude Desktop sessions for this project, repeat step 2, and report that the first write was lost.
-
-Undo: `/mcp enable <server>` in a terminal session, or `del(.projects["/Users/jason/dev/claude-multipass"].disabledMcpServers)` written the same way as step 2.
-
-### Task 4: Turn off 3 plugins in this project
-
-**Files:**
-
-- Modify: `.claude/settings.local.json` (key `enabledPlugins`, written by the CLI)
-
-`claude-stack` cannot do this. Its dry run refuses all three keys as "not selectable" (see Follow-ups). `claude-stack` keeps a `false` that it did not write, so a later `claude-stack apply` leaves these three off. `.claude/rules/skill-stack.md` will not list them.
-
-- [ ] **Step 1: Record the starting state**
+Expected: no output, so this project picks none of them.
 
 ```bash
 jq '.enabledPlugins | length' .claude/settings.local.json
@@ -201,17 +80,17 @@ Expected: 21.
 jq '[.enabledPlugins | to_entries[] | select(.value == false)] | length' ~/.claude/settings.json
 ```
 
-Expected: 15 after Task 1 (5 before it).
+Expected: 5. Keep this number for step 3.
 
-- [ ] **Step 2: Disable the three plugins at local scope**
+- [ ] **Step 2: Disable the 14 plugins at local scope**
 
 Run from the repo root.
 
 ```bash
-for p in voltagent-qa-sec@voltagent-subagents plugin-dev@claude-plugins-official microsoft-docs@claude-plugins-official; do claude plugin disable "$p" --scope local || echo "FAILED $p"; done
+for p in agent-sdk-dev@claude-plugins-official claude-md-management@claude-plugins-official code-simplifier@claude-plugins-official commit-commands@claude-plugins-official mcp-server-dev@claude-plugins-official modern-web-guidance@claude-plugins-official session-report@claude-plugins-official superdesign@claude-plugins-official browser-use@claude-plugins-official rust-analyzer-lsp@claude-plugins-official lua-lsp@claude-plugins-official voltagent-qa-sec@voltagent-subagents plugin-dev@claude-plugins-official microsoft-docs@claude-plugins-official; do claude plugin disable "$p" --scope local || echo "FAILED $p"; done
 ```
 
-Expected: no `FAILED` line. On a `FAILED` line, set that key to `false` under `enabledPlugins` in `.claude/settings.local.json` with `jq`, through a temp file as in Task 2 step 2.
+Expected: no `FAILED` line. On a `FAILED` line, set that key to `false` under `enabledPlugins` in `.claude/settings.local.json` with `jq`, through a temp file as in Task 2 step 1.
 
 - [ ] **Step 3: Verify**
 
@@ -219,9 +98,9 @@ Expected: no `FAILED` line. On a `FAILED` line, set that key to `false` under `e
 jq '.enabledPlugins | length' .claude/settings.local.json
 ```
 
-Expected: 24.
+Expected: 35.
 
-Run the second command of step 1 again. Expected: the same number as in step 1. A higher number means the CLI wrote to user scope. Run `claude plugin enable <key> --scope user` for each of the three and use the `jq` fallback of step 2.
+Run the third command of step 1 again. Expected: 5, the same as before. A higher number means the CLI wrote to user scope. For each of the 14 keys that is now `false` in `~/.claude/settings.json`, run `claude plugin enable <key> --scope user`, confirm the count is 5 again, and use the `jq` fallback of step 2 for that key.
 
 ```bash
 git status --short
@@ -231,12 +110,37 @@ Expected: no output, because `.claude/settings.local.json` is git-ignored.
 
 Undo: `claude plugin enable <key> --scope local`.
 
-### Task 5: Trim `CLAUDE.md`
+### Task 2: Turn off 10 never-used personal skills in this project
 
 **Files:**
 
-- Modify: `CLAUDE.md:23-37` (the tree under `## Architecture`)
-- Modify: `CLAUDE.md:73` (the body of `## Release`)
+- Modify: `/Users/jason/dev/claude-multipass/.claude/settings.local.json` (key `skillOverrides`, absent today)
+
+Each key is the skill's frontmatter `name`, which equals its folder name under `~/.claude/skills` for all ten (verified on 2026-11-15). The skills stay installed and stay on in every other project.
+
+- [ ] **Step 1: Add the overrides**
+
+```bash
+tmp=$(mktemp) && jq '.skillOverrides = ((.skillOverrides // {}) + {"doc-coauthoring": "off", "find-skills": "off", "internal-comms": "off", "mcp-builder": "off", "theme-factory": "off", "web-artifacts-builder": "off", "supabase-prompts": "off", "organization-best-practices": "off", "email-and-password-best-practices": "off", "two-factor-authentication-best-practices": "off"})' .claude/settings.local.json > "$tmp" && jq empty "$tmp" && cat "$tmp" > .claude/settings.local.json
+rm -f "$tmp"
+```
+
+- [ ] **Step 2: Verify**
+
+```bash
+jq '[(.skillOverrides | length), (.enabledPlugins | length)]' .claude/settings.local.json
+```
+
+Expected: `[10, 35]`.
+
+Undo: write the file the same way with `del(.skillOverrides)`.
+
+### Task 3: Trim `CLAUDE.md`
+
+**Files:**
+
+- Modify: `/Users/jason/dev/claude-multipass/CLAUDE.md:23-37` (the tree under `## Architecture`)
+- Modify: `/Users/jason/dev/claude-multipass/CLAUDE.md:73` (the body of `## Release`)
 
 - [ ] **Step 1: Confirm the anchors**
 
@@ -294,36 +198,9 @@ git push
 
 Expected: the push output names the `check` rule it bypassed, which is the intended docs-only bypass.
 
-### Task 6: Record the change in dotfiles
+### Task 4: Find out why plugins that are off still connect their servers
 
-**Files:**
-
-- Modify: `~/dev/dotfiles/agents/claude-plugins.txt`, `~/dev/dotfiles/agents/claude-settings.json` (written by `claude-config save`)
-- Modify: `~/.claude/catalog/CATALOG.md` (rebuilt by `claude-catalog`)
-
-`claude-config` tracks the plugin list (with a `disabled` flag) and the base settings in the dotfiles repo. Without this task the next `claude-config save` shows the changes as a surprise, and another Mac keeps the old state. This task writes outside this repo, so it runs only on Jason's say.
-
-- [ ] **Step 1: Rebuild the catalog**
-
-```bash
-claude-catalog
-```
-
-- [ ] **Step 2: Record the machine state**
-
-```bash
-claude-config save
-```
-
-```bash
-git -C ~/dev/dotfiles diff --stat agents/
-```
-
-Expected: `claude-plugins.txt` shows 10 lines that gained `disabled`, and `claude-settings.json` shows the new `skillOverrides` key. Leave the commit in the dotfiles repo to Jason.
-
-### Task 7: Find out why plugins that are off still connect their servers
-
-This task ends in a finding, not a change. `.claude/settings.local.json` has set `logfire`, `sentry` and `cloudflare` to `false` since 2026-11-03. A session started in this project on 2026-11-15 still listed tools from `plugin_logfire_logfire`, `plugin_sentry_sentry` and `plugin_cloudflare_cloudflare`, while the subagents of plugins turned off in the same file were gone. The cause is unknown.
+This task ends in a finding, not a change. `.claude/settings.local.json` has set `logfire`, `sentry` and `cloudflare` to `false` since 2026-11-03. A session started in this project on 2026-11-15 still listed tools from `plugin_logfire_logfire`, `plugin_sentry_sentry` and `plugin_cloudflare_cloudflare`, while the subagents of plugins turned off in the same file were gone. The cause is unknown. It matters here because `microsoft-docs` and `browser-use` from Task 1 each bring a server.
 
 - [ ] **Step 1: Confirm the setting**
 
@@ -339,30 +216,45 @@ Run `claude mcp list` from the repo root in a terminal. Then start a new Code ta
 
 - [ ] **Step 3: Report**
 
-Write the result in the session reply. If the servers appear only in the desktop app, the finding is "the app connects plugin servers without reading the project's `enabledPlugins`". If they appear in both, the finding is "a plugin's `false` does not stop its MCP server". In that case `microsoft-docs` from Task 4 keeps its server too. Turning the plugins off at user scope would stop the servers in every project, and that is Jason's decision.
+Write the result in the session reply. If the servers appear only in the desktop app, the finding is "the app connects plugin servers without reading the project's `enabledPlugins`". If they appear in both, the finding is "a plugin's `false` does not stop its MCP server". Neither finding leads to a change outside this project.
 
-### Task 8: Verify in a new session
+### Task 5: Verify in a new session
 
 - [ ] **Step 1: Jason runs `/context` in a new session in this project**
 
-Compare with the reading from "Before you start". Expected: the skills, agents, MCP and memory-file lines are lower by up to 6k tokens together.
+Compare with the reading from "Before you start". Expected: the skills, agents and memory-file lines are lower by up to 5k tokens together.
 
 - [ ] **Step 2: Check the listings in that session**
 
-Expected absent: the skills `doc-coauthoring`, `find-skills` and any `plugin-dev:` entry, the `voltagent-qa-sec:` agent types, and the tools `mcp__snippetslab__`, `mcp__jean__`, `mcp__mise__`, `mcp__astro-docs__` and `mcp__agent-browser__`. An entry that is still present means its key name was wrong or the setting is not read. Report it with the key that was written.
+Expected absent: any `plugin-dev:`, `commit-commands:` or `agent-sdk-dev:` skill, the `voltagent-qa-sec:` agent types, and the skills `doc-coauthoring`, `find-skills` and `mcp-builder`.
+
+If the plugin entries are gone but the three skills are still listed, `skillOverrides` in the local file does not reach user skills. Revert Task 2 with its undo command and report that. Do not move the overrides to `~/.claude/settings.json`.
+
+- [ ] **Step 3: Confirm that nothing outside the project changed**
+
+```bash
+jq '[([.enabledPlugins | to_entries[] | select(.value == false)] | length), (.skillOverrides // {} | length)]' ~/.claude/settings.json
+```
+
+Expected: `[5, 0]`.
+
+## Left out because it is not project-local
+
+- **The 5 idle MCP servers (`agent-browser`, `astro-docs`, `jean`, `mise`, `snippetslab`).** They are configured at user scope, and the per-project switch for them is the `disabledMcpServers` key inside `~/.claude.json`. Its effect is limited to this project, but the file is outside it, so the plan does not touch it. The cost of leaving them on is about 0.5k estimated tokens of server instructions. Jason can type `/mcp disable <server>` in a terminal `claude` session at the repo root if that trade is acceptable.
+- **Turning anything off at user scope**, and **recording the state in dotfiles** with `claude-config save`. Nothing this plan changes is tracked by `claude-config`, which reads `~/.claude/settings.json`.
 
 ## Follow-ups, not part of this plan
 
-- **`.prettierignore` does not list `.claude/skill-stack.json`.** `pnpm check` runs `prettier --check` over `**/*.json`, and `claude-stack apply` writes that file in a style prettier rejects. The commit gate failed on it on 2026-11-15 until `node_modules/.bin/prettier --write .claude/skill-stack.json` ran. The fix is one line in `.prettierignore`, which is tooling and needs its own branch and PR.
-- **`claude-stack` refuses three enabled plugins.** `claude-stack scan --off voltagent-qa-sec@voltagent-subagents --off plugin-dev@claude-plugins-official --off microsoft-docs@claude-plugins-official` prints "not selectable (not in [stack.signals], or off at user scope)". All three are on at user scope and appear in `~/dev/dotfiles/agents/catalog/curated.toml`. The cause was not traced. It belongs to the dotfiles repo.
+- **`.prettierignore` does not list `.claude/skill-stack.json`.** `pnpm check` runs `prettier --check` over `**/*.json`, and `claude-stack apply` writes that file in a style prettier rejects. The commit gate failed on it on 2026-11-15 until `node_modules/.bin/prettier --write .claude/skill-stack.json` ran. The fix is one line in `.prettierignore`, which is tooling in this repo and needs its own branch and PR.
+- **`claude-stack` refuses three enabled plugins.** `claude-stack scan --off voltagent-qa-sec@voltagent-subagents --off plugin-dev@claude-plugins-official --off microsoft-docs@claude-plugins-official` prints "not selectable (not in [stack.signals], or off at user scope)". The cause was not traced. It belongs to the dotfiles repo, so this plan only notes it.
 
 ## Owner decisions, not tasks
 
-`/usage` flagged four more items. None is an agent's to change from this repo.
+`/usage` flagged four more items. None is a change to this project.
 
 - **Start fresh when you switch tasks (86% of usage).** Run `/clear` between tasks.
-- **`jstack:j-agent` subagents (13%).** The agent file sets no model. `~/dev/dotfiles/tilde/.claude/rules/jstack-models.md` sets the code roles to `opus medium` by hand. Setting `swarm workers`, `feature, refactoring` and `bug-fix` to `sonnet medium` would lower this share.
-- **`~/dev/career-ops/AGENTS.md` (25%, 26k tokens per request).** Keep the rules most tasks need and move the rest into files it points to. That edit belongs to a session in that repo.
+- **`jstack:j-agent` subagents (13%).** The agent file sets no model. `~/dev/dotfiles/tilde/.claude/rules/jstack-models.md` sets the code roles to `opus medium` by hand.
+- **`~/dev/career-ops/AGENTS.md` (25%, 26k tokens per request).** That edit belongs to a session in that repo.
 - **`ccd_turn` (12%) and the `jstack` plugin (26%).** `ccd_turn` is the desktop app's built-in task list and has no setting. The `jstack` share is the work run under it, and this project uses it.
 
 Checks 0, 2, 8 and 9 of `/doctor` found nothing to change: one native install on PATH, every settings file parses, auto mode is already the default, and the denials in the window were `automode-unavailable`, which no allow rule fixes safely.
