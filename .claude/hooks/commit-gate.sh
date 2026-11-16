@@ -42,7 +42,7 @@ enter() {
 # segment's target. Known misses: git -C "$(...)" commit, sudo -u git git
 # commit, and a cd inside backticks, which is not undone when they close
 is_commit() {
-  local seg w first prev gitdir sub cddir wrapped depth=0
+  local seg w first prev gitdir sub cddir wrapped aliased depth=0
   local -a saved
   cddir=$cwd
   while IFS= read -r seg; do
@@ -70,7 +70,7 @@ is_commit() {
         [[ $w =~ ^[A-Za-z_][A-Za-z0-9_]*= || $w == -* ]] && continue
         case ${w##*/} in
           # Wrappers that run the words after them as the command
-          env | command | builtin | exec | nohup | time | nice | sudo | xargs | bash | sh | zsh)
+          env | command | builtin | exec | nohup | time | nice | sudo | xargs | bash | sh | zsh | timeout | eval | caffeinate | stdbuf)
             wrapped=1
             continue
             ;;
@@ -101,6 +101,12 @@ is_commit() {
         esac
         if [[ $w != -* ]]; then
           sub=$w
+          # A plain alias (`git cm` for `commit -m`) gates as its first word
+          # does; a shell alias (`!cmd`) is not followed
+          case $sub in
+            commit | merge | cherry-pick | revert | rebase | am) ;;
+            *) aliased=$(git -C "$gitdir" config --get "alias.$sub" 2> /dev/null) && sub=${aliased%% *} ;;
+          esac
           [ "$sub" = commit ] && dir=$gitdir && return 0
           case $sub in merge | cherry-pick | revert | rebase | am) ;; *) break ;; esac
         fi
