@@ -1158,14 +1158,18 @@ active_profile() {
 # whose source is absent, so a profile restores exactly what it saved.
 copy_cookies() {
   local f
+  # Both files are staged before either is renamed, so a copy that fails
+  # leaves the destination's pair as it was.
+  for f in Cookies Cookies-journal; do
+    [[ ! -f $1/$f ]] || cp -p "$1/$f" "$2/$f.tmp" || {
+      rm -f "$2/Cookies.tmp" "$2/Cookies-journal.tmp"
+      return 1
+    }
+  done
   for f in Cookies Cookies-journal; do
     if [[ -f $1/$f ]]; then
-      cp -p "$1/$f" "$2/$f.tmp" || {
-        rm -f "$2/$f.tmp"
-        return 1
-      }
       mv "$2/$f.tmp" "$2/$f" || {
-        rm -f "$2/$f.tmp"
+        rm -f "$2/Cookies.tmp" "$2/Cookies-journal.tmp"
         return 1
       }
     else
