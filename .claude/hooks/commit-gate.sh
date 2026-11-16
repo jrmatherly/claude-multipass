@@ -44,7 +44,7 @@ enter() {
 is_commit() {
   local seg w first prev gitdir sub cddir wrapped aliased hops depth=0
   local -a saved
-  cddir=$cwd
+  cddir=${2:-$cwd}
   while IFS= read -r seg; do
     case $seg in
       '(')
@@ -118,10 +118,11 @@ is_commit() {
                 hops=$((hops + 1))
                 if [[ $aliased == '!'* ]]; then
                   ((alias_depth < 4)) || break
+                  # Git runs it from the repo, and its own cd or -C can move the commit
                   alias_depth=$((alias_depth + 1))
-                  is_commit "${aliased#!}" || break
-                  dir=$gitdir
-                  return 0
+                  is_commit "${aliased#!}" "$gitdir" && return 0
+                  alias_depth=$((alias_depth - 1))
+                  break
                 fi
                 aliased=${aliased//[\"\']/}
                 # shellcheck disable=SC2086 # split into words on purpose

@@ -37,6 +37,7 @@ git -C "$proj" config alias.c ci
 git -C "$proj" config alias.oc '-c commit.gpgsign=false commit'
 git -C "$proj" config alias.rc 'rebase --continue'
 git -C "$proj" config alias.pick cherry-pick
+git -C "$proj" config alias.shci '!git ci -m x'
 git -C "$proj" config alias.sq "'commit' -m"
 git -C "$proj" add test/check.sh .claude/hooks/commit-gate.sh
 git -C "$proj" commit -qm init
@@ -90,7 +91,7 @@ for c in 'git -C . commit --amend' 'git -c commit.gpgsign=false commit' '/usr/bi
   "git -C $other status; git commit -m x" '( git commit -m x )' 'true & git commit -m x' 'if true; then git commit -m x; fi' \
   '{ git commit -m x; }' 'echo $(git commit -m x)' 'echo `git commit -m x`' 'sudo git commit -m x' 'sudo -u root git commit' 'sudo -n -u root git commit' 'xargs git commit' \
   'nice -n 10 git commit' "(cd $other && ls); git commit -m x" \
-  'git cm x' 'git qc x' 'git ci' 'git c x' 'git oc x' 'git rc' 'git pick --continue' 'git sq x' 'git sh' 'rtk git commit -m x' 'gtimeout 600 git commit' 'noglob git commit -m x' 'cd $NOPE && git commit -m x' 'cd "$CLAUDE_PROJECT_DIR" && git cm x' 'timeout 600 git commit -m x' 'eval git commit -m x' 'caffeinate git commit -m x' 'stdbuf -o0 git commit'; do
+  'git cm x' 'git qc x' 'git ci' 'git c x' 'git oc x' 'git rc' 'git pick --continue' 'git sq x' 'git sh' 'git st; git st; git st; git st; git st; git sh' 'rtk git commit -m x' 'gtimeout 600 git commit' 'noglob git commit -m x' 'cd $NOPE && git commit -m x' 'cd "$CLAUDE_PROJECT_DIR" && git cm x' 'timeout 600 git commit -m x' 'eval git commit -m x' 'caffeinate git commit -m x' 'stdbuf -o0 git commit'; do
   rm -f "$STATE/check-ran"
   run "$c"
   [ -e "$STATE/check-ran" ] || fail "not gated: $c"
@@ -124,7 +125,7 @@ run 'git commit -m "x"'
 git -C "$proj" add -A && git -C "$proj" commit -qm settle
 # 7. from outside, a leading cd (absolute or relative) or git -C targets the repo
 for c in "cd $proj && git commit -m x" 'cd proj; git commit -m x' "git -C $proj commit -m x" \
-  "git -C $proj cm x" 'cd proj && git cm x' "git -C $other status; git -C proj cm x"; do
+  "git -C $proj cm x" "git -C $proj shci" 'cd proj && git cm x' "git -C $other status; git -C proj cm x"; do
   rm -f "$STATE/check-ran"
   run "$c" "$tmp"
   [ -e "$STATE/check-ran" ] || fail "not gated from outside: $c"
