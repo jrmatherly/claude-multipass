@@ -29,6 +29,7 @@ git -C "$proj" config commit.gpgsign false
 git -C "$proj" config core.hooksPath /dev/null
 git -C "$proj" config alias.cm 'commit -m'
 git -C "$proj" config alias.lg 'log --oneline'
+git -C "$proj" config alias.qc '"commit" -m'
 git -C "$proj" config alias.sh '!git commit'
 git -C "$proj" add test/check.sh .claude/hooks/commit-gate.sh
 git -C "$proj" commit -qm init
@@ -81,7 +82,7 @@ for c in 'git -C . commit --amend' 'git -c commit.gpgsign=false commit' '/usr/bi
   "git -C $other status; git commit -m x" '( git commit -m x )' 'true & git commit -m x' 'if true; then git commit -m x; fi' \
   '{ git commit -m x; }' 'echo $(git commit -m x)' 'echo `git commit -m x`' 'sudo git commit -m x' 'sudo -u root git commit' 'sudo -n -u root git commit' 'xargs git commit' \
   'nice -n 10 git commit' "(cd $other && ls); git commit -m x" \
-  'git cm x' 'timeout 600 git commit -m x' 'eval git commit -m x' 'caffeinate git commit -m x' 'stdbuf -o0 git commit'; do
+  'git cm x' 'git qc x' 'timeout 600 git commit -m x' 'eval git commit -m x' 'caffeinate git commit -m x' 'stdbuf -o0 git commit'; do
   rm -f "$STATE/check-ran"
   run "$c"
   [ -e "$STATE/check-ran" ] || fail "not gated: $c"

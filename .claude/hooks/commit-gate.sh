@@ -105,7 +105,10 @@ is_commit() {
           # does; a shell alias (`!cmd`) is not followed
           case $sub in
             commit | merge | cherry-pick | revert | rebase | am) ;;
-            *) aliased=$(git -C "$gitdir" config --get "alias.$sub" 2> /dev/null) && sub=${aliased%% *} ;;
+            *)
+              # Git unquotes an alias, so `"commit" -m` is a commit too
+              aliased=$(git -C "$gitdir" config --get "alias.$sub" 2> /dev/null) && aliased=${aliased//[\"\']/} && sub=${aliased%% *}
+              ;;
           esac
           [ "$sub" = commit ] && dir=$gitdir && return 0
           case $sub in merge | cherry-pick | revert | rebase | am) ;; *) break ;; esac

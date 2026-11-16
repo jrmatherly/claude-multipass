@@ -116,7 +116,7 @@ sparkle_importers=$(grep -rlE '^[[:space:]]*(@[A-Za-z_]+[[:space:]]+)*import[[:s
   exit 1
 }
 # Core stays free of UI frameworks, so its tests need no app
-core_importers=$(grep -rE '^[[:space:]]*(@[A-Za-z_]+[[:space:]]+)*import[[:space:]]' app/Sources/MultipassCore | grep -vE ':import Foundation$' | cut -d: -f1 | sort -u || true)
+core_importers=$(grep -rE '^[[:space:]]*((@[A-Za-z_]+|public|package|internal|fileprivate|private)[[:space:]]+)*import[[:space:]]' app/Sources/MultipassCore | grep -vE ':import Foundation$' | cut -d: -f1 | sort -u || true)
 [[ -z $core_importers ]] || {
   echo "check: MultipassCore may import only Foundation, found: $core_importers" >&2
   exit 1
