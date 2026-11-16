@@ -22,7 +22,7 @@
 #
 # `claude-multipass switch {{name}}`
 #
-# - Save an LLM Router profile under a name (no quit, no Keychain); switching to it quits Claude and runs `llmr {{llmr_profile}} app`:
+# - Save an LLM Router profile under a name (no quit; with --force over a claude.ai profile, that profile's CLI item is deleted); switching to it quits Claude and runs `llmr {{llmr_profile}} app`:
 #
 # `claude-multipass save {{name}} --llmr {{llmr_profile}}`
 #
@@ -439,8 +439,11 @@ EOF
 jq_write() {
   local dest=$1 out
   shift
-  out=$(jq --tab "$@")
-  (umask 077 && printf '%s' "$out" > "$dest.tmp")
+  out=$(jq --tab "$@") || return 1
+  (umask 077 && printf '%s' "$out" > "$dest.tmp") || {
+    rm -f "$dest.tmp"
+    return 1
+  }
   mv "$dest.tmp" "$dest"
 }
 
@@ -722,6 +725,10 @@ cli_capture() {
     warning "$name: $(keychain_exit "$rc") reading the CLI login; saved the Desktop login only"
     return 0
   fi
+  if ! printf '%s' "$live" | jq -e '.claudeAiOauth != null' > /dev/null 2>&1; then
+    warning "$name: the live CLI login holds no tokens; saved the Desktop login only"
+    return 0
+  fi
   if cli_cleared "$live"; then
     warning "$name: Claude Code cleared its login; switch to $name, run claude auth login, then save $name"
     return 0
@@ -883,7 +890,11 @@ hindsight_pause() {
 # no copy.
 cli_backup() {
   local live=$1 part
-  [[ -n $backup_dest ]] || backup_login
+  [[ -n $backup_dest ]] || backup_login || {
+    backup_dest=''
+    warning "could not back up the current login; switched Desktop only"
+    return 1
+  }
   if [[ -n $live ]] && ! { part=$(printf '%s' "$live" | cli_account_part) && printf '%s' "$part" | keychain_put "$mp_service" "$(basename "$backup_dest")"; }; then
     warning "could not back up the CLI login; switched Desktop only"
     return 1
@@ -943,6 +954,10 @@ cli_restore() {
     && printf '%s' "$cli_live" | jq -e '.claudeAiOauth != null' > /dev/null 2>&1 && ! cli_cleared "$cli_live"; then
     cli_capture "$name"
     dbg "cli restore already on $(cli_signed_in_as)"
+    return 0
+  fi
+  if ! jq -e '.oauthAccount.accountUuid | strings' "$dir/cli.json" > /dev/null 2>&1; then
+    warning "the saved CLI identity for $name is unreadable; run claude auth login, then save $name"
     return 0
   fi
   if ((rc == 44)); then live=''; elif ((rc != 0)); then
@@ -1136,7 +1151,15 @@ active_profile() {
 copy_cookies() {
   local f
   for f in Cookies Cookies-journal; do
-    if [[ -f $1/$f ]]; then cp -p "$1/$f" "$2/$f"; else rm -f "$2/$f"; fi
+    if [[ -f $1/$f ]]; then
+      cp -p "$1/$f" "$2/$f.tmp" || {
+        rm -f "$2/$f.tmp"
+        return 1
+      }
+      mv "$2/$f.tmp" "$2/$f"
+    else
+      rm -f "$2/$f"
+    fi
   done
 }
 
@@ -1146,9 +1169,9 @@ backup_dest=''
 backup_login() {
   local old i all
   backup_dest="$backups/login-$(date +%Y%m%d-%H%M%S)-$$"
-  (umask 077 && mkdir -p "$backup_dest")
-  cp -p "$config" "$backup_dest/config.json"
-  copy_cookies "$cookies" "$backup_dest"
+  (umask 077 && mkdir -p "$backup_dest") || return 1
+  cp -p "$config" "$backup_dest/config.json" || return 1
+  copy_cookies "$cookies" "$backup_dest" || return 1
   echo "Backed up the current login to $backup_dest"
   # A glob, not ls, so a store path with a space never splits; names sort by
   # time. The folder just made is left out of the candidates rather than

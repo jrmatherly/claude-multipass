@@ -1423,6 +1423,7 @@ enc=$(encrypt "${plain//FUTURE/$future}")
 jq -n --arg v "$enc" '{"oauth:tokenCacheV2":$v,"lastKnownAccountUuid":"vvvvvvvv-1"}' > "$d/config.json"
 check "usage adds a (signed in) row for an unsaved live login" "(signed in)      $expected" "$(cda usage | grep '^(signed in) ')"
 check "but not when one name is asked for" 0 "$(cda usage usagey | grep -c '^(signed in)' || true)"
+check "Raycast usage passes through not saved" "not saved" "$("$raycast/claude-account-usage.sh")"
 : > "$tmp/stdin-types"
 cda_stdin usage > /dev/null
 check "usage passes the decrypted token cache to jq through a pipe" 0 "$(grep -c 'Regular File' "$tmp/stdin-types" || true)"
@@ -1651,6 +1652,8 @@ check_true "the probe asks the gateway's health route, skipping curlrc and proxi
 check "list marks it" 1 "$(cda list | grep -c '^\* router           llmr router-p  ')"
 check "and marks no claude.ai account" 1 "$(cda list | grep -c '^\*')"
 check "list --json names it current" router "$(cda list --json | jq -r .current)"
+check "Raycast usage names a running LLMR profile" router "$("$raycast/claude-account-usage.sh" 2> /dev/null)"
+check "and exits 0" 0 "$(exit_code "$raycast/claude-account-usage.sh")"
 printf '#!/bin/sh\ncase "$*" in *3456/health*) exit 7 ;; esac\nexit 0\n' > "$tmp/bin/curl"
 check "current warns when the gateway does not answer" "router: LLMR profile, gateway not running" "$(cda current 2>&1 > /dev/null)"
 check "and still prints the profile" router "$(cda current 2> /dev/null)"
@@ -2451,6 +2454,58 @@ cp "$tmp/home/.config/claude-multipass/profiles/old/"* "$tmp/home2/.config/dotfi
 env -u CLAUDE_MULTIPASS_DIR XDG_CONFIG_HOME="$tmp/home2/.config" "$script" list > /dev/null 2> "$tmp/migrate-err2"
 check_true "migration warns when the new backups folder already exists" grep -q "Left $tmp/home2/.config/dotfiles/claude-desktop-accounts-backups in place" "$tmp/migrate-err2"
 check_true "and leaves the legacy backups where they were" test -d "$tmp/home2/.config/dotfiles/claude-desktop-accounts-backups"
+
+#@ failclosed needs switch
+# The switch section leaves Desktop and the CLI on beta.
+errs() { { TERM=dumb "$@" > /dev/null; } 2>&1 || true; }
+# Earlier sections leave either profile's identity file on another account.
+for n in alpha beta; do
+  printf '{"oauthAccount":{"accountUuid":"%s","emailAddress":"%s@example.com","organizationUuid":"org-%s"}}' "$(jq -r .account "$p/$n/meta.json")" "$n" "$n" > "$p/$n/cli.json"
+done
+check "failclosed starts on alpha" 0 "$(exit_code cda switch alpha --no-relaunch)"
+# a failed identity write keeps the old file and says so
+mkdir -p "$tmp/jqfail"
+printf '#!/bin/sh\ncase "$*" in *"--tab {oauthAccount}"*) exit 5 ;; esac\nPATH=${PATH#*/jqfail:} exec jq "$@"\n' > "$tmp/jqfail/jq"
+chmod +x "$tmp/jqfail/jq"
+before=$(cksum < "$p/alpha/cli.json")
+out=$(PATH="$tmp/jqfail:$PATH" errs cda save alpha --no-relaunch)
+check_true "save warns when cli.json cannot be written" grep -q 'could not write .*alpha/cli.json' <<< "$out"
+check "and keeps the old cli.json" "$before" "$(cksum < "$p/alpha/cli.json")"
+check_true "and leaves no temp file" test ! -e "$p/alpha/cli.json.tmp"
+# an empty saved identity is never restored
+cp "$p/beta/cli.json" "$tmp/beta-cli.json"
+: > "$p/beta/cli.json"
+live=$(jq -c .oauthAccount "$tmp/claude.json")
+out=$(errs cda switch beta --no-relaunch)
+check_true "switch refuses an unreadable cli.json" grep -q 'the saved CLI identity for beta is unreadable; run claude auth login, then save beta' <<< "$out"
+check "and keeps oauthAccount in the CLI config" "$live" "$(jq -c .oauthAccount "$tmp/claude.json")"
+cp "$tmp/beta-cli.json" "$p/beta/cli.json"
+# Desktop is on beta and the CLI still on alpha: the same-account repair, with no backup made yet
+token=$(kc_get "Claude Code-credentials" "$USER" | jq -r .claudeAiOauth.accessToken)
+chmod 500 "$b"
+out=$(cda switch beta --no-relaunch 2>&1 || true)
+chmod 700 "$b"
+check "a backup that cannot be made is not announced" 0 "$(grep -c 'Backed up the current login' <<< "$out" || true)"
+check_true "and the run says so" grep -q 'could not back up the current login; switched Desktop only' <<< "$out"
+check "and the CLI login is not written" "$token" "$(kc_get "Claude Code-credentials" "$USER" | jq -r .claudeAiOauth.accessToken)"
+check "the repair then works" 0 "$(exit_code cda switch beta --no-relaunch)"
+check "and moves the CLI to beta" "$(jq -r .account "$p/beta/meta.json")" "$(jq -r .oauthAccount.accountUuid "$tmp/claude.json")"
+# an item with shared keys and no login is not a CLI login
+saved=$(kc_get claude-multipass beta)
+live_now=$(kc_get "Claude Code-credentials" "$USER")
+kc_put "Claude Code-credentials" "$USER" '{"mcpOAuth":{"srv":"shared"}}'
+out=$(errs cda save beta --no-relaunch)
+check_true "save names an item with no tokens" grep -q 'beta: the live CLI login holds no tokens; saved the Desktop login only' <<< "$out"
+check "and keeps the profile's saved CLI login" "$saved" "$(kc_get claude-multipass beta)"
+kc_put "Claude Code-credentials" "$USER" "$live_now"
+# a cookie copy that dies leaves the live file whole
+printf '#!/bin/sh\nfor a; do last=$a; done\ncase "$last" in "%s/Cookies" | "%s/Cookies.tmp") printf half > "$last"; exit 1 ;; esac\nexec /bin/cp "$@"\n' "$d" "$d" > "$tmp/bin/cp"
+chmod +x "$tmp/bin/cp"
+before=$(cat "$d/Cookies")
+check "a switch whose cookie copy dies fails" 1 "$(exit_code cda switch alpha --no-relaunch)"
+check "and leaves the live Cookies file whole" "$before" "$(cat "$d/Cookies")"
+check_true "and no temp file" test ! -e "$d/Cookies.tmp"
+rm "$tmp/bin/cp"
 
 #@ done
 [[ $# -gt 0 ]] || echo "All claude-multipass checks passed"

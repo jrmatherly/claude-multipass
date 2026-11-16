@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- A profile's CLI identity file (`cli.json`) that cannot be written now keeps its old contents and warns `could not write`. Before, the write could fail without a word and leave an empty file, and the next switch to that profile then cleared the account from `~/.claude.json`.
+- `switch` no longer restores a CLI login from an identity file that is empty or names no account. It warns `the saved CLI identity for <name> is unreadable; run claude auth login, then save <name>` and switches Desktop only.
+- `save` no longer stores a Claude Code Keychain item that holds no login (shared MCP keys only). It warns `the live CLI login holds no tokens` and keeps the profile's saved CLI login.
+- A same-account switch that cannot make its backup folder now warns `could not back up the current login; switched Desktop only`. Before, it printed `Backed up the current login` for a backup it had not made.
+- The Raycast usage command shows the profile's name while an LLM Router profile is running. Before, it showed an error on every refresh.
+
 ## 0.14.0 (2026-11-03)
 
 - `doctor` now warns when `~/.claude/.credentials.json` exists. Claude Code reads that file when the Keychain has no item or is locked, and a switch does not move it.
