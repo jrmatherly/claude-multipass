@@ -22,7 +22,7 @@
 #
 # `claude-multipass switch {{name}}`
 #
-# - Save an LLM Router profile under a name (no quit, no Keychain); switching to it quits Claude and runs `llmr {{llmr_profile}} app`:
+# - Save an LLM Router profile under a name (no quit; with --force over a claude.ai profile, that profile's CLI item is deleted); switching to it quits Claude and runs `llmr {{llmr_profile}} app`:
 #
 # `claude-multipass save {{name}} --llmr {{llmr_profile}}`
 #
@@ -439,8 +439,11 @@ EOF
 jq_write() {
   local dest=$1 out
   shift
-  out=$(jq --tab "$@")
-  (umask 077 && printf '%s' "$out" > "$dest.tmp")
+  out=$(jq --tab "$@") || return 1
+  (umask 077 && printf '%s' "$out" > "$dest.tmp") || {
+    rm -f "$dest.tmp"
+    return 1
+  }
   mv "$dest.tmp" "$dest"
 }
 
@@ -722,6 +725,11 @@ cli_capture() {
     warning "$name: $(keychain_exit "$rc") reading the CLI login; saved the Desktop login only"
     return 0
   fi
+  # The positive test, so an item that is not JSON reaches its own warning below.
+  if printf '%s' "$live" | jq -e '.claudeAiOauth == null' > /dev/null 2>&1; then
+    warning "$name: the live CLI login holds no tokens; saved the Desktop login only"
+    return 0
+  fi
   if cli_cleared "$live"; then
     warning "$name: Claude Code cleared its login; switch to $name, run claude auth login, then save $name"
     return 0
@@ -883,7 +891,11 @@ hindsight_pause() {
 # no copy.
 cli_backup() {
   local live=$1 part
-  [[ -n $backup_dest ]] || backup_login
+  [[ -n $backup_dest ]] || backup_login || {
+    backup_dest=''
+    warning "could not back up the current login; switched Desktop only"
+    return 1
+  }
   if [[ -n $live ]] && ! { part=$(printf '%s' "$live" | cli_account_part) && printf '%s' "$part" | keychain_put "$mp_service" "$(basename "$backup_dest")"; }; then
     warning "could not back up the CLI login; switched Desktop only"
     return 1
@@ -945,6 +957,10 @@ cli_restore() {
     dbg "cli restore already on $(cli_signed_in_as)"
     return 0
   fi
+  if ! jq -e '.oauthAccount.accountUuid | strings' "$dir/cli.json" > /dev/null 2>&1; then
+    warning "the saved CLI identity for $name is unreadable; run claude auth login, then save $name"
+    return 0
+  fi
   if ((rc == 44)); then live=''; elif ((rc != 0)); then
     warning "$(keychain_exit "$rc") reading the CLI login; switched Desktop only"
     return 0
@@ -958,6 +974,13 @@ cli_restore() {
     return 0
   elif ((rc != 0)); then
     warning "$(keychain_exit "$rc") reading the saved CLI login; switched Desktop only"
+    return 0
+  fi
+  if ! printf '%s' "$saved" | jq -e . > /dev/null 2>&1; then
+    warning "the live or saved CLI login is not valid JSON; switched Desktop only"
+    return 0
+  elif printf '%s' "$saved" | jq -e '.claudeAiOauth == null' > /dev/null 2>&1; then
+    warning "the saved CLI login for $name holds no tokens; run claude auth login, then save $name"
     return 0
   fi
   merged=$saved
@@ -1135,8 +1158,23 @@ active_profile() {
 # whose source is absent, so a profile restores exactly what it saved.
 copy_cookies() {
   local f
+  # Both files are staged before either is renamed, so a copy that fails
+  # leaves the destination's pair as it was.
   for f in Cookies Cookies-journal; do
-    if [[ -f $1/$f ]]; then cp -p "$1/$f" "$2/$f"; else rm -f "$2/$f"; fi
+    [[ ! -f $1/$f ]] || cp -p "$1/$f" "$2/$f.tmp" || {
+      rm -f "$2/Cookies.tmp" "$2/Cookies-journal.tmp"
+      return 1
+    }
+  done
+  for f in Cookies Cookies-journal; do
+    if [[ -f $1/$f ]]; then
+      mv "$2/$f.tmp" "$2/$f" || {
+        rm -f "$2/Cookies.tmp" "$2/Cookies-journal.tmp"
+        return 1
+      }
+    else
+      rm -f "$2/$f" || return 1
+    fi
   done
 }
 
@@ -1146,9 +1184,11 @@ backup_dest=''
 backup_login() {
   local old i all
   backup_dest="$backups/login-$(date +%Y%m%d-%H%M%S)-$$"
-  (umask 077 && mkdir -p "$backup_dest")
-  cp -p "$config" "$backup_dest/config.json"
-  copy_cookies "$cookies" "$backup_dest"
+  # A partial folder would count toward the ten kept and push out a whole one.
+  { (umask 077 && mkdir -p "$backup_dest") && cp -p "$config" "$backup_dest/config.json" && copy_cookies "$cookies" "$backup_dest"; } || {
+    rm -rf "$backup_dest"
+    return 1
+  }
   echo "Backed up the current login to $backup_dest"
   # A glob, not ls, so a store path with a space never splits; names sort by
   # time. The folder just made is left out of the candidates rather than
@@ -1159,7 +1199,10 @@ backup_login() {
   for old in "$backups"/login-*/; do [[ ${old%/} == "$backup_dest" ]] || all+=("$old"); done
   for ((i = 0; i < ${#all[@]} - (backup_keep - 1); i++)); do
     old=${all[i]}
-    rm -rf "$old"
+    rm -rf "$old" || {
+      warning "could not remove $old"
+      continue
+    }
     keychain_delete "$mp_service" "$(basename "$old")" || warning "could not delete the Keychain item for $old"
   done
 }
@@ -1232,10 +1275,16 @@ profile_save() {
 profile_restore() {
   local name=$1 dir="$store/$1"
   backup_login
+  # Cookies first, and put back when the config write fails, so a failed
+  # switch leaves the login it found. A run killed between the two is not
+  # covered: config.json then names the old account over the new cookies.
+  copy_cookies "$dir" "$cookies" || fail "could not copy $name's cookies; the previous login is in $backup_dest"
   jq_write "$config" --slurpfile p "$dir/config.json" --argjson k "$auth_keys" \
     'reduce $k[] as $x (.; if $p[0] | has($x) then .[$x] = $p[0][$x] else del(.[$x]) end)' \
-    "$config"
-  copy_cookies "$dir" "$cookies"
+    "$config" || {
+    copy_cookies "$backup_dest" "$cookies" || warning "could not put the previous cookies back; they are in $backup_dest"
+    fail "could not write $config; the previous login is in $backup_dest"
+  }
   cli_restore "$name"
   echo "Restored $name"
 }

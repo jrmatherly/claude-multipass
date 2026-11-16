@@ -28,5 +28,11 @@ command -v "$cda" > /dev/null || {
 name=$("$cda" current)
 case $name in
   "not saved" | "signed out") echo "$name" ;;
-  *) "$cda" usage "$name" ;;
+  *)
+    kind=$("$cda" list --json | jq -r --arg n "$name" '.profiles[] | select(.name == $n) | .kind // ""') || {
+      echo "could not read the account list"
+      exit 1
+    }
+    if [[ $kind == llmr ]]; then echo "$name"; else "$cda" usage "$name"; fi
+    ;;
 esac

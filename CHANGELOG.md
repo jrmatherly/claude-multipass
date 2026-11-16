@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- A profile's CLI identity file (`cli.json`) that cannot be written now keeps its old contents and warns `could not write`. Before, the write could fail without a word and leave an empty file, and the next switch to that profile then cleared the account from `~/.claude.json`.
+- `switch` no longer restores a CLI login from an identity file that is empty or names no account. It warns `the saved CLI identity for <name> is unreadable; run claude auth login, then save <name>` and switches Desktop only.
+- `save` no longer stores a Claude Code Keychain item that holds no login (shared MCP keys only). It warns `the live CLI login holds no tokens` and keeps the profile's saved CLI login.
+- A switch that cannot make or fill its backup folder now warns `could not back up the current login; switched Desktop only` and removes the partial folder. Before, a same-account switch printed `Backed up the current login` for a backup it had not made.
+- A `switch` whose cookie copy or `config.json` write fails now leaves the login it found and says where the backup is (`could not copy <name>'s cookies; the previous login is in <folder>`, `could not write <config.json>; the previous login is in <folder>`). Before, a failed cookie copy left Desktop with the new account's token and the old account's cookies, and a retry reported `already signed in` without repairing it. A run that is killed between the two writes is still not repaired.
+- `switch` no longer writes a saved CLI login that holds no tokens over the live one. It warns `the saved CLI login for <name> holds no tokens; run claude auth login, then save <name>`.
+- The Raycast usage command shows the profile's name while an LLM Router profile is running. Before, it showed an error on every refresh. When the account list cannot be read it says `could not read the account list`.
+
 ## 0.14.0 (2026-11-03)
 
 - `doctor` now warns when `~/.claude/.credentials.json` exists. Claude Code reads that file when the Keychain has no item or is locked, and a switch does not move it.
