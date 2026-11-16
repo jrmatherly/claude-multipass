@@ -224,3 +224,19 @@ Run the `docs-audit` skill on the branch and fix what it finds in this PR.
 - [ ] **Step 3: Push and open the PR against `main`**
 
 The description quotes finding 5's drift numbers, and carries the shots. Add for Jason, on a real Mac: "With usage on, wait for an idle account to lapse, then confirm its panel shows the figures and their age, and that the strip does not." Stop at merge-ready.
+
+## Gate result
+
+Not decided yet. One of the two readings is in.
+
+**Reading 1, 2026-11-16 14:31 EST** (`claude-multipass usage`, run by Jason):
+
+| Account | Line | Last saved (`list`) | Lapsed |
+| --- | --- | --- | --- |
+| `matherly-gmail` | Ultra, 7d 63%, Fable 96% | 2026-11-16 13:28 UTC | no |
+| `matherly` | Ultra, 7d 0%, Fable 0% | 2026-11-13 13:26 UTC, about 3 days idle | no |
+| `spoons` | Ultra, 7d 47%, Fable 63% | 2026-11-08 16:05 UTC, the current account | no |
+
+No account showed `token expired` or `token lapsed`. `matherly` read after about three days idle, which already points at the stop rule in Step 2. "Last saved" is the profile's `savedAt`, the last time the tool saved that login, taken here as when the account was last in use.
+
+**Reading 2:** due about 12 hours later, on or after 2026-11-17 02:30 EST.
