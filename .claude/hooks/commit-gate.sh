@@ -42,7 +42,7 @@ enter() {
 # segment's target. Known misses: git -C "$(...)" commit, sudo -u git git
 # commit, and a cd inside backticks, which is not undone when they close
 is_commit() {
-  local seg w first prev gitdir sub cddir wrapped aliased depth=0
+  local seg w first prev gitdir sub cddir wrapped aliased hops depth=0
   local -a saved
   cddir=$cwd
   while IFS= read -r seg; do
@@ -65,12 +65,17 @@ is_commit() {
     sub=""
     wrapped=""
     gitdir=$cddir
-    for w in $seg; do
+    hops=0
+    # shellcheck disable=SC2086 # split into words on purpose
+    set -- $seg
+    while (($#)); do
+      w=$1
+      shift
       if [ -z "$first" ]; then
         [[ $w =~ ^[A-Za-z_][A-Za-z0-9_]*= || $w == -* ]] && continue
         case ${w##*/} in
           # Wrappers that run the words after them as the command
-          env | command | builtin | exec | nohup | time | nice | sudo | xargs | bash | sh | zsh | timeout | eval | caffeinate | stdbuf)
+          env | command | builtin | exec | nohup | time | nice | sudo | xargs | bash | sh | zsh | timeout | gtimeout | eval | caffeinate | stdbuf | noglob | rtk)
             wrapped=1
             continue
             ;;
@@ -101,13 +106,30 @@ is_commit() {
         esac
         if [[ $w != -* ]]; then
           sub=$w
-          # A plain alias (`git cm` for `commit -m`) gates as its first word
-          # does; a shell alias (`!cmd`) is not followed
+          # Git expands an alias in place and unquotes it, so its words go
+          # back through this loop: `cm` for `commit -m`, an alias of an
+          # alias, one that starts with `-c key=value`, `rebase --continue`.
+          # A shell alias (`!cmd`) is a command line of its own
           case $sub in
             commit | merge | cherry-pick | revert | rebase | am) ;;
             *)
-              # Git unquotes an alias, so `"commit" -m` is a commit too
-              aliased=$(git -C "$gitdir" config --get "alias.$sub" 2> /dev/null) && aliased=${aliased//[\"\']/} && sub=${aliased%% *}
+              [ -d "$gitdir" ] || gitdir=$cwd
+              if ((hops < 8)) && aliased=$(git -C "$gitdir" config --get "alias.$sub" 2> /dev/null); then
+                hops=$((hops + 1))
+                if [[ $aliased == '!'* ]]; then
+                  ((alias_depth < 4)) || break
+                  alias_depth=$((alias_depth + 1))
+                  is_commit "${aliased#!}" || break
+                  dir=$gitdir
+                  return 0
+                fi
+                aliased=${aliased//[\"\']/}
+                # shellcheck disable=SC2086 # split into words on purpose
+                set -- $aliased "$@"
+                sub=""
+                prev=""
+                continue
+              fi
               ;;
           esac
           [ "$sub" = commit ] && dir=$gitdir && return 0
@@ -126,7 +148,11 @@ is_commit() {
   return 1
 }
 
+alias_depth=0
 is_commit "$command" || exit 0
+# A cd or -C target this parser cannot resolve (`cd "$VAR"`, `cd -`) must not
+# skip the gate, so the commit is taken to be in the session's directory
+[ -d "$dir" ] || dir=$cwd
 root=$(git -C "$dir" rev-parse --show-toplevel 2> /dev/null) || exit 0
 # Gate only repos that ship this hook, so a commit in a foreign repo never
 # runs that repo's check script. When a worktree's own copy differs from this

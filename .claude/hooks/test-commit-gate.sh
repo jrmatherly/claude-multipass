@@ -30,7 +30,14 @@ git -C "$proj" config core.hooksPath /dev/null
 git -C "$proj" config alias.cm 'commit -m'
 git -C "$proj" config alias.lg 'log --oneline'
 git -C "$proj" config alias.qc '"commit" -m'
-git -C "$proj" config alias.sh '!git commit'
+git -C "$proj" config alias.sh '!git add . && git commit'
+git -C "$proj" config alias.st '!git status'
+git -C "$proj" config alias.ci commit
+git -C "$proj" config alias.c ci
+git -C "$proj" config alias.oc '-c commit.gpgsign=false commit'
+git -C "$proj" config alias.rc 'rebase --continue'
+git -C "$proj" config alias.pick cherry-pick
+git -C "$proj" config alias.sq "'commit' -m"
 git -C "$proj" add test/check.sh .claude/hooks/commit-gate.sh
 git -C "$proj" commit -qm init
 
@@ -56,7 +63,8 @@ run() {
   local payload
   payload=$(jq -cn --arg c "$1" --arg d "${2:-$proj}" '{tool_name:"Bash",tool_input:{command:$c},cwd:$d}')
   rc=0
-  out=$(CLAUDE_PROJECT_DIR=$proj PATH="$tmp/bin:$PATH" "$hook" <<< "$payload" 2> "$tmp/stderr") || rc=$?
+  # No host aliases: a global `alias.cm` would gate `git cm` whatever the hook reads
+  out=$(GIT_CONFIG_GLOBAL=/dev/null CLAUDE_PROJECT_DIR=$proj PATH="$tmp/bin:$PATH" "$hook" <<< "$payload" 2> "$tmp/stderr") || rc=$?
   err=$(cat "$tmp/stderr")
 }
 touch_path() {
@@ -82,7 +90,7 @@ for c in 'git -C . commit --amend' 'git -c commit.gpgsign=false commit' '/usr/bi
   "git -C $other status; git commit -m x" '( git commit -m x )' 'true & git commit -m x' 'if true; then git commit -m x; fi' \
   '{ git commit -m x; }' 'echo $(git commit -m x)' 'echo `git commit -m x`' 'sudo git commit -m x' 'sudo -u root git commit' 'sudo -n -u root git commit' 'xargs git commit' \
   'nice -n 10 git commit' "(cd $other && ls); git commit -m x" \
-  'git cm x' 'git qc x' 'timeout 600 git commit -m x' 'eval git commit -m x' 'caffeinate git commit -m x' 'stdbuf -o0 git commit'; do
+  'git cm x' 'git qc x' 'git ci' 'git c x' 'git oc x' 'git rc' 'git pick --continue' 'git sq x' 'git sh' 'rtk git commit -m x' 'gtimeout 600 git commit' 'noglob git commit -m x' 'cd $NOPE && git commit -m x' 'cd "$CLAUDE_PROJECT_DIR" && git cm x' 'timeout 600 git commit -m x' 'eval git commit -m x' 'caffeinate git commit -m x' 'stdbuf -o0 git commit'; do
   rm -f "$STATE/check-ran"
   run "$c"
   [ -e "$STATE/check-ran" ] || fail "not gated: $c"
@@ -90,7 +98,7 @@ done
 # 4. mentions of the word do not gate, nor do commands whose commit tree is not on disk yet
 for c in 'pre-commit run' 'echo "git commit"' 'git commit-tree HEAD^{tree}' 'git log --grep commit' 'git show commit' 'git -c commit.gpgsign=false log' \
   'git merge feature' 'git merge --abort' 'git rebase main' 'git cherry-pick abc' 'git revert HEAD' 'git pull' \
-  'sudo git log --grep commit' 'git lg' 'git sh'; do
+  'sudo git log --grep commit' 'git lg' 'git st'; do
   rm -f "$STATE/check-ran"
   run "$c"
   [ ! -e "$STATE/check-ran" ] || fail "wrongly gated: $c"
@@ -115,7 +123,8 @@ run 'git commit -m "x"'
 [ "$rc" -eq 0 ] && grep -q CHANGELOG <<< "$out" && ! grep -q README <<< "$out" || fail "app/Sources change: expected only the changelog reminder"
 git -C "$proj" add -A && git -C "$proj" commit -qm settle
 # 7. from outside, a leading cd (absolute or relative) or git -C targets the repo
-for c in "cd $proj && git commit -m x" 'cd proj; git commit -m x' "git -C $proj commit -m x"; do
+for c in "cd $proj && git commit -m x" 'cd proj; git commit -m x' "git -C $proj commit -m x" \
+  "git -C $proj cm x" 'cd proj && git cm x' "git -C $other status; git -C proj cm x"; do
   rm -f "$STATE/check-ran"
   run "$c" "$tmp"
   [ -e "$STATE/check-ran" ] || fail "not gated from outside: $c"

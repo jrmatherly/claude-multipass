@@ -115,8 +115,13 @@ sparkle_importers=$(grep -rlE '^[[:space:]]*(@[A-Za-z_]+[[:space:]]+)*import[[:s
   echo "check: only SparkleUpdater.swift may import Sparkle, found: $sparkle_importers" >&2
   exit 1
 }
-# Core stays free of UI frameworks, so its tests need no app
-core_importers=$(grep -rE '^[[:space:]]*((@[A-Za-z_]+|public|package|internal|fileprivate|private)[[:space:]]+)*import[[:space:]]' app/Sources/MultipassCore | grep -vE ':import Foundation$' | cut -d: -f1 | sort -u || true)
+# Core stays free of UI frameworks, so its tests need no app. The folder is
+# checked first: grep on a missing one fails into the `|| true` and passes
+[[ -d app/Sources/MultipassCore ]] || {
+  echo "check: app/Sources/MultipassCore is missing, so its imports cannot be checked" >&2
+  exit 1
+}
+core_importers=$(grep -rE '^[[:space:]]*((@[A-Za-z_]+(\([^)]*\))?|public|package|internal|fileprivate|private)[[:space:]]+)*import[[:space:]]' app/Sources/MultipassCore | grep -vE ':import Foundation$' | cut -d: -f1 | sort -u || true)
 [[ -z $core_importers ]] || {
   echo "check: MultipassCore may import only Foundation, found: $core_importers" >&2
   exit 1

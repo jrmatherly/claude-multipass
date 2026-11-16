@@ -73,7 +73,8 @@ asks=(claude-multipass bin/claude-multipass ./bin/claude-multipass "bash bin/cla
   '"/Users/x/bin/claude-multipass" switch w' "bash 'bin/claude-multipass' sync"
   "cd bin && ./claude-multipass switch w" "timeout 60 claude-multipass switch w" "env FOO=1 claude-multipass save w" "echo w | xargs claude-multipass switch")
 bundled="/Applications/Claude Multipass.app/Contents/Resources/claude-multipass"
-for prefix in claude-multipass bin/claude-multipass ./bin/claude-multipass "bash bin/claude-multipass" "$root/bin/claude-multipass" "\"$bundled\"" "bash \"$bundled\""; do
+for prefix in claude-multipass bin/claude-multipass ./bin/claude-multipass "bash bin/claude-multipass" "$root/bin/claude-multipass" "\"$bundled\"" "bash \"$bundled\"" \
+  "cd bin && ./claude-multipass" "timeout 60 claude-multipass" "env FOO=1 claude-multipass" "echo w | xargs claude-multipass"; do
   for cmd in switch add save remove rename sync usage pick; do
     asks+=("$prefix $cmd w")
   done
