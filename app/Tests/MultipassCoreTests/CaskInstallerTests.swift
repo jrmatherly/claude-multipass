@@ -301,3 +301,10 @@ private let miseUpgrade = ["bootstrap", "packages", "upgrade", "--yes", "brew:jr
   let problem = try #require(await h.problem())
   #expect(problem.detail == nil)
 }
+
+// An app opened from Finder has none of the shell's variables, so mise is told where this bundle lives.
+@Test func miseIsToldTheFolderThisAppIsIn() {
+  let app = URL(fileURLWithPath: "/Users/me/Applications/Claude Multipass.app", isDirectory: true)
+  #expect(CaskInstaller.Manager.mise.environment(forAppAt: app) == ["MISE_BREW_CASK_OPT_APPDIR": "/Users/me/Applications"])
+  #expect(CaskInstaller.Manager.homebrew.environment(forAppAt: app) == CaskInstaller.Manager.homebrew.environment)
+}

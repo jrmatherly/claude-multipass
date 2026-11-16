@@ -206,6 +206,15 @@ public final class CaskInstaller: Installer {
     /// What About offers to copy when the upgrade fails.
     public let command: String
     public let environment: [String: String]
+    /// The variable that names the folder casks install into, where the manager reads one.
+    var appDirVariable: String? = nil
+
+    /// For a run from this app. Opened from Finder it has none of the shell's variables, so
+    /// an install outside /Applications made with one would be upgraded into the default folder.
+    public func environment(forAppAt app: URL) -> [String: String] {
+      guard let appDirVariable else { return environment }
+      return environment.merging([appDirVariable: app.deletingLastPathComponent().path]) { _, here in here }
+    }
 
     private static let formula = "jrmatherly/tap/claude-multipass"
     private static let cask = "jrmatherly/tap/claude-multipass-app"
@@ -225,7 +234,7 @@ public final class CaskInstaller: Installer {
     /// One run: mise refreshes the tap itself, and skips a name its config does not declare.
     public static let mise: Manager = {
       let upgrade = ["bootstrap", "packages", "upgrade", "--yes", "brew:\(formula)", "brew-cask:\(cask)"]
-      return Manager(name: "mise", steps: [Step(stage: .upgrading, arguments: upgrade)], command: "mise " + upgrade.joined(separator: " "), environment: [:])
+      return Manager(name: "mise", steps: [Step(stage: .upgrading, arguments: upgrade)], command: "mise " + upgrade.joined(separator: " "), environment: [:], appDirVariable: "MISE_BREW_CASK_OPT_APPDIR")
     }()
   }
 

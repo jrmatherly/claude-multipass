@@ -75,7 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       installer: { [sparkle] kind in
         if let cask = kind.cask {
           return CaskInstaller(
-            runner: CLI(executable: cask.tool, mutatingTimeout: CaskInstaller.timeout, extraEnvironment: cask.manager.environment),
+            runner: CLI(executable: cask.tool, mutatingTimeout: CaskInstaller.timeout, extraEnvironment: cask.manager.environment(forAppAt: bundleURL)),
             manager: cask.manager,
             appURL: bundleURL,
             diskVersion: diskVersion,
