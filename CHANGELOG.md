@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.15.0 (2026-11-16)
 
 - The app's Update and relaunch button now works when mise installed the cask. It runs `mise bootstrap packages upgrade` for the tool and the app, and About says `Updates with mise`. Before, on a Mac with no `brew`, the button said `Homebrew installed this app, but brew was not found`.
 
