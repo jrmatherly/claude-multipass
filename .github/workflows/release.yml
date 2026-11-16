@@ -7,6 +7,11 @@ on:
 permissions:
   contents: read
 
+# Two runs for one tag would race on the release and its assets
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   # Builds, signs and notarizes with a read-only token; only release below can write
   build:
@@ -38,11 +43,7 @@ jobs:
           echo "$SHELLCHECK_SHA256  $tarball" | shasum -a 256 -c
           tar -xJf "$tarball"
           echo "$PWD/shellcheck-v$SHELLCHECK_VERSION" >> "$GITHUB_PATH"
-      - run: brew install jq
-        env:
-          HOMEBREW_NO_AUTO_UPDATE: 1
-          HOMEBREW_NO_INSTALL_CLEANUP: 1
-          HOMEBREW_NO_ANALYTICS: 1
+      - run: command -v jq
       - name: Check the tag, the changelog and the release secrets
         env:
           HAS_SECRETS: ${{ secrets.MACOS_CERT_P12 != '' && secrets.MACOS_CERT_PASSWORD != '' && secrets.APPLE_API_KEY_ID != '' && secrets.APPLE_API_ISSUER_ID != '' && secrets.APPLE_API_KEY_P8 != '' && secrets.SPARKLE_ED_KEY != '' }}

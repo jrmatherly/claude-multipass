@@ -80,6 +80,8 @@ fi
 swift_log=$(mktemp)
 swift test --package-path app > "$swift_log" 2>&1 || {
   grep -vE 'ld: warning|^\s*$' "$swift_log" | tail -n 60 >&2
+  # A failure early in a long run is above the tail, so name it again
+  grep -E '✘|error:' "$swift_log" >&2 || true
   echo "check: swift test failed (the app needs Xcode, not only the Command Line Tools; the last lines of its output are above)" >&2
   rm -f "$swift_log"
   exit 1
@@ -113,9 +115,29 @@ sparkle_importers=$(grep -rlE '^[[:space:]]*(@[A-Za-z_]+[[:space:]]+)*import[[:s
   echo "check: only SparkleUpdater.swift may import Sparkle, found: $sparkle_importers" >&2
   exit 1
 }
-# Both workflows pin the same ShellCheck release
-pins=$(grep -ho 'SHELLCHECK_SHA256: *[0-9a-f]*' .github/workflows/check.yml .github/workflows/release.yml | tr -d ' ' | sort -u | wc -l | tr -d ' ')
-[[ $pins == 1 ]] || {
-  echo "check: check.yml and release.yml pin different ShellCheck releases" >&2
+# Core stays free of UI frameworks, so its tests need no app. The folder is
+# checked first: grep on a missing one fails into the `|| true` and passes
+[[ -d app/Sources/MultipassCore ]] || {
+  echo "check: app/Sources/MultipassCore is missing, so its imports cannot be checked" >&2
   exit 1
 }
+core_importers=$(grep -rE '^[[:space:]]*((@[A-Za-z_]+(\([^)]*\))?|public|package|internal|fileprivate|private)[[:space:]]+)*import[[:space:]]' app/Sources/MultipassCore | grep -vE ':import Foundation$' | cut -d: -f1 | sort -u || true)
+[[ -z $core_importers ]] || {
+  echo "check: MultipassCore may import only Foundation, found: $core_importers" >&2
+  exit 1
+}
+# Each workflow has one ShellCheck pin, and both pin the same release. Counted
+# per file: a count across both would pass with both lines in one file
+workflows=(.github/workflows/check.yml .github/workflows/release.yml)
+for key in SHELLCHECK_VERSION SHELLCHECK_SHA256; do
+  for workflow in "${workflows[@]}"; do
+    [[ $(grep -c "^ *$key:" "$workflow") == 1 ]] || {
+      echo "check: $workflow has no single ShellCheck pin" >&2
+      exit 1
+    }
+  done
+  [[ $(grep -h "^ *$key:" "${workflows[@]}" | tr -d " '\"" | sort -u | wc -l | tr -d ' ') == 1 ]] || {
+    echo "check: check.yml and release.yml pin different ShellCheck releases" >&2
+    exit 1
+  }
+done
