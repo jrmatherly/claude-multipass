@@ -268,6 +268,12 @@ Checks 0, 2, 8 and 9 of `/doctor` found nothing to change: one native install on
 - **Task 5: step 3 done.** `~/.claude/settings.json` reads `[5, 0]` and `disabledMcpServers` in `~/.claude.json` is still absent. No `/context` baseline was taken before Task 1, so the saving can be read only as an absolute figure.
 - **Task 5: step 2 done, with one gap.** The 16:59 session lists no `plugin-dev:`, `commit-commands:` or `agent-sdk-dev:` skill, no `voltagent-qa-sec:` agent type, and none of `doc-coauthoring`, `find-skills` and `mcp-builder`. It does list the MCP tools of `logfire`, `sentry`, `cloudflare` and `microsoft-docs`, four plugins the local file turns off. Its scratchpad path names `claude-spares`, as the 16:08 session's did, so this is a second sighting of the Task 4 pattern: a Code tab session that starts in a spare folder connects the plugin servers before it reaches the project. The cause is still inferred. Step 1 (`/context`) is Jason's.
 
+## Closed (2026-11-16)
+
+Jason dropped Task 5 step 1, the `/context` reading, on 2026-11-16. No baseline was taken before Task 1, so the reading could only have been an absolute figure. Nothing else in this plan is open.
+
+A third sighting of the Task 4 pattern, the same day: a Code tab session that started in a spare folder (its scratchpad path named `claude-spares`) listed the tools of `logfire`, `sentry`, `cloudflare` and `microsoft-docs`, and the app reported those tools as no longer available when the session resumed inside the project. The cause is still inferred from the paths, not tested.
+
 ## Review (2026-11-15)
 
 A fresh reviewer checked `f37472b..b865507` and the local settings file. It found no critical issue and two things to correct.
