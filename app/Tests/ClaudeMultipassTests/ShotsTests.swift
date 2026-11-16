@@ -169,11 +169,11 @@ func updateController(
     appState: appState,
     feed: FixtureFeed(feed),
     detect: { kind },
-    installer: { kind in kind == .homebrewMissing ? nil : installer },
+    installer: { kind in kind == .homebrewMissing || kind == .miseMissing ? nil : installer },
     runningVersion: "0.9.0")
 }
 
-let updateFixtureNames = ["idle", "upToDate", "available", "availableBrew", "availableMise", "noBrew", "failedNoBrew", "failedCheck", "installing", "upgrading", "failedBrew", "failedSparkle", "startFailed"]
+let updateFixtureNames = ["idle", "upToDate", "available", "availableBrew", "availableMise", "noBrew", "noMise", "failedNoBrew", "failedCheck", "installing", "upgrading", "failedBrew", "failedSparkle", "startFailed"]
 
 /// Each named state, reached through `check()` and `install()` as the real app reaches it.
 @MainActor
@@ -194,6 +194,8 @@ func updateFixture(_ name: String) async -> (AppState, UpdateController) {
     controller = updateController(appState, kind: .mise(mise: URL(fileURLWithPath: "/Users/me/.local/bin/mise")))
   case "noBrew":
     controller = updateController(appState, kind: .homebrewMissing)
+  case "noMise":
+    controller = updateController(appState, kind: .miseMissing)
   case "failedCheck":
     controller = updateController(appState, feed: .failure(UpdateProblem(message: "The update server could not be reached.", detail: nil, fallback: nil)))
   case "installing":

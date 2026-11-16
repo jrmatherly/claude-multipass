@@ -19,7 +19,7 @@ public enum Version {
 
 /// How this bundle got here, which decides who may replace it.
 public enum InstallKind: Equatable {
-  case homebrew(brew: URL), mise(mise: URL), homebrewMissing, direct, development
+  case homebrew(brew: URL), mise(mise: URL), homebrewMissing, miseMissing, direct, development
 
   /// Where a `mise` may be: its own installer's path first, since an app opened from Finder has no shell PATH.
   public static let miseCandidates = [
@@ -42,24 +42,35 @@ public enum InstallKind: Equatable {
     for prefix in prefixes {
       let cask = prefix.appendingPathComponent("Caskroom/claude-multipass-app")
       let versions = (try? fm.contentsOfDirectory(at: cask, includingPropertiesForKeys: nil)) ?? []
-      let owner = versions.first { version in
+      let owners = versions.filter { version in
         let link = version.appendingPathComponent("Claude Multipass.app")
         // A link to a deleted bundle does not resolve, so what it says it points at counts too.
         return link.resolvingSymlinksInPath().path == bundle || (try? fm.destinationOfSymbolicLink(atPath: link.path)) == bundleURL.path
       }
-      guard let owner else { continue }
-      guard fm.fileExists(atPath: bundleURL.path) else { return .homebrewMissing }
+      guard !owners.isEmpty else { continue }
+      let present = fm.fileExists(atPath: bundleURL.path)
       // mise installs a cask with no Homebrew and leaves its own receipt beside the same
-      // link. Homebrew does not know such an install, so mise comes before a brew that is also there.
-      if fm.fileExists(atPath: owner.appendingPathComponent(".mise-cask.toml").path),
-        let mise = miseCandidates.first(where: { fm.isExecutableFile(atPath: $0.path) })
-      {
+      // link. Homebrew does not know such an install, so a brew that is also there is never run on it.
+      if owners.contains(where: { fm.fileExists(atPath: $0.appendingPathComponent(".mise-cask.toml").path) }) {
+        guard present, let mise = miseCandidates.first(where: { fm.isExecutableFile(atPath: $0.path) }) else { return .miseMissing }
         return .mise(mise: mise)
       }
+      guard present else { return .homebrewMissing }
       let brew = prefix.appendingPathComponent("bin/brew")
       return fm.isExecutableFile(atPath: brew.path) ? .homebrew(brew: brew) : .homebrewMissing
     }
     return .direct
+  }
+}
+
+extension InstallKind {
+  /// The tool to run and the manager it is, for a cask install whose tool was found.
+  public var cask: (tool: URL, manager: CaskInstaller.Manager)? {
+    switch self {
+    case .homebrew(let brew): return (brew, .homebrew)
+    case .mise(let mise): return (mise, .mise)
+    case .homebrewMissing, .miseMissing, .direct, .development: return nil
+    }
   }
 }
 
@@ -124,7 +135,7 @@ public struct UpdateOffer: Equatable {
   }
 }
 
-public enum InstallStage: Equatable {
+public enum InstallStage: Equatable, Sendable {
   case preparing, updatingHomebrew, upgrading, downloading(Double?), extracting, installing, relaunching
 }
 
@@ -145,6 +156,8 @@ extension UpdateProblem: Error {
   /// Sparkle says the offered release is gone: the offer goes too.
   public static let noLongerOffered = UpdateProblem(message: "This update is no longer offered.", detail: nil, fallback: nil)
   public static let brewMissing = UpdateProblem(message: "Homebrew installed this app, but brew was not found. Download the update instead.", detail: nil, fallback: .download(UpdateController.releasePage))
+  /// Not a download: mise keeps a fingerprint of the bundle it installed.
+  public static let miseMissing = UpdateProblem(message: "mise installed this app, but mise was not found. Run the upgrade yourself.", detail: nil, fallback: .command(CaskInstaller.Manager.mise.command))
 }
 
 public enum UpdateState: Equatable {
@@ -404,8 +417,9 @@ public final class UpdateController: ObservableObject {
     while let probe = probing { await probe.value }
     guard let offer = state.offer else { return }
     if case .installing = state { return }
-    guard let installer = installer(detect()) else {
-      state = .failed(offer, .brewMissing)
+    let kind = detect()
+    guard let installer = installer(kind) else {
+      state = .failed(offer, kind == .miseMissing ? .miseMissing : .brewMissing)
       return
     }
     let before = state

@@ -247,6 +247,7 @@ private final class Harness {
   #expect(CaskInstaller.timeout > CLI(executable: appURL).mutatingTimeout)
   #expect(!CLI.promptFreeCommands.contains("update"))
   #expect(!CLI.promptFreeCommands.contains("upgrade"))
+  #expect(!CLI.promptFreeCommands.contains("bootstrap"))
 }
 
 private let miseUpgrade = ["bootstrap", "packages", "upgrade", "--yes", "brew:jrmatherly/tap/claude-multipass", "brew-cask:jrmatherly/tap/claude-multipass-app"]
@@ -273,4 +274,30 @@ private let miseUpgrade = ["bootstrap", "packages", "upgrade", "--yes", "brew:jr
   let h = Harness(disk: ["0.10.0"], manager: .mise)
   let problem = try #require(await h.problem())
   #expect(problem.message == "mise finished, but the app on disk is still 0.10.0.")
+}
+
+// mise exits 0 when it skips a name its config does not declare, and says so on stderr.
+@Test @MainActor func whatMiseSaidExplainsAnOldDisk() async throws {
+  let h = Harness(disk: ["0.10.0"], manager: .mise)
+  h.runner.onStderr["bootstrap"] = "progress\nmise WARN brew-cask: 1 package(s) not installed"
+  let problem = try #require(await h.problem())
+  #expect(problem.message == "mise finished, but the app on disk is still 0.10.0.")
+  #expect(problem.detail == "progress\nmise WARN brew-cask: 1 package(s) not installed")
+  #expect(problem.fallback == .command(CaskInstaller.Manager.mise.command))
+}
+
+// mise prints progress and a warning on every run, which is not a failure once the app landed.
+@Test @MainActor func miseProgressOnALandedUpgradeIsNotLogged() async throws {
+  let h = Harness(disk: ["0.10.0", "0.11.0"], manager: .mise)
+  h.runner.onStderr["bootstrap"] = "mise WARN brew-cask: replacing /Applications/Claude Multipass.app"
+  try await h.install()
+  #expect(h.relaunched == appURL)
+  #expect(h.logged.isEmpty)
+}
+
+@Test @MainActor func whatBrewUpdateSaidOnSuccessIsNotTheExplanation() async throws {
+  let h = Harness(disk: ["0.10.0"])
+  h.runner.onStderr["update"] = "noise from a tap"
+  let problem = try #require(await h.problem())
+  #expect(problem.detail == nil)
 }

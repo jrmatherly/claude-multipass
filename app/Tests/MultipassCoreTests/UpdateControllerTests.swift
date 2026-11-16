@@ -315,6 +315,20 @@ private func fixture(
   #expect(f.installer.calls == 1)
 }
 
+@Test @MainActor func miseMissingOffersTheCommandAndNeverInstalls() async {
+  let f = await fixture(feed: FakeFeed([.success(newer)]), usesInstaller: false, kind: .miseMissing)
+  await f.controller.check()
+  await f.controller.install()
+  guard case .failed(offer, let problem) = f.controller.state else {
+    Issue.record("expected a failure keeping the offer, got \(f.controller.state)")
+    return
+  }
+  #expect(problem == .miseMissing)
+  #expect(problem.message.contains("mise"))
+  #expect(problem.fallback == .command(CaskInstaller.Manager.mise.command))
+  #expect(f.installer.calls == 0)
+}
+
 @Test @MainActor func homebrewMissingReportsAndNeverInstalls() async {
   let f = await fixture(feed: FakeFeed([.success(newer)]), usesInstaller: false, kind: .homebrewMissing)
   await f.controller.check()

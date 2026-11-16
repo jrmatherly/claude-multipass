@@ -146,12 +146,69 @@ private func addMise(to prefix: URL) throws -> URL {
   #expect(InstallKind.detect(bundleURL: bundle, version: "0.9.0", prefixes: [prefix], miseCandidates: [mise]) == .mise(mise: mise))
 }
 
-@Test func aMiseReceiptWithNoMiseToRunFallsBackToBrew() throws {
+// brew does not own a cask mise installed, so a brew on the Mac must not be run on it.
+@Test func aMiseReceiptWithNoMiseToRunIsMiseMissingEvenBesideABrew() throws {
   let (prefix, bundle) = try installFixture()
   try linkCask(in: prefix, to: bundle)
   let mise = try addMise(to: prefix)
   try FileManager.default.removeItem(at: mise)
-  #expect(InstallKind.detect(bundleURL: bundle, version: "0.9.0", prefixes: [prefix], miseCandidates: [mise]) == .homebrewMissing)
+  #expect(InstallKind.detect(bundleURL: bundle, version: "0.9.0", prefixes: [prefix], miseCandidates: [mise]) == .miseMissing)
+  _ = try addBrew(to: prefix)
+  #expect(InstallKind.detect(bundleURL: bundle, version: "0.9.0", prefixes: [prefix], miseCandidates: [mise]) == .miseMissing)
+}
+
+@Test func aMiseThatIsNotExecutableIsPassedOverForTheNext() throws {
+  let (prefix, bundle) = try installFixture()
+  try linkCask(in: prefix, to: bundle)
+  let first = try addMise(to: prefix)
+  let second = prefix.appendingPathComponent("second/mise")
+  try FileManager.default.createDirectory(at: second.deletingLastPathComponent(), withIntermediateDirectories: true)
+  try FileManager.default.copyItem(at: first, to: second)
+  #expect(InstallKind.detect(bundleURL: bundle, version: "0.9.0", prefixes: [prefix], miseCandidates: [first, second]) == .mise(mise: first))
+  try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: first.path)
+  #expect(InstallKind.detect(bundleURL: bundle, version: "0.9.0", prefixes: [prefix], miseCandidates: [first, second]) == .mise(mise: second))
+}
+
+// An app opened from Finder has no shell PATH, so mise's own installer path comes first.
+@Test func miseIsLookedForInThreePlacesInOrder() {
+  let home = FileManager.default.homeDirectoryForCurrentUser.path
+  #expect(InstallKind.miseCandidates.map(\.path) == ["\(home)/.local/bin/mise", "/opt/homebrew/bin/mise", "/usr/local/bin/mise"])
+}
+
+@Test func aReceiptInAFolderThatDoesNotOwnThisBundleIsNotMise() throws {
+  let (prefix, bundle) = try installFixture()
+  try linkCask(in: prefix, to: bundle)
+  let mise = try addMise(to: prefix)
+  let cask = prefix.appendingPathComponent("Caskroom/claude-multipass-app")
+  try FileManager.default.createDirectory(at: cask.appendingPathComponent("0.8.0"), withIntermediateDirectories: true)
+  try FileManager.default.moveItem(at: cask.appendingPathComponent("0.9.0/.mise-cask.toml"), to: cask.appendingPathComponent("0.8.0/.mise-cask.toml"))
+  let brew = try addBrew(to: prefix)
+  #expect(InstallKind.detect(bundleURL: bundle, version: "0.9.0", prefixes: [prefix], miseCandidates: [mise]) == .homebrew(brew: brew))
+}
+
+// Folder order is not defined, so the receipt counts in any folder whose link is this bundle.
+@Test func twoOwningFoldersWithOneReceiptAreMise() throws {
+  let (prefix, bundle) = try installFixture()
+  try linkCask(in: prefix, to: bundle)
+  let mise = try addMise(to: prefix)
+  _ = try addBrew(to: prefix)
+  for older in ["0.1.0", "0.8.0", "0.9.5", "1.0.0"] {
+    let dir = prefix.appendingPathComponent("Caskroom/claude-multipass-app/\(older)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    try FileManager.default.createSymbolicLink(at: dir.appendingPathComponent("Claude Multipass.app"), withDestinationURL: bundle)
+  }
+  #expect(InstallKind.detect(bundleURL: bundle, version: "0.9.0", prefixes: [prefix], miseCandidates: [mise]) == .mise(mise: mise))
+}
+
+@Test func aCaskKindNamesItsToolAndItsManager() {
+  let tool = URL(fileURLWithPath: "/x/tool")
+  #expect(InstallKind.mise(mise: tool).cask?.tool == tool)
+  #expect(InstallKind.mise(mise: tool).cask?.manager == .mise)
+  #expect(InstallKind.homebrew(brew: tool).cask?.tool == tool)
+  #expect(InstallKind.homebrew(brew: tool).cask?.manager == .homebrew)
+  for kind in [InstallKind.homebrewMissing, .miseMissing, .direct, .development] {
+    #expect(kind.cask == nil)
+  }
 }
 
 @Test func aMiseOnTheMacWithoutAReceiptChangesNothing() throws {

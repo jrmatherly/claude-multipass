@@ -22,6 +22,11 @@ extension InstallStage {
   }
 }
 
+extension InstallKind {
+  /// Beside the Update button, for an install a package manager will upgrade.
+  var updateCaption: String? { cask.map { "Updates with \($0.manager.name)" } }
+}
+
 extension UpdateState {
   /// What the popover and the menu say in place of the offer once it is not just on offer.
   /// A failed check has no fallback and leaves the offer standing, so it changes nothing here.
@@ -145,8 +150,8 @@ struct UpdateSection: View {
     case .failed(let offer, let problem):
       if let offer {
         whatsNew(offer)
-        // The problem row says the same as the brew-missing row, and it announces.
-        if problem != .brewMissing { updateRow(offer) }
+        // The problem row says the same as the missing-manager row, and it announces.
+        if problem != .brewMissing, problem != .miseMissing { updateRow(offer) }
       }
       problemRow(problem)
     }
@@ -198,12 +203,13 @@ struct UpdateSection: View {
 
   @ViewBuilder private func updateRow(_ offer: UpdateOffer) -> some View {
     switch updates.installKind {
-    case .homebrew:
-      updateButton(offer, caption: "Updates with Homebrew")
-    case .mise:
-      updateButton(offer, caption: "Updates with mise")
-    case .direct, .development:
-      updateButton(offer, caption: nil)
+    case .homebrew, .mise, .direct, .development:
+      updateButton(offer, caption: updates.installKind.updateCaption)
+    case .miseMissing:
+      VStack(alignment: .leading, spacing: 4) {
+        Text("mise installed this app, but mise was not found.")
+        fallbackRow(UpdateProblem.miseMissing.fallback)
+      }
     case .homebrewMissing:
       VStack(alignment: .leading, spacing: 4) {
         Text("Homebrew installed this app, but brew was not found.")

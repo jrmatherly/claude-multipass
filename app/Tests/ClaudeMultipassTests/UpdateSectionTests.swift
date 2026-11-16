@@ -205,6 +205,13 @@ private func ink(_ view: some View) throws -> CGFloat {
     #expect(try ink(row) == idle)
   }
 
+  @Test func theUpdateButtonNamesTheManagerThatWillRun() {
+    let tool = URL(fileURLWithPath: "/x/tool")
+    #expect(InstallKind.mise(mise: tool).updateCaption == "Updates with mise")
+    #expect(InstallKind.homebrew(brew: tool).updateCaption == "Updates with Homebrew")
+    #expect(InstallKind.direct.updateCaption == nil)
+  }
+
   @Test func copyPutsTheCommandOnThePasteboard() {
     let pasteboard = NSPasteboard(name: .init("net.matherly.claude-multipass.tests.copy"))
     defer { pasteboard.releaseGlobally() }
