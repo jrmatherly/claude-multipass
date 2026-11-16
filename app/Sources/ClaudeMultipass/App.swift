@@ -73,18 +73,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       startProblem: startProblem,
       detect: detect,
       installer: { [sparkle] kind in
-        switch kind {
-        case .homebrew(let brew):
-          return BrewInstaller(
-            runner: CLI(executable: brew, mutatingTimeout: BrewInstaller.timeout, extraEnvironment: BrewInstaller.environment),
+        if let cask = kind.cask {
+          return CaskInstaller(
+            runner: CLI(executable: cask.tool, mutatingTimeout: CaskInstaller.timeout, extraEnvironment: cask.manager.environment(forAppAt: bundleURL)),
+            manager: cask.manager,
             appURL: bundleURL,
             diskVersion: diskVersion,
             relaunch: relaunch)
-        case .direct:
-          return sparkle
-        case .homebrewMissing, .development:
-          return nil
         }
+        return kind == .direct ? sparkle : nil
       },
       runningVersion: version)
   }
