@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.14.1 (2026-11-16)
 
 - Turning "Show usage" off and on again within 30 seconds no longer reads usage a second time. The toggle now shares the Refresh button's 30 second floor.
 - The popover's Refresh button is disabled while a refresh runs.
