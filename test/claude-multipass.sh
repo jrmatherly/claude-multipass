@@ -2547,6 +2547,14 @@ rm "$tmp/bin/cp"
 check "the retry then completes" 0 "$(exit_code cda switch alpha --no-relaunch)"
 check "with alpha's cookies" "$(cat "$p/alpha/Cookies")" "$(cat "$d/Cookies")"
 check "and Desktop on alpha" alpha "$(cda current)"
+# a config write that fails puts the cookies back
+printf '#!/bin/sh\ncase "$*" in *"--tab --slurpfile p "*) exit 5 ;; esac\nPATH=${PATH#*/jqfail:} exec jq "$@"\n' > "$tmp/jqfail/jq"
+before=$(cat "$d/Cookies")
+out=$(PATH="$tmp/jqfail:$PATH" cda switch beta --no-relaunch 2>&1) && rc=0 || rc=$?
+check "a switch whose config write fails exits 1" 1 "$rc"
+check_true "and names the backup" grep -q "could not write $d/config.json; the previous login is in $b/login-" <<< "$out"
+check "and puts the previous cookies back" "$before" "$(cat "$d/Cookies")"
+check "and Desktop stays on alpha" alpha "$(cda current)"
 
 #@ done
 [[ $# -gt 0 ]] || echo "All claude-multipass checks passed"

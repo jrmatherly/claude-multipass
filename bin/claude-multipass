@@ -1275,12 +1275,16 @@ profile_save() {
 profile_restore() {
   local name=$1 dir="$store/$1"
   backup_login
-  # Cookies first: config.json names the signed-in account, so a run that dies
-  # before it is written still reads as the old account and a retry restores all of it.
+  # Cookies first, and put back when the config write fails, so a failed
+  # switch leaves the login it found. A run killed between the two is not
+  # covered: config.json then names the old account over the new cookies.
   copy_cookies "$dir" "$cookies" || fail "could not copy $name's cookies; the previous login is in $backup_dest"
   jq_write "$config" --slurpfile p "$dir/config.json" --argjson k "$auth_keys" \
     'reduce $k[] as $x (.; if $p[0] | has($x) then .[$x] = $p[0][$x] else del(.[$x]) end)' \
-    "$config"
+    "$config" || {
+    copy_cookies "$backup_dest" "$cookies" || warning "could not put the previous cookies back; they are in $backup_dest"
+    fail "could not write $config; the previous login is in $backup_dest"
+  }
   cli_restore "$name"
   echo "Restored $name"
 }
