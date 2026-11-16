@@ -10,7 +10,7 @@
 
 **Spec:** this plan carries its own spec in the Findings section below.
 
-**Depends on:** `2026-11-03-doctor-and-self-check-hardening.md` being merged first, because Task 4 of that plan sets the error strings this plan matches.
+**Depends on:** `completed/2026-11-03-doctor-and-self-check-hardening.md` being merged first, because Task 4 of that plan sets the error strings this plan matches.
 
 ## Findings
 
