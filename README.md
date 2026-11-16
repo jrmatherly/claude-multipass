@@ -23,6 +23,8 @@ brew install jrmatherly/tap/claude-multipass
 
 Needs `jq` (installed with it); `fzf` for the picker; `openssl`, `curl` and the Command Line Tools (`xcode-select --install`, for their `/usr/bin/python3`) for the opt-in `usage` command, which exits 1 naming them when they are missing. The CLI login moves through `/usr/bin/security`, the tool Claude Code uses for its own item; the first `switch` may ask once to let `security` use an item: click Always Allow, which persists. Or clone the repo and put `bin/claude-multipass` on your PATH.
 
+If the first `switch` is refused (exit 3), or anything else goes wrong, see [When something is off](docs/claude-multipass.md#when-something-is-off).
+
 ## How it works
 
 A Desktop login is three keys of `~/Library/Application Support/Claude/config.json` plus the cookie files, encrypted by the app with a key in this Mac's login Keychain. `save` copies them as opaque bytes into a named profile; `switch` quits Desktop, re-saves the login you are leaving, swaps the saved one in, merges every account's Code-tab session list into every other account's, and relaunches. Nothing is decrypted for that, and nothing switches on its own. The Claude Code CLI's login (a login-Keychain item plus `oauthAccount` in `~/.claude.json`) is saved with the profile when the terminal is signed in as the same account, and moves with it on `switch`; the token only ever travels between two items of the same Keychain. The menu bar app only polls `list --json` (no Keychain) and, when you turn usage on, `usage --json` at most every 5 minutes.
