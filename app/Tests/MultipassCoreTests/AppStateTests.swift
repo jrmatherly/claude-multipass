@@ -439,6 +439,21 @@ private func enabledUsage(_ s: AppState) -> AppSettings {
   #expect(s.isPollingUsage)
 }
 
+@Test @MainActor func reEnablingUsageWithinTheFloorDoesNotFetch() async {
+  let clock = TestClock()
+  let (s, r) = await readyState(clock: clock)
+  await s.apply(enabledUsage(s))
+  r.clearCalls()
+  await s.apply(AppSettings())
+  await s.apply(enabledUsage(s))
+  #expect(r.calls == [])
+  #expect(s.isPollingUsage)
+  clock.now += AppSettings.usageRefreshFloor
+  await s.apply(AppSettings())
+  await s.apply(enabledUsage(s))
+  #expect(r.calls == [["usage", "--json"]])
+}
+
 @Test @MainActor func applyStripStyleDoesNotFetchUsage() async {
   let (s, r) = await readyState()
   await s.apply(enabledUsage(s))

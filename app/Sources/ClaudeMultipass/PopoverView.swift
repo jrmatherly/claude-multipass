@@ -53,6 +53,7 @@ struct PopoverView: View {
       }
       HStack(spacing: 16) {
         Button("Refresh") { Task { await appState.refreshAll() } }
+          .disabled(appState.isRefreshing || appState.isRefreshingUsage)
         Button("Settings…") {
           close()
           openSettings(nil)
