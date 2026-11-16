@@ -39,7 +39,9 @@ public enum InstallKind: Equatable {
     guard version != nil, bundleURL.pathExtension == "app" else { return .development }
     let fm = FileManager.default
     let bundle = bundleURL.resolvingSymlinksInPath().path
-    for prefix in prefixes {
+    // Every prefix's folders that link this bundle, before anything is decided: a link
+    // left in one prefix must not hide mise's receipt in the other.
+    let owned = prefixes.compactMap { prefix -> (prefix: URL, owners: [URL])? in
       let cask = prefix.appendingPathComponent("Caskroom/claude-multipass-app")
       let versions = (try? fm.contentsOfDirectory(at: cask, includingPropertiesForKeys: nil)) ?? []
       let owners = versions.filter { version in
@@ -47,19 +49,19 @@ public enum InstallKind: Equatable {
         // A link to a deleted bundle does not resolve, so what it says it points at counts too.
         return link.resolvingSymlinksInPath().path == bundle || (try? fm.destinationOfSymbolicLink(atPath: link.path)) == bundleURL.path
       }
-      guard !owners.isEmpty else { continue }
-      let present = fm.fileExists(atPath: bundleURL.path)
-      // mise installs a cask with no Homebrew and leaves its own receipt beside the same
-      // link. Homebrew does not know such an install, so a brew that is also there is never run on it.
-      if owners.contains(where: { fm.fileExists(atPath: $0.appendingPathComponent(".mise-cask.toml").path) }) {
-        guard present, let mise = miseCandidates.first(where: { fm.isExecutableFile(atPath: $0.path) }) else { return .miseMissing }
-        return .mise(mise: mise)
-      }
-      guard present else { return .homebrewMissing }
-      let brew = prefix.appendingPathComponent("bin/brew")
-      return fm.isExecutableFile(atPath: brew.path) ? .homebrew(brew: brew) : .homebrewMissing
+      return owners.isEmpty ? nil : (prefix, owners)
     }
-    return .direct
+    guard let first = owned.first else { return .direct }
+    let present = fm.fileExists(atPath: bundleURL.path)
+    // mise installs a cask with no Homebrew and leaves its own receipt beside the same
+    // link. Homebrew does not know such an install, so a brew that is also there is never run on it.
+    if owned.flatMap(\.owners).contains(where: { fm.fileExists(atPath: $0.appendingPathComponent(".mise-cask.toml").path) }) {
+      guard present, let mise = miseCandidates.first(where: { fm.isExecutableFile(atPath: $0.path) }) else { return .miseMissing }
+      return .mise(mise: mise)
+    }
+    guard present else { return .homebrewMissing }
+    let brew = first.prefix.appendingPathComponent("bin/brew")
+    return fm.isExecutableFile(atPath: brew.path) ? .homebrew(brew: brew) : .homebrewMissing
   }
 }
 

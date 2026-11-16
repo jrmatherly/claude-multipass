@@ -200,6 +200,17 @@ private func addMise(to prefix: URL) throws -> URL {
   #expect(InstallKind.detect(bundleURL: bundle, version: "0.9.0", prefixes: [prefix], miseCandidates: [mise]) == .mise(mise: mise))
 }
 
+// A cask link left in one prefix must not hide mise's receipt in the other.
+@Test func aMiseReceiptInALaterPrefixStillWins() throws {
+  let (prefix, bundle) = try installFixture()
+  let stale = prefix.deletingLastPathComponent().appendingPathComponent("stale-prefix")
+  try linkCask(in: stale, to: bundle)
+  _ = try addBrew(to: stale)
+  try linkCask(in: prefix, to: bundle)
+  let mise = try addMise(to: prefix)
+  #expect(InstallKind.detect(bundleURL: bundle, version: "0.9.0", prefixes: [stale, prefix], miseCandidates: [mise]) == .mise(mise: mise))
+}
+
 @Test func aCaskKindNamesItsToolAndItsManager() {
   let tool = URL(fileURLWithPath: "/x/tool")
   #expect(InstallKind.mise(mise: tool).cask?.tool == tool)
