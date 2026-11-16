@@ -10,6 +10,18 @@
 
 **Spec:** There is no separate spec. The audit findings are in [Appendix A](#appendix-a-findings-and-evidence), with the evidence label each one carries. A task cites its finding by id (A1, B2 and so on). [Appendix B](#appendix-b-what-the-plan-review-ran) records what was run to check this plan itself.
 
+## Status (2026-11-16)
+
+- **Task 0: done.** `7d3c8da` on `main`.
+- **Batch A: done.** PR 73, squash-merged as `7073a50`. It went further than Tasks A1 to A4 below, after a review of the PR:
+  - `copy_cookies` stages both files as `.tmp` before it renames either, and checks each `mv` and `rm`.
+  - `backup_login` removes a backup folder it could not fill.
+  - `profile_restore` copies the cookies before it writes `config.json`, puts them back when that write fails, and names the backup in both failure messages.
+  - `cli_restore` refuses a saved Keychain item that holds no login.
+  - The Raycast usage command says `could not read the account list` when it cannot.
+  - The `failclosed` section has 35 check lines, four of them in a loop that runs twice. The task text below is the plan as written, not the code as merged, so read `bin/claude-multipass` for the final form.
+- **Batches B, C, D and E: not started.** The step checkboxes in this file are not ticked. This section is the record.
+
 ## Global constraints
 
 - Code never goes to `main`. Each of batches A, B and C starts with `git worktree add .claude/worktrees/<branch> -b <branch>` and `pnpm install` in that worktree, and lands only through its PR after `check` is green. Merging is Jason's call.
@@ -678,7 +690,9 @@ These findings are recorded and not planned. Each names what would change the ca
 
 | Finding | Why it waits | What would start it |
 | --- | --- | --- |
-| A4, second half. A kill between the config merge and the cookie copy leaves the new tokens with the old cookies, and a re-run skips the copy because `Cookies` exists (`bin/claude-multipass:2063`). | Inferred from code order, not reproduced. The fix needs a marker file and a recovery path, and "When something is off" already sends a half-finished switch to the login backup. | One real sighting of a wrong-account Desktop after a killed switch. |
+| A4, second half, what is left. A run killed between the cookie rename and the `config.json` write leaves the old account's token with the new account's cookies, and the retry's re-save then stores those cookies in the outgoing profile. PR 73 fixed the failure cases (a copy or a write that fails rolls back) but not a kill. | A marker that makes the retry skip the re-save would also skip it when the marker is stale and the account has been used since, which loses rotated tokens. "When something is off" tells the user to restore the newest login backup by hand. | A design for a marker that expires, or one real sighting. |
+| The second cookie rename failing after the first succeeded (`copy_cookies`, PR 73 review). | Both files are already staged in the destination folder, so only a `mv` within one folder can fail, and it could not be produced outside a stub. | The same rollback the config write has, added to the `copy_cookies "$dir" "$cookies"` failure in `profile_restore`, the next time that function is edited. |
+| `save --force` under a second name: when the move of the other name's CLI item fails, nothing is said, and `profile_set_aside` then deletes the source item (`profile_save`, PR 73 review, pre-existing). | A warning in an `else` would also fire when the `cli_capture` that follows succeeds and makes the move moot. It needs the warning placed after the capture, and its own test. | Batch-sized work on `profile_save`. |
 | B6. The custom path field applies on every keystroke, so each executable prefix it passes runs once with `--version` (`SettingsView.swift:192`). | It needs a design choice. Committing on submit needs separate field state, because `.onReceive(appState.$settings)` at line 75 overwrites `draft` on every settings change, and there is no focus state to commit on. Refusing a path whose file name is not `claude-multipass` is smaller but narrows what a user may point at. | Jason's pick between the two. |
 | B6. `PipeDrain.stop()` can close a handle while a read is running (`CLI.swift:238`). | Inferred. It needs a grandchild still writing past the timeout. | A crash log that names `availableData`. |
 | B6. A failed `list --json` keeps the old account in the menu bar strip. | Keeping the snapshot on failure is deliberate and tested (`AppStateTests.swift:282`). The open popover shows the error. | A report of a stale strip after a switch. |
