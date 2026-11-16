@@ -209,8 +209,8 @@ private func ink(_ view: some View) throws -> CGFloat {
     let pasteboard = NSPasteboard(name: .init("net.matherly.claude-multipass.tests.copy"))
     defer { pasteboard.releaseGlobally() }
     pasteboard.setString("stale", forType: .string)
-    UpdateSection.copy(BrewInstaller.command, to: pasteboard)
-    #expect(pasteboard.string(forType: .string) == BrewInstaller.command)
+    UpdateSection.copy(CaskInstaller.Manager.homebrew.command, to: pasteboard)
+    #expect(pasteboard.string(forType: .string) == CaskInstaller.Manager.homebrew.command)
     #expect(pasteboard.pasteboardItems?.count == 1)
   }
 

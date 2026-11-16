@@ -125,6 +125,44 @@ private func addBrew(to prefix: URL) throws -> URL {
   #expect(InstallKind.detect(bundleURL: realPath, version: "0.9.0", prefixes: [prefix]) == .homebrew(brew: brew))
 }
 
+/// mise's receipt beside the cask link, and a `mise` to run.
+private func addMise(to prefix: URL) throws -> URL {
+  let receipt = prefix.appendingPathComponent("Caskroom/claude-multipass-app/0.9.0/.mise-cask.toml")
+  try "schema_version = 3\n".write(to: receipt, atomically: true, encoding: .utf8)
+  let mise = prefix.appendingPathComponent("home/.local/bin/mise")
+  try FileManager.default.createDirectory(at: mise.deletingLastPathComponent(), withIntermediateDirectories: true)
+  try "#!/bin/sh\n".write(to: mise, atomically: true, encoding: .utf8)
+  try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: mise.path)
+  return mise
+}
+
+// Homebrew does not know a cask mise installed, so mise wins even beside a brew.
+@Test func aCaskLinkWithAMiseReceiptIsMise() throws {
+  let (prefix, bundle) = try installFixture()
+  try linkCask(in: prefix, to: bundle)
+  let mise = try addMise(to: prefix)
+  #expect(InstallKind.detect(bundleURL: bundle, version: "0.9.0", prefixes: [prefix], miseCandidates: [mise]) == .mise(mise: mise))
+  _ = try addBrew(to: prefix)
+  #expect(InstallKind.detect(bundleURL: bundle, version: "0.9.0", prefixes: [prefix], miseCandidates: [mise]) == .mise(mise: mise))
+}
+
+@Test func aMiseReceiptWithNoMiseToRunFallsBackToBrew() throws {
+  let (prefix, bundle) = try installFixture()
+  try linkCask(in: prefix, to: bundle)
+  let mise = try addMise(to: prefix)
+  try FileManager.default.removeItem(at: mise)
+  #expect(InstallKind.detect(bundleURL: bundle, version: "0.9.0", prefixes: [prefix], miseCandidates: [mise]) == .homebrewMissing)
+}
+
+@Test func aMiseOnTheMacWithoutAReceiptChangesNothing() throws {
+  let (prefix, bundle) = try installFixture()
+  try linkCask(in: prefix, to: bundle)
+  let mise = try addMise(to: prefix)
+  try FileManager.default.removeItem(at: prefix.appendingPathComponent("Caskroom/claude-multipass-app/0.9.0/.mise-cask.toml"))
+  let brew = try addBrew(to: prefix)
+  #expect(InstallKind.detect(bundleURL: bundle, version: "0.9.0", prefixes: [prefix], miseCandidates: [mise]) == .homebrew(brew: brew))
+}
+
 @Test func caskSymlinkToAnotherBundleIsDirect() throws {
   let (prefix, bundle) = try installFixture()
   let other = bundle.deletingLastPathComponent().appendingPathComponent("Other/Claude Multipass.app")

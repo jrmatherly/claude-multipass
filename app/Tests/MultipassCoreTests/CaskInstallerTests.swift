@@ -13,16 +13,21 @@ private final class Harness {
   var relaunched: URL?
   var stages: [InstallStage] = []
   var logged: [String] = []
-  lazy var installer = BrewInstaller(
+  lazy var installer = CaskInstaller(
     runner: runner,
+    manager: manager,
     appURL: appURL,
     diskVersion: { [unowned self] _ in self.disk.count > 1 ? self.disk.removeFirst() : self.disk[0] },
     relaunch: { [unowned self] in self.relaunched = $0 },
     log: { [unowned self] in self.logged.append($0) }
   )
 
-  init(disk: [String?]) {
+  let manager: CaskInstaller.Manager
+
+  init(disk: [String?], manager: CaskInstaller.Manager = .homebrew) {
     self.disk = disk
+    self.manager = manager
+    runner.answer("bootstrap", "")
     runner.answer("update", "")
     runner.answer("upgrade", "")
   }
@@ -53,7 +58,7 @@ private final class Harness {
   let h = Harness(disk: ["0.10.0"])
   let problem = try #require(await h.problem())
   #expect(problem.message.contains("0.10.0"))
-  #expect(problem.fallback == .command(BrewInstaller.command))
+  #expect(problem.fallback == .command(CaskInstaller.Manager.homebrew.command))
   #expect(h.relaunched == nil)
 }
 
@@ -78,7 +83,7 @@ private final class Harness {
   h.runner.fail("upgrade", .failed(status: 1, stderr: lines.joined(separator: "\n")))
   let problem = try #require(await h.problem())
   #expect(problem.detail == lines.suffix(20).joined(separator: "\n"))
-  #expect(problem.fallback == .command(BrewInstaller.command))
+  #expect(problem.fallback == .command(CaskInstaller.Manager.homebrew.command))
   #expect(h.relaunched == nil)
 }
 
@@ -126,7 +131,7 @@ private final class Harness {
     let problem = try #require(await h.problem())
     #expect(problem.message == "Homebrew finished, but the app on disk is still 0.10.0.")
     #expect(problem.detail == "Warning: the real reason")
-    #expect(problem.fallback == .command(BrewInstaller.command))
+    #expect(problem.fallback == .command(CaskInstaller.Manager.homebrew.command))
     #expect(h.relaunched == nil)
   }
 }
@@ -175,7 +180,7 @@ private final class Harness {
   h.runner.fail("upgrade", .refused("a refusal"))
   let problem = try #require(await h.problem())
   #expect(problem.detail == "a refusal")
-  #expect(problem.fallback == .command(BrewInstaller.command))
+  #expect(problem.fallback == .command(CaskInstaller.Manager.homebrew.command))
 }
 
 @Test @MainActor func aDenialFromMacOSGetsAHint() async throws {
@@ -202,7 +207,7 @@ private final class Harness {
   stuck.runner.fail("upgrade", .timedOut)
   let problem = try #require(await stuck.problem())
   #expect(problem.message.contains("in time"))
-  #expect(problem.fallback == .command(BrewInstaller.command))
+  #expect(problem.fallback == .command(CaskInstaller.Manager.homebrew.command))
   #expect(stuck.relaunched == nil)
 }
 
@@ -229,17 +234,43 @@ private final class Harness {
 }
 
 @Test func brewRunsUnattendedAndTheCommandMatchesWhatItRuns() {
-  #expect(BrewInstaller.environment == [
+  #expect(CaskInstaller.Manager.homebrew.environment == [
     "HOMEBREW_NO_ASK": "1",
     "HOMEBREW_NO_AUTO_UPDATE": "1",
     "HOMEBREW_NO_INSTALL_CLEANUP": "1",
     "HOMEBREW_NO_ENV_HINTS": "1",
   ])
-  #expect(BrewInstaller.command == "brew update && brew upgrade jrmatherly/tap/claude-multipass jrmatherly/tap/claude-multipass-app")
+  #expect(CaskInstaller.Manager.homebrew.command == "brew update && brew upgrade jrmatherly/tap/claude-multipass jrmatherly/tap/claude-multipass-app")
 }
 
 @Test func brewOutlastsTheDefaultTimeoutOnBothCommands() {
-  #expect(BrewInstaller.timeout > CLI(executable: appURL).mutatingTimeout)
+  #expect(CaskInstaller.timeout > CLI(executable: appURL).mutatingTimeout)
   #expect(!CLI.promptFreeCommands.contains("update"))
   #expect(!CLI.promptFreeCommands.contains("upgrade"))
+}
+
+private let miseUpgrade = ["bootstrap", "packages", "upgrade", "--yes", "brew:jrmatherly/tap/claude-multipass", "brew-cask:jrmatherly/tap/claude-multipass-app"]
+
+@Test @MainActor func miseUpgradesTheFormulaAndTheCaskInOneRunThenRelaunches() async throws {
+  let h = Harness(disk: ["0.10.0", "0.11.0"], manager: .mise)
+  try await h.install()
+  #expect(h.runner.calls == [miseUpgrade])
+  #expect(h.relaunched == appURL)
+  #expect(h.stages == [.upgrading, .relaunching])
+}
+
+@Test @MainActor func aMiseFailureNamesMiseAndCarriesItsCommand() async throws {
+  let h = Harness(disk: ["0.10.0"], manager: .mise)
+  h.runner.fail("bootstrap", .failed(status: 1, stderr: "mise ERROR no such cask"))
+  let problem = try #require(await h.problem())
+  #expect(problem.message == "mise could not update the app.")
+  #expect(problem.detail == "mise ERROR no such cask")
+  #expect(problem.fallback == .command("mise bootstrap packages upgrade --yes brew:jrmatherly/tap/claude-multipass brew-cask:jrmatherly/tap/claude-multipass-app"))
+  #expect(h.relaunched == nil)
+}
+
+@Test @MainActor func miseExitingZeroWithAnOldDiskIsAFailure() async throws {
+  let h = Harness(disk: ["0.10.0"], manager: .mise)
+  let problem = try #require(await h.problem())
+  #expect(problem.message == "mise finished, but the app on disk is still 0.10.0.")
 }

@@ -19,14 +19,22 @@ public enum Version {
 
 /// How this bundle got here, which decides who may replace it.
 public enum InstallKind: Equatable {
-  case homebrew(brew: URL), homebrewMissing, direct, development
+  case homebrew(brew: URL), mise(mise: URL), homebrewMissing, direct, development
+
+  /// Where a `mise` may be: its own installer's path first, since an app opened from Finder has no shell PATH.
+  public static let miseCandidates = [
+    FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/mise"),
+    URL(fileURLWithPath: "/opt/homebrew/bin/mise"),
+    URL(fileURLWithPath: "/usr/local/bin/mise"),
+  ]
 
   /// Stat only, never a subprocess. A second copy of the app beside a cask
   /// install is `direct`, since only the cask's own symlink proves brew owns it.
   public static func detect(
     bundleURL: URL,
     version: String?,
-    prefixes: [URL] = [URL(fileURLWithPath: "/opt/homebrew"), URL(fileURLWithPath: "/usr/local")]
+    prefixes: [URL] = [URL(fileURLWithPath: "/opt/homebrew"), URL(fileURLWithPath: "/usr/local")],
+    miseCandidates: [URL] = InstallKind.miseCandidates
   ) -> InstallKind {
     guard version != nil, bundleURL.pathExtension == "app" else { return .development }
     let fm = FileManager.default
@@ -34,13 +42,20 @@ public enum InstallKind: Equatable {
     for prefix in prefixes {
       let cask = prefix.appendingPathComponent("Caskroom/claude-multipass-app")
       let versions = (try? fm.contentsOfDirectory(at: cask, includingPropertiesForKeys: nil)) ?? []
-      let owned = versions.contains { version in
+      let owner = versions.first { version in
         let link = version.appendingPathComponent("Claude Multipass.app")
         // A link to a deleted bundle does not resolve, so what it says it points at counts too.
         return link.resolvingSymlinksInPath().path == bundle || (try? fm.destinationOfSymbolicLink(atPath: link.path)) == bundleURL.path
       }
-      guard owned else { continue }
+      guard let owner else { continue }
       guard fm.fileExists(atPath: bundleURL.path) else { return .homebrewMissing }
+      // mise installs a cask with no Homebrew and leaves its own receipt beside the same
+      // link. Homebrew does not know such an install, so mise comes before a brew that is also there.
+      if fm.fileExists(atPath: owner.appendingPathComponent(".mise-cask.toml").path),
+        let mise = miseCandidates.first(where: { fm.isExecutableFile(atPath: $0.path) })
+      {
+        return .mise(mise: mise)
+      }
       let brew = prefix.appendingPathComponent("bin/brew")
       return fm.isExecutableFile(atPath: brew.path) ? .homebrew(brew: brew) : .homebrewMissing
     }
@@ -144,7 +159,7 @@ public enum UpdateState: Equatable {
     }
   }
 
-  /// Killing brew between removing and placing a bundle is the one way to
+  /// Killing brew or mise between removing and placing a bundle is the one way to
   /// lose the app. Sparkle's own terminate and the relaunch must still pass.
   public var blocksQuit: Bool {
     guard case .installing(_, let stage) = self else { return false }
@@ -157,26 +172,55 @@ public protocol UpdateFeed: AnyObject {
 }
 
 public protocol Installer: AnyObject {
-  /// Returns once the relaunch has started (brew). Never returns on success when the installer's own quit ends the process (Sparkle). Throws UpdateProblem.
+  /// Returns once the relaunch has started (brew, mise). Never returns on success when the installer's own quit ends the process (Sparkle). Throws UpdateProblem.
   @MainActor func install(_ offer: UpdateOffer, report: @escaping @MainActor (InstallStage) -> Void) async throws
 }
 
-/// Upgrades the formula and the cask, then relaunches. The disk decides the
-/// outcome, not brew's exit code: brew can exit 0 and leave the old version, or
-/// time out after the new one landed.
-public final class BrewInstaller: Installer {
-  public static let environment = [
-    "HOMEBREW_NO_ASK": "1",
-    "HOMEBREW_NO_AUTO_UPDATE": "1",
-    "HOMEBREW_NO_INSTALL_CLEANUP": "1",
-    "HOMEBREW_NO_ENV_HINTS": "1",
-  ]
-  /// Long, because the timeout kills brew, and a kill mid-swap is the one way to lose the app.
+/// Upgrades the formula and the cask through the manager that installed them,
+/// then relaunches. The disk decides the outcome, not the exit code: brew can
+/// exit 0 and leave the old version, or time out after the new one landed.
+public final class CaskInstaller: Installer {
+  /// Homebrew or mise: the runs that upgrade a cask install, and the words for a failure.
+  public struct Manager: Equatable, Sendable {
+    public struct Step: Equatable, Sendable {
+      let stage: InstallStage
+      let arguments: [String]
+    }
+
+    public let name: String
+    /// Run in order. A failure before the last step still lets the last one run.
+    let steps: [Step]
+    /// What About offers to copy when the upgrade fails.
+    public let command: String
+    public let environment: [String: String]
+
+    private static let formula = "jrmatherly/tap/claude-multipass"
+    private static let cask = "jrmatherly/tap/claude-multipass-app"
+
+    public static let homebrew = Manager(
+      name: "Homebrew",
+      // Any one stale tap fails `brew update`, so the upgrade still gets its chance.
+      steps: [Step(stage: .updatingHomebrew, arguments: ["update", "--quiet"]), Step(stage: .upgrading, arguments: ["upgrade", formula, cask])],
+      command: "brew update && brew upgrade \(formula) \(cask)",
+      environment: [
+        "HOMEBREW_NO_ASK": "1",
+        "HOMEBREW_NO_AUTO_UPDATE": "1",
+        "HOMEBREW_NO_INSTALL_CLEANUP": "1",
+        "HOMEBREW_NO_ENV_HINTS": "1",
+      ])
+
+    /// One run: mise refreshes the tap itself, and skips a name its config does not declare.
+    public static let mise: Manager = {
+      let upgrade = ["bootstrap", "packages", "upgrade", "--yes", "brew:\(formula)", "brew-cask:\(cask)"]
+      return Manager(name: "mise", steps: [Step(stage: .upgrading, arguments: upgrade)], command: "mise " + upgrade.joined(separator: " "), environment: [:])
+    }()
+  }
+
+  /// Long, because the timeout kills the upgrade, and a kill mid-swap is the one way to lose the app.
   public static let timeout: TimeInterval = 1800
-  private static let packages = ["jrmatherly/tap/claude-multipass", "jrmatherly/tap/claude-multipass-app"]
-  public static let command = "brew update && brew upgrade " + packages.joined(separator: " ")
 
   private let runner: CommandRunner
+  private let manager: Manager
   private let appURL: URL
   private let diskVersion: (URL) -> String?
   private let relaunch: (URL) -> Void
@@ -184,12 +228,14 @@ public final class BrewInstaller: Installer {
 
   public init(
     runner: CommandRunner,
+    manager: Manager,
     appURL: URL,
     diskVersion: @escaping (URL) -> String?,
     relaunch: @escaping (URL) -> Void,
     log: @escaping (String) -> Void = { NSLog("Claude Multipass: %@", $0) }
   ) {
     self.runner = runner
+    self.manager = manager
     self.appURL = appURL
     self.diskVersion = diskVersion
     self.relaunch = relaunch
@@ -206,44 +252,43 @@ public final class BrewInstaller: Installer {
       let said = Self.output(of: error)
       if !said.isEmpty { output = said }
     }
-    // A terminal `brew upgrade` may have got here first.
+    // An upgrade from a terminal may have got here first.
     if diskVersion(appURL).map(landed) != true {
-      report(.updatingHomebrew)
-      // Any one stale tap fails `brew update`, so the upgrade still gets its chance.
-      do { _ = try await runner.run(["update", "--quiet"]) } catch { fail(error) }
-      report(.upgrading)
-      do {
-        let warnings = try await runner.runCapturing(["upgrade"] + Self.packages).stderr
-        // The upgrade got past any update failure, so what it said explains the outcome.
-        if !warnings.isEmpty {
-          failure = nil
-          output = warnings
+      for step in manager.steps {
+        report(step.stage)
+        do {
+          let warnings = try await runner.runCapturing(step.arguments).stderr
+          // The upgrade got past any earlier failure, so what it said explains the outcome.
+          if step == manager.steps.last, !warnings.isEmpty {
+            failure = nil
+            output = warnings
+          }
+        } catch {
+          fail(error)
         }
-      } catch {
-        fail(error)
       }
     }
     let detail = output.isEmpty ? nil : output.split(separator: "\n", omittingEmptySubsequences: false).suffix(20).joined(separator: "\n")
     guard let disk = diskVersion(appURL) else {
-      throw UpdateProblem(message: "The app could not be read from disk after Homebrew ran. Download it to reinstall.", detail: detail, fallback: .download(UpdateController.releasePage))
+      throw UpdateProblem(message: "The app could not be read from disk after \(manager.name) ran. Download it to reinstall.", detail: detail, fallback: .download(UpdateController.releasePage))
     }
     guard landed(disk) else {
-      throw UpdateProblem(message: Self.message(for: failure, detail: detail, disk: disk), detail: detail, fallback: .command(Self.command))
+      throw UpdateProblem(message: message(for: failure, detail: detail, disk: disk), detail: detail, fallback: .command(manager.command))
     }
-    if let failure { log("Homebrew reported a failure, but \(disk) landed: \(failure)") }
+    if let failure { log("\(manager.name) reported a failure, but \(disk) landed: \(failure)") }
     report(.relaunching)
     relaunch(appURL)
   }
 
-  private static func message(for failure: Error?, detail: String?, disk: String) -> String {
+  private func message(for failure: Error?, detail: String?, disk: String) -> String {
     switch failure {
     case nil:
-      return "Homebrew finished, but the app on disk is still \(disk)."
+      return "\(manager.name) finished, but the app on disk is still \(disk)."
     case CLIError.timedOut?:
-      return "Homebrew did not finish in time. The app on disk is still \(disk)."
+      return "\(manager.name) did not finish in time. The app on disk is still \(disk)."
     default:
       let denied = detail?.contains("Operation not permitted") == true
-      return "Homebrew could not update the app." + (denied ? " macOS may be blocking this. Check System Settings, Privacy and Security, App Management." : "")
+      return "\(manager.name) could not update the app." + (denied ? " macOS may be blocking this. Check System Settings, Privacy and Security, App Management." : "")
     }
   }
 
@@ -270,7 +315,7 @@ public final class UpdateController: ObservableObject {
 
   /// False for a development build: no update rows. True with a `startProblem`, so About can say updates are off.
   public var isAvailable: Bool { (feed != nil || startProblem != nil) && runningVersion != nil }
-  /// Read from disk each time: a menu bar app runs for weeks, and brew can appear under it.
+  /// Read from disk each time: a menu bar app runs for weeks, and brew or mise can appear under it.
   public var installKind: InstallKind { detect() }
 
   private let appState: AppState

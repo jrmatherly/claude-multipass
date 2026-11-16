@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- The app's Update and relaunch button now works when mise installed the cask. It runs `mise bootstrap packages upgrade` for the tool and the app, and About says `Updates with mise`. Before, on a Mac with no `brew`, the button said `Homebrew installed this app, but brew was not found`.
+
 ## 0.14.1 (2026-11-16)
 
 - Turning "Show usage" off and on again within 30 seconds no longer reads usage a second time. The toggle now shares the Refresh button's 30 second floor.

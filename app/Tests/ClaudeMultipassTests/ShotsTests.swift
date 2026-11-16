@@ -173,7 +173,7 @@ func updateController(
     runningVersion: "0.9.0")
 }
 
-let updateFixtureNames = ["idle", "upToDate", "available", "availableBrew", "noBrew", "failedNoBrew", "failedCheck", "installing", "upgrading", "failedBrew", "failedSparkle", "startFailed"]
+let updateFixtureNames = ["idle", "upToDate", "available", "availableBrew", "availableMise", "noBrew", "failedNoBrew", "failedCheck", "installing", "upgrading", "failedBrew", "failedSparkle", "startFailed"]
 
 /// Each named state, reached through `check()` and `install()` as the real app reaches it.
 @MainActor
@@ -190,6 +190,8 @@ func updateFixture(_ name: String) async -> (AppState, UpdateController) {
     controller = updateController(appState)
   case "availableBrew":
     controller = updateController(appState, kind: brew)
+  case "availableMise":
+    controller = updateController(appState, kind: .mise(mise: URL(fileURLWithPath: "/Users/me/.local/bin/mise")))
   case "noBrew":
     controller = updateController(appState, kind: .homebrewMissing)
   case "failedCheck":
@@ -204,7 +206,7 @@ func updateFixture(_ name: String) async -> (AppState, UpdateController) {
     return (appState, UpdateController(appState: appState, feed: nil, startProblem: "The provided EdDSA key could not be decoded.", detect: { .direct }, installer: { _ in nil }, runningVersion: "0.9.0"))
   case "failedBrew":
     let output = (1...20).map { "Error: line \($0) of what brew printed, long enough that it has to wrap in the output area" }.joined(separator: "\n")
-    let problem = UpdateProblem(message: "Homebrew could not update the app. macOS may be blocking this. Check System Settings, Privacy and Security, App Management.", detail: output, fallback: .command(BrewInstaller.command))
+    let problem = UpdateProblem(message: "Homebrew could not update the app. macOS may be blocking this. Check System Settings, Privacy and Security, App Management.", detail: output, fallback: .command(CaskInstaller.Manager.homebrew.command))
     controller = updateController(appState, kind: brew, installer: FixtureInstaller(error: problem))
   case "failedSparkle":
     let problem = UpdateProblem(message: "The update could not be installed.", detail: nil, fallback: .download(UpdateController.releasePage))

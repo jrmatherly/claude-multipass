@@ -200,6 +200,8 @@ struct UpdateSection: View {
     switch updates.installKind {
     case .homebrew:
       updateButton(offer, caption: "Updates with Homebrew")
+    case .mise:
+      updateButton(offer, caption: "Updates with mise")
     case .direct, .development:
       updateButton(offer, caption: nil)
     case .homebrewMissing:
