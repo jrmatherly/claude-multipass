@@ -80,6 +80,8 @@ fi
 swift_log=$(mktemp)
 swift test --package-path app > "$swift_log" 2>&1 || {
   grep -vE 'ld: warning|^\s*$' "$swift_log" | tail -n 60 >&2
+  # A failure early in a long run is above the tail, so name it again
+  grep -E '✘|error:' "$swift_log" >&2 || true
   echo "check: swift test failed (the app needs Xcode, not only the Command Line Tools; the last lines of its output are above)" >&2
   rm -f "$swift_log"
   exit 1
