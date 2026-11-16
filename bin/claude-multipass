@@ -725,7 +725,8 @@ cli_capture() {
     warning "$name: $(keychain_exit "$rc") reading the CLI login; saved the Desktop login only"
     return 0
   fi
-  if ! printf '%s' "$live" | jq -e '.claudeAiOauth != null' > /dev/null 2>&1; then
+  # The positive test, so an item that is not JSON reaches its own warning below.
+  if printf '%s' "$live" | jq -e '.claudeAiOauth == null' > /dev/null 2>&1; then
     warning "$name: the live CLI login holds no tokens; saved the Desktop login only"
     return 0
   fi
@@ -975,6 +976,13 @@ cli_restore() {
     warning "$(keychain_exit "$rc") reading the saved CLI login; switched Desktop only"
     return 0
   fi
+  if ! printf '%s' "$saved" | jq -e . > /dev/null 2>&1; then
+    warning "the live or saved CLI login is not valid JSON; switched Desktop only"
+    return 0
+  elif printf '%s' "$saved" | jq -e '.claudeAiOauth == null' > /dev/null 2>&1; then
+    warning "the saved CLI login for $name holds no tokens; run claude auth login, then save $name"
+    return 0
+  fi
   merged=$saved
   # Both items reach jq on stdin: --argjson would put the saved tokens on its argv.
   if [[ -n $live ]] && ! merged=$(printf '%s\n%s\n' "$live" "$saved" | jq -c -s "(.[0] | {$cli_shared} | with_entries(select(.value != null))) + .[1]" 2> /dev/null); then
@@ -1156,9 +1164,12 @@ copy_cookies() {
         rm -f "$2/$f.tmp"
         return 1
       }
-      mv "$2/$f.tmp" "$2/$f"
+      mv "$2/$f.tmp" "$2/$f" || {
+        rm -f "$2/$f.tmp"
+        return 1
+      }
     else
-      rm -f "$2/$f"
+      rm -f "$2/$f" || return 1
     fi
   done
 }
@@ -1169,9 +1180,11 @@ backup_dest=''
 backup_login() {
   local old i all
   backup_dest="$backups/login-$(date +%Y%m%d-%H%M%S)-$$"
-  (umask 077 && mkdir -p "$backup_dest") || return 1
-  cp -p "$config" "$backup_dest/config.json" || return 1
-  copy_cookies "$cookies" "$backup_dest" || return 1
+  # A partial folder would count toward the ten kept and push out a whole one.
+  { (umask 077 && mkdir -p "$backup_dest") && cp -p "$config" "$backup_dest/config.json" && copy_cookies "$cookies" "$backup_dest"; } || {
+    rm -rf "$backup_dest"
+    return 1
+  }
   echo "Backed up the current login to $backup_dest"
   # A glob, not ls, so a store path with a space never splits; names sort by
   # time. The folder just made is left out of the candidates rather than
@@ -1182,7 +1195,10 @@ backup_login() {
   for old in "$backups"/login-*/; do [[ ${old%/} == "$backup_dest" ]] || all+=("$old"); done
   for ((i = 0; i < ${#all[@]} - (backup_keep - 1); i++)); do
     old=${all[i]}
-    rm -rf "$old"
+    rm -rf "$old" || {
+      warning "could not remove $old"
+      continue
+    }
     keychain_delete "$mp_service" "$(basename "$old")" || warning "could not delete the Keychain item for $old"
   done
 }
@@ -1255,10 +1271,12 @@ profile_save() {
 profile_restore() {
   local name=$1 dir="$store/$1"
   backup_login
+  # Cookies first: config.json names the signed-in account, so a run that dies
+  # before it is written still reads as the old account and a retry restores all of it.
+  copy_cookies "$dir" "$cookies" || fail "could not copy $name's cookies; the previous login is in $backup_dest"
   jq_write "$config" --slurpfile p "$dir/config.json" --argjson k "$auth_keys" \
     'reduce $k[] as $x (.; if $p[0] | has($x) then .[$x] = $p[0][$x] else del(.[$x]) end)' \
     "$config"
-  copy_cookies "$dir" "$cookies"
   cli_restore "$name"
   echo "Restored $name"
 }

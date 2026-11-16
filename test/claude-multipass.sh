@@ -2476,18 +2476,44 @@ check_true "and leaves no temp file" test ! -e "$p/alpha/cli.json.tmp"
 cp "$p/beta/cli.json" "$tmp/beta-cli.json"
 : > "$p/beta/cli.json"
 live=$(jq -c .oauthAccount "$tmp/claude.json")
+token=$(kc_get "Claude Code-credentials" "$USER" | jq -r .claudeAiOauth.accessToken)
+cli_token() { kc_get "Claude Code-credentials" "$USER" | jq -r .claudeAiOauth.accessToken; }
 out=$(errs cda switch beta --no-relaunch)
 check_true "switch refuses an unreadable cli.json" grep -q 'the saved CLI identity for beta is unreadable; run claude auth login, then save beta' <<< "$out"
 check "and keeps oauthAccount in the CLI config" "$live" "$(jq -c .oauthAccount "$tmp/claude.json")"
+check "and the CLI item keeps its tokens" "$token" "$(cli_token)"
+# Desktop is now on beta and the CLI still on alpha, so each switch below is the same-account repair
+printf '{"oauthAccount":null}' > "$p/beta/cli.json"
+out=$(errs cda switch beta --no-relaunch)
+check_true "nor one that names no account" grep -q 'the saved CLI identity for beta is unreadable' <<< "$out"
+check "and oauthAccount stays" "$live" "$(jq -c .oauthAccount "$tmp/claude.json")"
+check "and the CLI item is left alone" "$token" "$(cli_token)"
 cp "$tmp/beta-cli.json" "$p/beta/cli.json"
-# Desktop is on beta and the CLI still on alpha: the same-account repair, with no backup made yet
-token=$(kc_get "Claude Code-credentials" "$USER" | jq -r .claudeAiOauth.accessToken)
+# a saved Keychain item with no login is never written over the live one
+saved=$(kc_get claude-multipass beta)
+kc_put claude-multipass beta '{"mcpOAuth":{"srv":"shared"}}'
+out=$(errs cda switch beta --no-relaunch)
+check_true "switch refuses a saved item with no tokens" grep -q 'the saved CLI login for beta holds no tokens; run claude auth login, then save beta' <<< "$out"
+check "and leaves the live CLI item" "$token" "$(cli_token)"
+kc_put claude-multipass beta "$saved"
+# no backup made yet in this run, so cli_backup makes one
 chmod 500 "$b"
 out=$(cda switch beta --no-relaunch 2>&1 || true)
 chmod 700 "$b"
 check "a backup that cannot be made is not announced" 0 "$(grep -c 'Backed up the current login' <<< "$out" || true)"
 check_true "and the run says so" grep -q 'could not back up the current login; switched Desktop only' <<< "$out"
-check "and the CLI login is not written" "$token" "$(kc_get "Claude Code-credentials" "$USER" | jq -r .claudeAiOauth.accessToken)"
+check "and the CLI login is not written" "$token" "$(cli_token)"
+before_backups=$(find "$b" -maxdepth 1 -name 'login-*' | wc -l | tr -d ' ')
+for f in config.json Cookies.tmp; do
+  printf '#!/bin/sh\nfor a; do last=$a; done\ncase "$last" in "%s"/login-*/%s) exit 1 ;; esac\nexec /bin/cp "$@"\n' "$b" "$f" > "$tmp/bin/cp"
+  chmod +x "$tmp/bin/cp"
+  out=$(cda switch beta --no-relaunch 2>&1 || true)
+  rm "$tmp/bin/cp"
+  check "a backup whose $f copy fails is not announced" 0 "$(grep -c 'Backed up the current login' <<< "$out" || true)"
+  check_true "and the run says so ($f)" grep -q 'could not back up the current login; switched Desktop only' <<< "$out"
+  check "and the CLI login is not written ($f)" "$token" "$(cli_token)"
+  check "and the partial folder is removed ($f)" "$before_backups" "$(find "$b" -maxdepth 1 -name 'login-*' | wc -l | tr -d ' ')"
+done
 check "the repair then works" 0 "$(exit_code cda switch beta --no-relaunch)"
 check "and moves the CLI to beta" "$(jq -r .account "$p/beta/meta.json")" "$(jq -r .oauthAccount.accountUuid "$tmp/claude.json")"
 # an item with shared keys and no login is not a CLI login
@@ -2497,15 +2523,23 @@ kc_put "Claude Code-credentials" "$USER" '{"mcpOAuth":{"srv":"shared"}}'
 out=$(errs cda save beta --no-relaunch)
 check_true "save names an item with no tokens" grep -q 'beta: the live CLI login holds no tokens; saved the Desktop login only' <<< "$out"
 check "and keeps the profile's saved CLI login" "$saved" "$(kc_get claude-multipass beta)"
+kc_put "Claude Code-credentials" "$USER" 'not json'
+check_true "an item that is not JSON keeps its own warning" grep -q 'beta: the live CLI login is not valid JSON; saved the Desktop login only' <<< "$(errs cda save beta --no-relaunch)"
 kc_put "Claude Code-credentials" "$USER" "$live_now"
 # a cookie copy that dies leaves the live file whole
 printf '#!/bin/sh\nfor a; do last=$a; done\ncase "$last" in "%s/Cookies" | "%s/Cookies.tmp") printf half > "$last"; exit 1 ;; esac\nexec /bin/cp "$@"\n' "$d" "$d" > "$tmp/bin/cp"
 chmod +x "$tmp/bin/cp"
 before=$(cat "$d/Cookies")
-check "a switch whose cookie copy dies fails" 1 "$(exit_code cda switch alpha --no-relaunch)"
+out=$(cda switch alpha --no-relaunch 2>&1) && rc=0 || rc=$?
+check "a switch whose cookie copy dies fails" 1 "$rc"
+check_true "and says where the previous login is" grep -q "could not copy alpha's cookies; the previous login is in $b/login-" <<< "$out"
 check "and leaves the live Cookies file whole" "$before" "$(cat "$d/Cookies")"
 check_true "and no temp file" test ! -e "$d/Cookies.tmp"
+check "and Desktop still reads as beta" beta "$(cda current)"
 rm "$tmp/bin/cp"
+check "the retry then completes" 0 "$(exit_code cda switch alpha --no-relaunch)"
+check "with alpha's cookies" "$(cat "$p/alpha/Cookies")" "$(cat "$d/Cookies")"
+check "and Desktop on alpha" alpha "$(cda current)"
 
 #@ done
 [[ $# -gt 0 ]] || echo "All claude-multipass checks passed"
