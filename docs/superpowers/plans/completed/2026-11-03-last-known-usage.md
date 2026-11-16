@@ -227,7 +227,7 @@ The description quotes finding 5's drift numbers, and carries the shots. Add for
 
 ## Gate result
 
-Not decided yet. One of the two readings is in.
+Moved to `completed/` on 2026-11-16 on Jason's word, with reading 1 pointing at the stop rule and reading 2 still owed as a follow-up. Nothing was built. If reading 2 shows an account with `token expired` or `token lapsed`, move this plan back and go on to Step 3.
 
 **Reading 1, 2026-11-16 14:31 EST** (`claude-multipass usage`, run by Jason):
 
