@@ -109,3 +109,9 @@ private func decode(_ json: String) throws -> AppSettings {
   defaults.set("not json", forKey: "settings")
   #expect(SettingsStore(defaults: defaults).load() == AppSettings())
 }
+
+@Test func usagePollIntervalNeverGoesBelowFiveMinutes() {
+  #expect(AppSettings.usagePollInterval(minutes: 1) == 300)
+  #expect(AppSettings.usagePollInterval(minutes: 5) == 300)
+  #expect(AppSettings.usagePollInterval(minutes: 60) == 3600)
+}

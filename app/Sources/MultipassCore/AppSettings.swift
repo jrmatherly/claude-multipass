@@ -15,8 +15,12 @@ public struct AppSettings: Equatable, Codable {
   public var debugSwitches = false
 
   public static let snapshotInterval: TimeInterval = 30
-  /// A Refresh click runs `usage` at once; a burst of clicks costs one run.
+  /// A Refresh click or turning usage on runs `usage` at once; a burst costs one run.
   public static let usageRefreshFloor: TimeInterval = 30
+  /// The usage timer never runs faster than 5 minutes, whatever the stored value.
+  public static func usagePollInterval(minutes: Int) -> TimeInterval {
+    TimeInterval(max(minutes, 5) * 60)
+  }
   public static let allowedIntervals = [5, 15, 30, 60]
 
   /// Added to the environment of every run of the tool.

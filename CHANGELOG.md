@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Turning "Show usage" off and on again within 30 seconds no longer reads usage a second time. The toggle now shares the Refresh button's 30 second floor.
+- The popover's Refresh button is disabled while a refresh runs.
+- Settings re-reads the "Launch at login" state each time its window comes forward, so a login item removed in System Settings shows as off.
 - A profile's CLI identity file (`cli.json`) that cannot be written now keeps its old contents and warns `could not write`. Before, the write could fail without a word and leave an empty file, and the next switch to that profile then cleared the account from `~/.claude.json`.
 - `switch` no longer restores a CLI login from an identity file that is empty or names no account. It warns `the saved CLI identity for <name> is unreadable; run claude auth login, then save <name>` and switches Desktop only.
 - `save` no longer stores a Claude Code Keychain item that holds no login (shared MCP keys only). It warns `the live CLI login holds no tokens` and keeps the profile's saved CLI login.

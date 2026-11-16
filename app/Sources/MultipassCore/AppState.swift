@@ -95,7 +95,7 @@ public final class AppState: ObservableObject {
     }
     switch (old.usageEnabled, new.usageEnabled) {
     case (false, true):
-      await refreshUsage()
+      if !withinUsageFloor { await refreshUsage() }
       if settings.usageEnabled { startUsageTimer() }
     case (true, false):
       usageTask?.cancel()
@@ -190,13 +190,18 @@ public final class AppState: ObservableObject {
     }
   }
 
-  /// The manual path (Refresh in the popover and the menu, and launch). The
-  /// timer and the usage toggle call `refreshUsage` directly, spaced on their
-  /// own, so only a click can land within the floor of the last attempt.
+  /// True within `usageRefreshFloor` of the last usage attempt. The timer is
+  /// spaced on its own, so only a click or the usage toggle can land here.
+  private var withinUsageFloor: Bool {
+    guard let last = usageAttemptedAt else { return false }
+    return now().timeIntervalSince(last) < AppSettings.usageRefreshFloor
+  }
+
+  /// The manual path (Refresh in the popover and the menu, and launch).
   public func refreshAll() async {
     clearRowNote()
     await refresh()
-    if let last = usageAttemptedAt, now().timeIntervalSince(last) < AppSettings.usageRefreshFloor { return }
+    if withinUsageFloor { return }
     await refreshUsage()
   }
 
@@ -290,7 +295,7 @@ public final class AppState: ObservableObject {
 
   private func startUsageTimer() {
     usageTask?.cancel()
-    usageTask = timer(every: TimeInterval(max(settings.usageIntervalMinutes, 5) * 60)) { await $0.refreshUsage() }
+    usageTask = timer(every: AppSettings.usagePollInterval(minutes: settings.usageIntervalMinutes)) { await $0.refreshUsage() }
   }
 
   private func timer(every interval: TimeInterval, _ tick: @escaping @MainActor (AppState) async -> Void) -> Task<Void, Never> {

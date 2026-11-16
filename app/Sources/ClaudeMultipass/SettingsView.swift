@@ -82,6 +82,11 @@ struct SettingsView: View {
     Section {
       Toggle("Launch at login", isOn: $launchAtLogin)
         .onChange(of: launchAtLogin) { _, enabled in setLaunchAtLogin(enabled) }
+        // The window is built once and re-shown, so a login item removed in System Settings is seen only here.
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+          launchAtLogin = Self.loginItemOn
+          loginItemNote = Self.approvalNote
+        }
       if let loginItemError {
         Text(loginItemError).font(.caption).foregroundStyle(.red)
       }

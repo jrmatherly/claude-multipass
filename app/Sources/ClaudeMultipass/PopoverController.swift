@@ -3,7 +3,7 @@ import MultipassCore
 import SwiftUI
 
 /// The transient popover under the status item. Opening it refreshes the
-/// snapshot and, when usage is on, the usage figures.
+/// snapshot. Usage runs on its own timer.
 @MainActor
 final class PopoverController: NSObject, NSPopoverDelegate {
   private let appState: AppState
