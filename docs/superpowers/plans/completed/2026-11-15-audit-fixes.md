@@ -32,7 +32,10 @@
   - Task D2 Step 1 was skipped, since PR 75 adds the pin clause. Step 3 (`/docs-audit`) was not run. The two corrected sentences were checked against `check.yml` lines 11 to 14.
   - Task D3 Step 2 is wrong as written. Measured on 2026-11-16 against an empty store: an unknown option, a misplaced `--force`, `--json` or `--llmr` and an extra name exit 2, and only a missing name (`show`, `remove`) exits 1. The doc now says that.
   - Task D3 also gained a bullet for the refused first switch (exit 3), which the new `README.md` line points to and the section did not cover.
-- **Batch E: not started.** It is Jason's.
+- **Batch E: done** by Jason on 2026-11-16.
+  - E1: Renovate, not Dependabot. He installed the Renovate app on the repository, and within minutes it opened PR 79 (`pnpm/action-setup` to v6.1.1), PR 80 (pnpm to v12.18.0) and the Dependency Dashboard, issue 81. `renovate.json` stays, and no `.github/dependabot.yml` is added. Dependabot security fixes stay off.
+  - E2: the tap has one ruleset, `protect main`, active, with the deletion and non-fast-forward rules. Still to see: the next release's tap push succeeds under it.
+- **The plan is complete** and moved to `completed/` on 2026-11-16. The Deferred table below still holds 13 findings that were recorded and not planned.
 - The step checkboxes in this file are not ticked. This section is the record.
 
 ## Global constraints
