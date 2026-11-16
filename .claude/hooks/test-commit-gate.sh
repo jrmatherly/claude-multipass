@@ -37,6 +37,7 @@ git -C "$proj" config alias.c ci
 git -C "$proj" config alias.oc '-c commit.gpgsign=false commit'
 git -C "$proj" config alias.rc 'rebase --continue'
 git -C "$proj" config alias.pick cherry-pick
+git -C "$proj" config alias.g '!git'
 git -C "$proj" config alias.shci '!git ci -m x'
 git -C "$proj" config alias.sq "'commit' -m"
 git -C "$proj" add test/check.sh .claude/hooks/commit-gate.sh
@@ -91,7 +92,7 @@ for c in 'git -C . commit --amend' 'git -c commit.gpgsign=false commit' '/usr/bi
   "git -C $other status; git commit -m x" '( git commit -m x )' 'true & git commit -m x' 'if true; then git commit -m x; fi' \
   '{ git commit -m x; }' 'echo $(git commit -m x)' 'echo `git commit -m x`' 'sudo git commit -m x' 'sudo -u root git commit' 'sudo -n -u root git commit' 'xargs git commit' \
   'nice -n 10 git commit' "(cd $other && ls); git commit -m x" \
-  'git cm x' 'git qc x' 'git ci' 'git c x' 'git oc x' 'git rc' 'git pick --continue' 'git sq x' 'git sh' 'git st; git st; git st; git st; git st; git sh' 'rtk git commit -m x' 'gtimeout 600 git commit' 'noglob git commit -m x' 'cd $NOPE && git commit -m x' 'cd "$CLAUDE_PROJECT_DIR" && git cm x' 'timeout 600 git commit -m x' 'eval git commit -m x' 'caffeinate git commit -m x' 'stdbuf -o0 git commit'; do
+  'git cm x' 'git qc x' 'git ci' 'git c x' 'git oc x' 'git rc' 'git pick --continue' 'git sq x' 'git sh' 'git g commit -m x' 'git st; git st; git st; git st; git st; git sh' 'rtk git commit -m x' 'gtimeout 600 git commit' 'noglob git commit -m x' 'cd $NOPE && git commit -m x' 'cd "$CLAUDE_PROJECT_DIR" && git cm x' 'timeout 600 git commit -m x' 'eval git commit -m x' 'caffeinate git commit -m x' 'stdbuf -o0 git commit'; do
   rm -f "$STATE/check-ran"
   run "$c"
   [ -e "$STATE/check-ran" ] || fail "not gated: $c"
@@ -99,7 +100,7 @@ done
 # 4. mentions of the word do not gate, nor do commands whose commit tree is not on disk yet
 for c in 'pre-commit run' 'echo "git commit"' 'git commit-tree HEAD^{tree}' 'git log --grep commit' 'git show commit' 'git -c commit.gpgsign=false log' \
   'git merge feature' 'git merge --abort' 'git rebase main' 'git cherry-pick abc' 'git revert HEAD' 'git pull' \
-  'sudo git log --grep commit' 'git lg' 'git st'; do
+  'sudo git log --grep commit' 'git lg' 'git st' 'git g log'; do
   rm -f "$STATE/check-ran"
   run "$c"
   [ ! -e "$STATE/check-ran" ] || fail "wrongly gated: $c"

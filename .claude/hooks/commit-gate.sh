@@ -118,9 +118,10 @@ is_commit() {
                 hops=$((hops + 1))
                 if [[ $aliased == '!'* ]]; then
                   ((alias_depth < 4)) || break
-                  # Git runs it from the repo, and its own cd or -C can move the commit
+                  # Git runs it from the repo with the typed arguments appended,
+                  # and its own cd or -C can move the commit
                   alias_depth=$((alias_depth + 1))
-                  is_commit "${aliased#!}" "$gitdir" && return 0
+                  is_commit "${aliased#!} $*" "$gitdir" && return 0
                   alias_depth=$((alias_depth - 1))
                   break
                 fi
