@@ -20,7 +20,14 @@
   - `cli_restore` refuses a saved Keychain item that holds no login.
   - The Raycast usage command says `could not read the account list` when it cannot.
   - The `failclosed` section has 35 check lines, four of them in a loop that runs twice. The task text below is the plan as written, not the code as merged, so read `bin/claude-multipass` for the final form.
-- **Batches B, C, D and E: not started.** The step checkboxes in this file are not ticked. This section is the record.
+- **Batch B: PR 74 open**, branch `usage-floor-and-app-polish`, one commit. Both new tests failed or did not compile before the change and pass after. Not checked: the login item re-read, which needs a person (Task B3 Step 4).
+- **Batch C: PR 75 open**, branch `gate-and-ci-hardening`. It adds one thing the tasks below do not name: when `swift test` fails, the gate prints every failed test line, because PR 74's first `check` run failed above the 60-line tail it printed. No Dependabot file, since Task E1 is not decided.
+- **Batch D: done**, four commits on `main` (`e1cd465`, `f169cd6`, `45c3dd8`, `c5efaf3`). Three differences from the tasks below:
+  - Task D2 Step 1 was skipped, since PR 75 adds the pin clause. Step 3 (`/docs-audit`) was not run. The two corrected sentences were checked against `check.yml` lines 11 to 14.
+  - Task D3 Step 2 is wrong as written. Measured on 2026-11-16 against an empty store: an unknown option, a misplaced `--force`, `--json` or `--llmr` and an extra name exit 2, and only a missing name (`show`, `remove`) exits 1. The doc now says that.
+  - Task D3 also gained a bullet for the refused first switch (exit 3), which the new `README.md` line points to and the section did not cover.
+- **Batch E: not started.** It is Jason's.
+- The step checkboxes in this file are not ticked. This section is the record.
 
 ## Global constraints
 
