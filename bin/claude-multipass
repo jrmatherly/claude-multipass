@@ -280,7 +280,7 @@ ${bold}Commands${reset}
                        The terminal's claude login stays as it is. llmr
                        <llmr-profile> uses your ~/.claude when that LLMR
                        profile has "Use my ~/.claude in the terminal" on (in
-                       llm-router after v7.1.1); otherwise it uses a blank
+                       llm-router v7.2.0 or later); otherwise it uses a blank
                        Claude home. If llmr fails, or no LLMR Desktop
                        appears within 10 s, Desktop relaunches on the
                        claude.ai login and switch exits 1. Switching away

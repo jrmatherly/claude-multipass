@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- The help page and the docs now name the llm-router release that has "Use my ~/.claude in the terminal": v7.2.0 or later.
+
 ## 0.15.1 (2026-11-16)
 
 - No change to the tool or the app. This release rebuilds 0.15.0 on the updated build tooling (Node 26, pnpm 12.18.0, a newer release runner).
