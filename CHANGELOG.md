@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.15.2 (2026-11-19)
 
 - The help page and the docs now name the llm-router release that has "Use my ~/.claude in the terminal": v7.2.0 or later.
 - The help page and the docs now say that a System default LLMR profile on `~/.claude/settings.json` reads the terminal's saved login in llm-router v8.0.0 or later, so a switch can swap it under that session too.
