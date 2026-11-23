@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- A switch now reads and rewrites the terminal login under the lock Claude Code takes for its own writes, so a login for an MCP server saved during a switch is no longer lost.
+
 ## 0.15.2 (2026-11-19)
 
 - The help page and the docs now name the llm-router release that has "Use my ~/.claude in the terminal": v7.2.0 or later.

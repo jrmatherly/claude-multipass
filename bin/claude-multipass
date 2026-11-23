@@ -544,9 +544,9 @@ dbg_warning() {
 # CLI login belongs to the profile being saved.
 cli_signed_in_as() { jq -r '.oauthAccount.accountUuid // empty' "$claude_json" 2> /dev/null || true; }
 
-# The live CLI item, read once per run: the re-save on the way out and the
-# restore right after it share the read (one Keychain prompt fewer). Status
-# 44 (absent) is cached too; any other failure is retried by the next caller.
+# The live CLI item, cached for the run. The restore does not share the
+# re-save's read: it clears the cache and reads again under the storage lock.
+# Status 44 (absent) is cached too; any other failure is retried by the next caller.
 cli_live='' cli_live_rc=''
 cli_live_read() {
   local rc=0
@@ -754,22 +754,28 @@ cli_capture() {
     || warning "$name: could not write $dir/cli.json; the CLI login is in the Keychain but not claimed; save $name again"
 }
 
-# The CLI's locks are directories: mkdir acquires, rmdir releases, and a
-# holder older than the threshold claude-swap uses for it (60, 60 and 10 s)
-# is swept first. A held lock fails a switch before Desktop's config moves.
+# The CLI's four locks are directories: mkdir acquires, rmdir releases, and a
+# holder older than its threshold is swept first: 60, 60 and 10 s for the three
+# cli_lock_all takes (claude-swap's values), 15 s for .storage-write.lock. A
+# held one of the three fails a switch before Desktop's config moves. The
+# storage lock is the one Claude Code holds for every write of its credential
+# item (2.1.330, mutate). Claude Code waits about 7.5 s for it, so it is held
+# only around the restore's own read and writes.
 cli_locks=()
 cli_touchers=()
 held_lock=''
 cli_lock() {
-  local dir=$1 stale=$2 i
+  local dir=$1 stale=$2 i mtime
   mkdir -p "$(dirname "$dir")"
-  if [[ -d $dir ]] && (($(date +%s) - $(stat -f %m "$dir") > stale)); then rm -rf "$dir"; fi
+  # Claude Code takes and drops the storage lock at every credential write, so
+  # the dir can vanish between the test and the stat: that reads as not stale.
+  if [[ -d $dir ]] && mtime=$(stat -f %m "$dir" 2> /dev/null) && (($(date +%s) - mtime > stale)); then rm -rf "$dir"; fi
   for ((i = 0; i < 5; i++)); do
     if mkdir "$dir" 2> /dev/null; then
       cli_locks+=("$dir")
-      # Claude Code deems claude.json.lock stale after 10 s and the credential
-      # locks after 60 s, and touches its own every 5 s, so a held dir is kept
-      # fresh. The loop ends itself once the dir is gone and -c covers the race,
+      # Claude Code deems claude.json.lock stale after 10 s, the storage lock
+      # after 15 s and the credential locks after 60 s, and touches its own
+      # every 5 s, so a held dir is kept fresh. The loop ends itself once the dir is gone and -c covers the race,
       # so a lingering loop never leaves a file where the CLI expects a dir. Its
       # fds go to /dev/null: the menu bar app and Raycast drain this script's
       # pipes to EOF, and an inherited fd would hold them until the next sleep.
@@ -800,6 +806,16 @@ cli_lock_all() {
       cli_unlock
       return 1
     }
+}
+
+# Releases only the newest lock. bash 3.2 has no negative index.
+cli_unlock_last() {
+  local n=${#cli_locks[@]}
+  ((n > 0)) || return 0
+  n=$((n - 1))
+  kill "${cli_touchers[n]}" 2> /dev/null || true
+  rmdir "${cli_locks[n]}" 2> /dev/null || true
+  unset "cli_touchers[$n]" "cli_locks[$n]"
 }
 
 # Runs from the EXIT trap too, so every rmdir tolerates an absent dir.
@@ -947,7 +963,7 @@ cli_verify() {
 # of the live item; the shared MCP keys stay. A CLI already on the target
 # account holds fresher tokens than the profile, so it is re-saved instead.
 cli_restore() {
-  local name=$1 dir="$store/$1" saved live merged rc=0 why
+  local name=$1 dir="$store/$1" why
   if [[ ! -f $dir/cli.json ]]; then
     warning "no CLI login saved for $name; switched Desktop only"
     return 0
@@ -957,6 +973,27 @@ cli_restore() {
     warning "$why; switched Desktop only"
     return 0
   fi
+  cli_swapped=''
+  cli_lock "$cli_home/.storage-write.lock" 15 || {
+    warning "Claude Code holds $held_lock; switched Desktop only (run claude-multipass switch $name again)"
+    return 0
+  }
+  # The re-save read the item before this lock was held.
+  cli_live_rc=''
+  cli_swap "$name"
+  cli_unlock_last
+  [[ -n $cli_swapped ]] || return 0
+  # Claude Code's refresh takes .oauth_refresh.lock and then ~/.claude.lock
+  # (2.1.330), so both are released before claude is asked.
+  cli_unlock
+  cli_verify "$(jq -r '.oauthAccount.organizationUuid // empty' "$dir/cli.json")"
+}
+
+# The read and writes of a restore, run under the storage lock. Sets
+# cli_swapped only when the item and ~/.claude.json were both written.
+cli_swapped=''
+cli_swap() {
+  local name=$1 dir="$store/$1" saved live merged rc=0
   cli_live_read || rc=$?
   # The identity alone does not prove a login: the item must hold live tokens too.
   if ((rc == 0)) && [[ $(cli_signed_in_as) == "$(jq -r .account "$dir/meta.json")" ]] \
@@ -1016,10 +1053,7 @@ cli_restore() {
     return 0
   fi
   dbg "cli restore wrote $(cli_signed_in_as)"
-  # claude-swap reports the CLI takes these locks on refresh (unverified here),
-  # so they are released before claude is asked.
-  cli_unlock
-  cli_verify "$(jq -r '.oauthAccount.organizationUuid // empty' "$dir/cli.json")"
+  cli_swapped=1
 }
 
 # BSD pgrep never reports its own ancestors, so from a shell inside Desktop

@@ -89,6 +89,8 @@ run() {
     esac
     shift
   done
+  # Whether Claude Code's storage lock is held at each access of the CLI item.
+  [[ $s != 'Claude Code-credentials' ]] || { [[ -d ${kc%/*}/claude-home/.storage-write.lock ]] && echo "$cmd held" || echo "$cmd free"; } >> "${kc%/*}/storage-lock-log"
   # Failure hooks for the self-check: a refused write, a failed read of the CLI item.
   [[ -z ${SECURITY_FAIL_ADD:-} || $cmd != add-generic-password ]] || return 1
   [[ -z ${SECURITY_FAIL_DELETE:-} || $cmd != delete-generic-password ]] || return 1
@@ -360,7 +362,7 @@ printf cookie-B > "$p/beta/Cookies"
 kc_put claude-multipass beta '{"claudeAiOauth":{"accessToken":"at-beta","refreshToken":"rt-beta","expiresAt":2,"scopes":["a"],"subscriptionType":"max"}}'
 printf '{"oauthAccount":{"accountUuid":"bbbbbbbb-2222","emailAddress":"b@example.com","organizationUuid":"org-beta"}}' > "$p/beta/cli.json"
 # claude on PATH answers the verification after a restore
-printf '#!/bin/sh\nls -d "%s"/claude.json.lock "%s"/claude-home/.oauth_refresh.lock "%s"/claude-home.lock 2> /dev/null | wc -l | tr -d " " > "%s/locks-at-verify"\necho "{\\"loggedIn\\":true,\\"orgId\\":\\"org-beta\\"}"\n' "$tmp" "$tmp" "$tmp" "$tmp" > "$tmp/bin/claude"
+printf '#!/bin/sh\nls -d "%s"/claude.json.lock "%s"/claude-home/.oauth_refresh.lock "%s"/claude-home.lock "%s"/claude-home/.storage-write.lock 2> /dev/null | wc -l | tr -d " " > "%s/locks-at-verify"\necho "{\\"loggedIn\\":true,\\"orgId\\":\\"org-beta\\"}"\n' "$tmp" "$tmp" "$tmp" "$tmp" "$tmp" > "$tmp/bin/claude"
 chmod +x "$tmp/bin/claude"
 cp "$tmp/claude.json" "$tmp/claude-before.json"
 
@@ -382,7 +384,7 @@ before=$(jq --tab '.["oauth:tokenCacheV2"] = "enc-A2-new"' "$d/config.json")
 printf '%s' "$before" > "$d/config.json"
 
 : > "$tmp/security-calls"
-# The CLI item is read once per run, so the switch waits 2 s once while holding the locks.
+# The re-save reads the CLI item and the restore reads it again under the storage lock, so the switch waits 2 s twice while holding the locks.
 export SECURITY_HOLD=$tmp/claude.json.lock
 out=$(cda switch beta --no-relaunch 2> "$tmp/switch-err" | tee "$tmp/switch-out")
 unset SECURITY_HOLD
@@ -420,10 +422,10 @@ dest=$(sed -n 's/^Backed up the current login to //p' "$tmp/switch-out")
 check "switch backs up the previous CLI tokens" at-alpha "$(kc_get claude-multipass "$(basename "$dest")" | jq -r .claudeAiOauth.accessToken)"
 check "switch backs up the previous identity" aaaaaaaa-1111 "$(jq -r .oauthAccount.accountUuid "$dest/cli.json")"
 check "switch re-saves the outgoing CLI login" at-alpha "$(kc_get claude-multipass alpha | jq -r .claudeAiOauth.accessToken)"
-check "switch releases the CLI locks" 0 "$(ls -d "$tmp"/claude.json.lock "$tmp"/claude-home/.oauth_refresh.lock "$tmp"/claude-home.lock 2> /dev/null | wc -l | tr -d ' ')"
+check "switch releases the CLI locks" 0 "$(ls -d "$tmp"/claude.json.lock "$tmp"/claude-home/.oauth_refresh.lock "$tmp"/claude-home.lock "$tmp"/claude-home/.storage-write.lock 2> /dev/null | wc -l | tr -d ' ')"
 check_true "the config lock is touched while held" test "$(cat "$tmp/lock-mtime-after")" -gt "$(cat "$tmp/lock-mtime-before")"
 /bin/sleep 1
-check_true "no toucher outlives the switch" test ! -e "$tmp/claude.json.lock" -a ! -e "$tmp/claude-home/.oauth_refresh.lock" -a ! -e "$tmp/claude-home.lock"
+check_true "no toucher outlives the switch" test ! -e "$tmp/claude.json.lock" -a ! -e "$tmp/claude-home/.oauth_refresh.lock" -a ! -e "$tmp/claude-home.lock" -a ! -e "$tmp/claude-home/.storage-write.lock"
 check "a matching org raises no warning" 0 "$(grep -c 'different org' "$tmp/switch-err")"
 check "the CLI locks are released before claude auth status runs" 0 "$(cat "$tmp/locks-at-verify")"
 check "a clean switch warns nothing" "" "$(cat "$tmp/switch-err")"
@@ -541,12 +543,15 @@ mv "$tmp/claude-aside.json" "$tmp/claude.json"
 cda switch alpha --no-relaunch > /dev/null 2>&1
 
 # security refuses the write (a locked Keychain, a denied prompt): nothing is written over a login that has no copy
+rm -f "$tmp/locks-at-verify"
 err=$(SECURITY_FAIL_ADD=1 cda switch beta --no-relaunch 2>&1 > /dev/null)
 check_true "a failed CLI backup warns" grep -q 'could not back up the CLI login; switched Desktop only' <<< "$err"
 check "and the profile's saved item survives" at-beta-fresh "$(kc_get claude-multipass beta | jq -r .claudeAiOauth.accessToken)"
 check "and leaves the live CLI item alone" at-alpha "$(kc_get "Claude Code-credentials" "$USER" | jq -r .claudeAiOauth.accessToken)"
 check "and leaves oauthAccount alone" aaaaaaaa-1111 "$(jq -r .oauthAccount.accountUuid "$tmp/claude.json")"
 check "and still switches Desktop" bbbbbbbb-2222 "$(jq -r .lastKnownAccountUuid "$d/config.json")"
+check_true "and the storage lock is released" test ! -e "$tmp/claude-home/.storage-write.lock"
+check_true "and claude is not asked about a login that did not move" test ! -e "$tmp/locks-at-verify"
 cda switch alpha --no-relaunch > /dev/null 2>&1
 
 # security fails the read of the CLI item with another status: the status is named, nothing moves
@@ -659,6 +664,51 @@ rc=0
 out=$(cda switch beta --no-relaunch 2>&1) || rc=$?
 check "a lock freed during the retries does not fail the switch" 0 "$rc"
 check_true "a toucher does not hold the caller's pipes" test "$((SECONDS - start))" -lt 8
+fast_sleep
+cda switch alpha --no-relaunch > /dev/null 2>&1
+
+# Claude Code's storage lock: the restore reads the CLI item again and writes it, both under the lock.
+sw="$tmp/claude-home/.storage-write.lock"
+: > "$tmp/storage-lock-log"
+check "a switch moves the CLI login" 0 "$(exit_code cda switch beta --no-relaunch)"
+# The re-save of the profile being left reads the item first, with no storage lock.
+check "no write of the CLI item ran outside the storage lock" 0 "$(grep -c -E '^(add|delete)-generic-password free$' "$tmp/storage-lock-log" || true)"
+check_true "the item was written under it" grep -q '^add-generic-password held$' "$tmp/storage-lock-log"
+check_true "and read again under it first" grep -q '^find-generic-password held$' "$tmp/storage-lock-log"
+check_true "and the storage lock is released" test ! -e "$sw"
+cda switch alpha --no-relaunch > /dev/null 2>&1
+# A stale one is swept
+mkdir "$sw" && touch -t 202001010000 "$sw"
+check "a stale storage lock does not block the switch" 0 "$(exit_code cda switch beta --no-relaunch)"
+check "and the CLI login moved" bbbbbbbb-2222 "$(jq -r .oauthAccount.accountUuid "$tmp/claude.json")"
+check_true "and it is removed" test ! -e "$sw"
+cda switch alpha --no-relaunch > /dev/null 2>&1
+# save only reads the live item, so it takes no storage lock
+mkdir "$sw"
+err=$(cda save alpha --no-relaunch 2>&1 > /dev/null) || true
+check "save does not wait on the storage lock" 0 "$(grep -c 'Claude Code holds' <<< "$err")"
+check "and still captures the CLI login" "$(kc_get "Claude Code-credentials" "$USER" | jq -r .claudeAiOauth.accessToken)" "$(kc_get claude-multipass alpha | jq -r .claudeAiOauth.accessToken)"
+# A fresh one, held throughout, moves Desktop only
+live=$(kc_get "Claude Code-credentials" "$USER" | jq -r .claudeAiOauth.accessToken)
+st=0
+err=$(cda switch beta --no-relaunch 2>&1 > /dev/null) || st=$?
+check "a held storage lock does not fail the switch" 0 "$st"
+check_true "and says why and what to run" grep -qF "Claude Code holds $sw; switched Desktop only (run claude-multipass switch beta again)" <<< "$err"
+check "and Desktop moved" bbbbbbbb-2222 "$(jq -r .lastKnownAccountUuid "$d/config.json")"
+check "and oauthAccount did not" aaaaaaaa-1111 "$(jq -r .oauthAccount.accountUuid "$tmp/claude.json")"
+check "and the CLI item did not" "$live" "$(kc_get "Claude Code-credentials" "$USER" | jq -r .claudeAiOauth.accessToken)"
+check_true "and the holder's lock is left alone" test -d "$sw"
+check_true "and the tool's own locks are released" test ! -e "$tmp/claude-home/.oauth_refresh.lock" -a ! -e "$tmp/claude-home.lock" -a ! -e "$tmp/claude.json.lock"
+rmdir "$sw"
+# The same switch again repairs the CLI part
+check "the same switch again exits 0" 0 "$(exit_code cda switch beta --no-relaunch)"
+check "and moves the CLI login" bbbbbbbb-2222 "$(jq -r .oauthAccount.accountUuid "$tmp/claude.json")"
+cda switch alpha --no-relaunch > /dev/null 2>&1
+# One freed during the retries does not cost the CLI login
+printf '#!/bin/sh\ncase "$1" in\n  1) rmdir "%s"; exit 0 ;;\nesac\nexec /bin/sleep "$@"\n' "$sw" > "$tmp/bin/sleep"
+mkdir "$sw"
+check "a storage lock freed during the retries does not fail the switch" 0 "$(exit_code cda switch beta --no-relaunch)"
+check "and the CLI login moved" bbbbbbbb-2222 "$(jq -r .oauthAccount.accountUuid "$tmp/claude.json")"
 fast_sleep
 cda switch alpha --no-relaunch > /dev/null 2>&1
 
