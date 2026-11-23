@@ -543,6 +543,7 @@ mv "$tmp/claude-aside.json" "$tmp/claude.json"
 cda switch alpha --no-relaunch > /dev/null 2>&1
 
 # security refuses the write (a locked Keychain, a denied prompt): nothing is written over a login that has no copy
+rm -f "$tmp/locks-at-verify"
 err=$(SECURITY_FAIL_ADD=1 cda switch beta --no-relaunch 2>&1 > /dev/null)
 check_true "a failed CLI backup warns" grep -q 'could not back up the CLI login; switched Desktop only' <<< "$err"
 check "and the profile's saved item survives" at-beta-fresh "$(kc_get claude-multipass beta | jq -r .claudeAiOauth.accessToken)"
@@ -550,6 +551,7 @@ check "and leaves the live CLI item alone" at-alpha "$(kc_get "Claude Code-crede
 check "and leaves oauthAccount alone" aaaaaaaa-1111 "$(jq -r .oauthAccount.accountUuid "$tmp/claude.json")"
 check "and still switches Desktop" bbbbbbbb-2222 "$(jq -r .lastKnownAccountUuid "$d/config.json")"
 check_true "and the storage lock is released" test ! -e "$tmp/claude-home/.storage-write.lock"
+check_true "and claude is not asked about a login that did not move" test ! -e "$tmp/locks-at-verify"
 cda switch alpha --no-relaunch > /dev/null 2>&1
 
 # security fails the read of the CLI item with another status: the status is named, nothing moves

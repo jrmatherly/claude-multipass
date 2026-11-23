@@ -765,15 +765,17 @@ cli_locks=()
 cli_touchers=()
 held_lock=''
 cli_lock() {
-  local dir=$1 stale=$2 i
+  local dir=$1 stale=$2 i mtime
   mkdir -p "$(dirname "$dir")"
-  if [[ -d $dir ]] && (($(date +%s) - $(stat -f %m "$dir") > stale)); then rm -rf "$dir"; fi
+  # Claude Code takes and drops the storage lock at every credential write, so
+  # the dir can vanish between the test and the stat: that reads as not stale.
+  if [[ -d $dir ]] && mtime=$(stat -f %m "$dir" 2> /dev/null) && (($(date +%s) - mtime > stale)); then rm -rf "$dir"; fi
   for ((i = 0; i < 5; i++)); do
     if mkdir "$dir" 2> /dev/null; then
       cli_locks+=("$dir")
-      # Claude Code deems claude.json.lock stale after 10 s and the credential
-      # locks after 60 s, and touches its own every 5 s, so a held dir is kept
-      # fresh. The loop ends itself once the dir is gone and -c covers the race,
+      # Claude Code deems claude.json.lock stale after 10 s, the storage lock
+      # after 15 s and the credential locks after 60 s, and touches its own
+      # every 5 s, so a held dir is kept fresh. The loop ends itself once the dir is gone and -c covers the race,
       # so a lingering loop never leaves a file where the CLI expects a dir. Its
       # fds go to /dev/null: the menu bar app and Raycast drain this script's
       # pipes to EOF, and an inherited fd would hold them until the next sleep.
