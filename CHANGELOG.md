@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.15.3 (2026-11-22)
 
 - A switch now reads and rewrites the terminal login under the lock Claude Code takes for its own writes, so a login for an MCP server saved during a switch is no longer lost.
 
