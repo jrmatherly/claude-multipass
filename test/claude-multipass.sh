@@ -1547,7 +1547,7 @@ check_doctor_without_jq() {
   check "and says once that it skipped the check" 1 "$(grep -c '^warn: profiles: saved tokens not checked without jq' <<< "$out")"
 }
 printf '{"apiKeyHelper":"/x/helper"}' > "$CLAUDE_CLI_HOME/settings.json"
-check_true "doctor without jq says it did not check settings.json" grep -qF "warn: apiKeyHelper: $CLAUDE_CLI_HOME/settings.json not checked without jq" <<< "$(PATH=$nojq cda doctor || true)"
+check_true "doctor without jq says it did not check settings.json" grep -qF "warn: apiKeyHelper and env: $CLAUDE_CLI_HOME/settings.json not checked without jq" <<< "$(PATH=$nojq cda doctor || true)"
 rm -f "$CLAUDE_CLI_HOME/settings.json"
 check "and is quiet with no settings.json" 0 "$( (PATH=$nojq cda doctor || true) | grep -c '^warn: apiKeyHelper')"
 check_doctor_without_jq "$nojq"

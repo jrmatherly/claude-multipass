@@ -1674,7 +1674,7 @@ doctor_report() {
   for var in CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY apiKeyHelper CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_PROFILE; do
     if [[ $var == apiKeyHelper ]]; then
       if [[ -z $jq_works ]]; then
-        [[ ! -e $cli_home/settings.json ]] || echo "warn: apiKeyHelper: $cli_home/settings.json not checked without jq"
+        [[ ! -e $cli_home/settings.json ]] || echo "warn: apiKeyHelper and env: $cli_home/settings.json not checked without jq"
       elif jq -e '.apiKeyHelper | type == "string" and length > 0' "$cli_home/settings.json" > /dev/null 2>&1; then
         echo "warn: apiKeyHelper is set in $cli_home/settings.json; it overrides the terminal login"
       fi
