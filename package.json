@@ -1,7 +1,7 @@
 {
   "name": "claude-multipass",
   "version": "0.16.0",
-  "packageManager": "pnpm@12.18.0",
+  "packageManager": "pnpm@12.22.0",
   "description": "Switch the Claude Desktop app between saved claude.ai accounts.",
   "private": true,
   "engines": {
