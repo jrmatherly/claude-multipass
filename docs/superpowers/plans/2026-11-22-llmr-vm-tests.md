@@ -20,27 +20,28 @@ The review compared claude-multipass 0.15.2 (`f8d607c`) with llm-router v8.1.0-1
 6. **read.** `llmr <profile> app` sets or deletes `CLAUDE_CONFIG_DIR` itself (`packages/core/src/agents/claude-app/launch.ts:83`), launches with `open -W -n` detached and returns before Desktop is up. The Desktop data folder is `<settings dir>/.llm-router/claude-app-user-data/<profile id>`.
 7. **read.** A profile with `claudeAppTakeover` on writes the shared `Claude-3p` data folder, which a plain `open -a Claude` reads. Multipass relaunches with exactly that (`bin/claude-multipass:1059`).
 8. **ran.** Jason's Mac has `llmr` 7.2.0 installed. At that tag every non-shared profile gets `CLAUDE_CONFIG_DIR`, `~/.claude` included. It left `~/.claude/.claude.json` and two `.llmr-*` copies there, dated 2026-10-28.
-9. **read.** llm-router writes `apiKeyHelper` into `settings.json` in its helper auth mode and only ever removes `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_API_KEY`. `doctor` already reads `apiKeyHelper` (`bin/claude-multipass:1622`).
+9. **read.** llm-router writes `apiKeyHelper` into `settings.json` in its helper auth mode and only ever removes `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_API_KEY`. `doctor` already reads `apiKeyHelper` (`bin/claude-multipass:1661`).
 
 ### llm-router v9.0.0 (2026-11-24)
 
 llm-router released v9.0.0 after the review. Read in its source at tag `v9.0.0` on 2026-11-24:
 
 10. **read.** Finding 2 no longer holds. The `claude-code` local provider is 36 lines that register a `Claude Code API` provider and bind a pass-through hook (`packages/core/src/agents/local-providers/claude-code.ts`). It reads no Keychain item, refreshes nothing and writes nothing back. Its own description: it forwards the login Claude Code sends, only from a Claude Code profile in Claude login mode, and stores nothing.
-11. **read.** The `$HOME` case of finding 4 is fixed. `writeClaudeCodeAutoCompactWindowsCache` returns before the write when `isClaudeCodeAccountFile` says the file is `.claude.json` in the home folder, with symlinks and letter case resolved (`packages/core/src/profiles/service.ts:2411`, `packages/core/src/agents/claude-code/environment.ts:55`).
-12. **read.** Finding 9 has a third auth mode beside the helper and WIF modes. In `claude-login` mode LLMR writes its gateway key into `ANTHROPIC_CUSTOM_HEADERS` (header `x-llmr-api-key`) and removes its own `apiKeyHelper` (`service.ts:2897`, `:1591`). `doctor` reads neither `ANTHROPIC_CUSTOM_HEADERS` nor `ANTHROPIC_BASE_URL`, so it does not warn for such a profile.
+11. **read.** The `$HOME` case of finding 4 is fixed. `writeClaudeCodeAutoCompactWindowsCache` returns before the write when `isClaudeCodeAccountFile` says the file is `.claude.json` in the home folder, with symlinks and letter case resolved (`packages/core/src/profiles/service.ts:2412`, `packages/core/src/agents/claude-code/environment.ts:55`).
+12. **read.** Finding 9 has a third auth mode beside the helper and WIF modes. In `claude-login` mode LLMR writes its gateway key into `ANTHROPIC_CUSTOM_HEADERS` (header `x-llmr-api-key`) and removes its own `apiKeyHelper` (`service.ts:2895`, `:1599`). `doctor` reads neither `ANTHROPIC_CUSTOM_HEADERS` nor `ANTHROPIC_BASE_URL`, so it does not warn for such a profile.
 
 ## Before the first test
 
 Unknown today, so settle each on the VM before running anything:
 
 - [ ] The VM's name in UTM and how a session reaches it (shared folder, ssh, or Jason at its screen).
-- [ ] `llmr --version` on the VM. Tests 1 to 7 assume v8.0.0 or later. Test 8 covers the upgrade from 7.2.0.
+- [ ] `llmr --version` on the VM. Tests 1 to 7 assume v8.0.0 or later, test 5 v9.0.0 or later. Test 8 covers the upgrade from 7.2.0.
 - [ ] `claude --version` and the Claude Desktop version on the VM.
 - [ ] `claude-multipass --version` on the VM, 0.15.2 or later.
-- [ ] Two claude.ai accounts saved as multipass profiles on the VM (call them A and B), each with a CLI login (`list` shows no "no CLI login" note). Tests 4, 5 and 7 need both.
+- [ ] Two claude.ai accounts saved as multipass profiles on the VM (call them A and B), each with a CLI login (`list` shows no "no CLI login" note). Tests 5 and 7 need both.
 - [ ] One LLMR profile for Claude Code, global scope, settings file `~/.claude/settings.json` (the System default case), saved in multipass with `save router --llmr <llmr-profile>`.
-- [ ] The `claude-code` local provider enabled in the VM's LLMR config, and the gateway running (`curl -fs http://127.0.0.1:3456/health`).
+- [ ] One LLMR Claude Code profile with "Sign in with my Claude login" on (test 5).
+- [ ] A `Claude Code API` provider (the `claude-code` local provider) enabled in the VM's LLMR config, and the gateway running (`curl -fs http://127.0.0.1:3456/health`).
 - [ ] A snapshot of the VM, so each test starts from the same state.
 
 ## Tests
@@ -78,7 +79,7 @@ Retired 2026-11-24. llm-router v9.0.0 has no refresh and no write-back to race a
 
 ### 5. The gateway follows the switch
 
-Settles what finding 10 implies: after a switch from A to B, a Claude login mode profile's traffic runs on B.
+Settles what finding 10 implies: after a switch from A to B, the traffic of a System default or shared-home profile in Claude login mode runs on B.
 
 - [ ] With llm-router v9.0.0 or later, a `Claude Code API` provider and a Claude Code profile with "Sign in with my Claude login" on, start `llmr <llmr-profile>` on A and send one request. Note which account LLMR's log or `/status` names.
 - [ ] `claude-multipass switch B`. Send another request from that session, then one from a new `llmr <llmr-profile>` session.
@@ -127,10 +128,9 @@ Owned by the llm-router project, and built in v9.0.0 (finding 11). Listed here s
 
 ## Not a test: decisions waiting on Jason
 
-- Decided 2026-11-22, shipped in llm-router v9.0.0: llm-router forwards the login and no longer refreshes or writes it back, so it takes no refresh lock.
 - Whether `doctor` should warn on an `ANTHROPIC_BASE_URL` or `ANTHROPIC_CUSTOM_HEADERS` line in `~/.claude/settings.json` (finding 12).
 - Whether to remove `~/.claude/.claude.json` and its two `.llmr-*` copies from Jason's Mac. Nothing reads them under v8.
-- Whether `llmr` should report its port, profile id and Desktop data folder in a machine-readable form. Until it does, a custom gateway port makes `list` and `current` say "gateway not running" (`bin/claude-multipass:1116`, a marked shortcut).
+- Whether `llmr` should report its port, profile id and Desktop data folder in a machine-readable form. Until it does, a custom gateway port makes `list` and `current` say "gateway not running" (`bin/claude-multipass:1154`, a marked shortcut).
 
 ## When a test is done
 

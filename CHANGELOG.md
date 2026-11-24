@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- The help page and the docs now say that llm-router v9.0.0 or later stores no copy of the terminal login: a profile in Claude login mode forwards the login `claude` sends, so its subscription is the account the terminal is on.
+- The help page and the docs now say that llm-router v9.0.0 or later stores no copy of the terminal login: a System default or shared-home profile in Claude login mode forwards the login `claude` sends, so its subscription is the account the terminal is on.
 
 ## 0.15.3 (2026-11-22)
 
