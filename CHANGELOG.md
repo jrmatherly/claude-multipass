@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- `doctor` now reads the login overrides from the `env` block of `~/.claude/settings.json` as well as the shell, since Claude Code applies that block over the shell's values. It also reports an `ANTHROPIC_BASE_URL`, which sends requests to a gateway and leaves the terminal login as the credential.
+- `doctor` now reads the login overrides from the `env` block of `~/.claude/settings.json` as well as the shell, since a terminal session applies that block over the shell's values. With `CLAUDE_CONFIG_DIR` set it reads that folder's `settings.json`, for `apiKeyHelper` too. It also reports an `ANTHROPIC_BASE_URL`, which sends requests to a gateway and leaves the terminal login as the credential.
 - The help page and the docs now say that llm-router v9.0.0 or later stores no copy of the terminal login: a System default or shared-home profile in Claude login mode forwards the login `claude` sends, so its subscription is the account the terminal is on.
 
 ## 0.15.3 (2026-11-22)
