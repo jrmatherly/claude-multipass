@@ -48,7 +48,8 @@ trap self_check_exit EXIT
 
 export CLAUDE_DESKTOP_DIR="$tmp/desktop" CLAUDE_MULTIPASS_DIR="$tmp/multipass"
 export TERM=dumb
-unset CLAUDE_MULTIPASS_DEBUG CLAUDE_CONFIG_DIR CLAUDE_SECURESTORAGE_CONFIG_DIR
+# ANTHROPIC_BASE_URL: the Claude desktop app sets it for its sessions, and doctor reports it.
+unset CLAUDE_MULTIPASS_DEBUG CLAUDE_CONFIG_DIR CLAUDE_SECURESTORAGE_CONFIG_DIR ANTHROPIC_BASE_URL
 d=$CLAUDE_DESKTOP_DIR p=$CLAUDE_MULTIPASS_DIR/profiles b=$CLAUDE_MULTIPASS_DIR/backups s=$CLAUDE_DESKTOP_DIR/claude-code-sessions
 mkdir -p "$tmp/bin"
 # pgrep says "not running" so quit is a no-op; the other three only log.
@@ -1427,7 +1428,27 @@ check "an empty apiKeyHelper does not warn" 0 "$(cda doctor | grep -c '^warn: ap
 printf 'not json' > "$CLAUDE_CLI_HOME/settings.json"
 check "an unreadable settings.json does not warn" 0 "$(cda doctor | grep -c '^warn: apiKeyHelper')"
 check "an unreadable settings.json does not fail doctor" 0 "$(exit_code cda doctor)"
+# Claude Code writes the user settings' env block over the shell's values.
+printf '{"env":{"ANTHROPIC_API_KEY":"sk-in-settings","ANTHROPIC_AUTH_TOKEN":""}}' > "$CLAUDE_CLI_HOME/settings.json"
+out=$(ANTHROPIC_AUTH_TOKEN=x cda doctor)
+check_true "doctor warns on an override in the settings env block" grep -qF "warn: ANTHROPIC_API_KEY is set in the env block of $CLAUDE_CLI_HOME/settings.json; it overrides the terminal login" <<< "$out"
+check "an empty value in the env block unsets the shell's" 0 "$(grep -c '^warn: ANTHROPIC_AUTH_TOKEN' <<< "$out")"
+check "doctor prints no value from the env block" 0 "$(grep -c sk-in-settings <<< "$out")"
+check "the shell's value still warns when the env block is silent" 1 "$(CLAUDE_CODE_OAUTH_TOKEN=x cda doctor | grep -c '^warn: CLAUDE_CODE_OAUTH_TOKEN is set; it overrides the terminal login$')"
+printf '{"env":{"ANTHROPIC_BASE_URL":"http://gateway-in-settings:3456"}}' > "$CLAUDE_CLI_HOME/settings.json"
+out=$(cda doctor)
+check_true "doctor names a gateway from the settings env block" grep -qF "warn: ANTHROPIC_BASE_URL is set in the env block of $CLAUDE_CLI_HOME/settings.json; requests go to that endpoint, on the terminal login unless another credential outranks it" <<< "$out"
+check "doctor prints no gateway address" 0 "$(grep -c gateway-in-settings <<< "$out")"
+check "a gateway does not fail doctor" 0 "$(exit_code cda doctor)"
+mkdir -p "$tmp/cfg-home"
+printf '{"apiKeyHelper":"/x/helper","env":{"ANTHROPIC_API_KEY":"k"}}' > "$tmp/cfg-home/settings.json"
+out=$(CLAUDE_CONFIG_DIR=$tmp/cfg-home cda doctor)
+check_true "doctor reads the env block of the settings file in CLAUDE_CONFIG_DIR" grep -qF "warn: ANTHROPIC_API_KEY is set in the env block of $tmp/cfg-home/settings.json" <<< "$out"
+check_true "and its apiKeyHelper" grep -qF "warn: apiKeyHelper is set in $tmp/cfg-home/settings.json" <<< "$out"
+check "and not the default home's settings file" 0 "$(grep -c '^warn: ANTHROPIC_BASE_URL' <<< "$out")"
 rm -f "$CLAUDE_CLI_HOME/settings.json"
+check_true "doctor names a gateway from the shell" grep -q '^warn: ANTHROPIC_BASE_URL is set; requests go to that endpoint, on the terminal login unless another credential outranks it$' <<< "$(ANTHROPIC_BASE_URL=http://x cda doctor)"
+check "doctor is quiet with no gateway" 0 "$(cda doctor | grep -c '^warn: ANTHROPIC_BASE_URL')"
 check_true "doctor warns when claude is not on PATH" grep -q '^warn: claude: not on PATH; the terminal login is not verified after a switch' <<< "$(PATH=$noclaude cda doctor)"
 printf '{"claudeAiOauth":{"accessToken":"at-secret-in-file"}}' > "$CLAUDE_CLI_HOME/.credentials.json"
 out=$(cda doctor)
@@ -1532,7 +1553,9 @@ check_doctor_without_jq() {
   check "and says once that it skipped the check" 1 "$(grep -c '^warn: profiles: saved tokens not checked without jq' <<< "$out")"
 }
 printf '{"apiKeyHelper":"/x/helper"}' > "$CLAUDE_CLI_HOME/settings.json"
-check_true "doctor without jq says it did not check settings.json" grep -qF "warn: apiKeyHelper: $CLAUDE_CLI_HOME/settings.json not checked without jq" <<< "$(PATH=$nojq cda doctor || true)"
+check_true "doctor without jq says it did not check settings.json" grep -qF "warn: apiKeyHelper and env: $CLAUDE_CLI_HOME/settings.json not checked without jq" <<< "$(PATH=$nojq cda doctor || true)"
+printf '{"env":{"ANTHROPIC_API_KEY":"k"}}' > "$tmp/cfg-home/settings.json"
+check_true "doctor without jq names the CLAUDE_CONFIG_DIR settings file it skipped" grep -qF "warn: apiKeyHelper and env: $tmp/cfg-home/settings.json not checked without jq" <<< "$(CLAUDE_CONFIG_DIR=$tmp/cfg-home PATH=$nojq cda doctor || true)"
 rm -f "$CLAUDE_CLI_HOME/settings.json"
 check "and is quiet with no settings.json" 0 "$( (PATH=$nojq cda doctor || true) | grep -c '^warn: apiKeyHelper')"
 check_doctor_without_jq "$nojq"
