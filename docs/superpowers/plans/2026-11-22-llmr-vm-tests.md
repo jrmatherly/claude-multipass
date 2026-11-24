@@ -22,6 +22,14 @@ The review compared claude-multipass 0.15.2 (`f8d607c`) with llm-router v8.1.0-1
 8. **ran.** Jason's Mac has `llmr` 7.2.0 installed. At that tag every non-shared profile gets `CLAUDE_CONFIG_DIR`, `~/.claude` included. It left `~/.claude/.claude.json` and two `.llmr-*` copies there, dated 2026-10-28.
 9. **read.** llm-router writes `apiKeyHelper` into `settings.json` in its helper auth mode and only ever removes `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_API_KEY`. `doctor` already reads `apiKeyHelper` (`bin/claude-multipass:1622`).
 
+### llm-router v9.0.0 (2026-11-24)
+
+llm-router released v9.0.0 after the review. Read in its source at tag `v9.0.0` on 2026-11-24:
+
+10. **read.** Finding 2 no longer holds. The `claude-code` local provider is 36 lines that register a `Claude Code API` provider and bind a pass-through hook (`packages/core/src/agents/local-providers/claude-code.ts`). It reads no Keychain item, refreshes nothing and writes nothing back. Its own description: it forwards the login Claude Code sends, only from a Claude Code profile in Claude login mode, and stores nothing.
+11. **read.** The `$HOME` case of finding 4 is fixed. `writeClaudeCodeAutoCompactWindowsCache` returns before the write when `isClaudeCodeAccountFile` says the file is `.claude.json` in the home folder, with symlinks and letter case resolved (`packages/core/src/profiles/service.ts:2411`, `packages/core/src/agents/claude-code/environment.ts:55`).
+12. **read.** Finding 9 has a third auth mode beside the helper and WIF modes. In `claude-login` mode LLMR writes its gateway key into `ANTHROPIC_CUSTOM_HEADERS` (header `x-llmr-api-key`) and removes its own `apiKeyHelper` (`service.ts:2897`, `:1591`). `doctor` reads neither `ANTHROPIC_CUSTOM_HEADERS` nor `ANTHROPIC_BASE_URL`, so it does not warn for such a profile.
+
 ## Before the first test
 
 Unknown today, so settle each on the VM before running anything:
@@ -66,28 +74,15 @@ Settles the claim in `docs/claude-multipass.md` that with a third-party gateway 
 
 ### 4. A switch during LLM Router's token refresh
 
-Settles finding 2: whether an LLMR refresh that overlaps a switch overwrites the new login, and whether it drops the pair it just rotated.
+Retired 2026-11-24. llm-router v9.0.0 has no refresh and no write-back to race a switch (finding 10), so there is nothing to run.
 
-llm-router honours `LLMR_CLAUDE_CODE_OAUTH_TOKEN_ENDPOINT` when it is a loopback URL (`claude-code.ts:232`), so the refresh can be held open without rotating a real token.
+### 5. The gateway follows the switch
 
-- [ ] Write a small loopback HTTP server that waits 30 s, then answers the refresh POST with a JSON pair whose tokens are recognisable fakes (`access_token`, `refresh_token`, `expires_in`). Start the gateway with the variable pointing at it.
-- [ ] Make account A's stored access token read as expired. On the VM only: lower `claudeAiOauth.expiresAt` in the `Claude Code-credentials` item, or wait for it to lapse.
-- [ ] Send one request through the `claude-code` provider so the refresh starts. Confirm the stub received the POST.
-- [ ] Inside the 30 s, `claude-multipass switch B`.
-- [ ] After the stub answers, read the Keychain item's account: `claude auth status` in a new terminal, and `jq .oauthAccount.emailAddress ~/.claude.json`.
-- [ ] Pass: the terminal is on B, and the fake pair is not in the item. Fail: the item holds the fake pair or A's tokens, which means LLMR overwrote the switch.
-- [ ] Either way, note from the gateway log whether LLMR adopted the stored pair. If it did, the pair it had just received was dropped. With a real endpoint that leaves profile A's saved refresh token rotated away. Record that as "by construction, shown with a stub".
-- [ ] `claude-multipass switch A`, then `claude auth status`. Record whether A's terminal login still works.
+Settles what finding 10 implies: after a switch from A to B, a Claude login mode profile's traffic runs on B.
 
-If llm-router later takes `~/.claude/.oauth_refresh.lock` around the refresh and the write-back, run this test again. Pass then means the switch waits for the refresh, or the refresh waits for the switch, and both logins survive.
-
-### 5. The provider follows the switch
-
-Settles the first consequence of finding 2: after a switch from A to B, traffic through the `claude-code` provider runs on B.
-
-- [ ] On A, send one request through the provider. Note which account LLMR reports or logs.
-- [ ] `claude-multipass switch B`. Send another request.
-- [ ] Record which account served it. There is no pass or fail: the result goes into the docs, because a user may not expect a switch to move the gateway's subscription.
+- [ ] With llm-router v9.0.0 or later, a `Claude Code API` provider and a Claude Code profile with "Sign in with my Claude login" on, start `llmr <llmr-profile>` on A and send one request. Note which account LLMR's log or `/status` names.
+- [ ] `claude-multipass switch B`. Send another request from that session, then one from a new `llmr <llmr-profile>` session.
+- [ ] Record which account served each. There is no pass or fail: the result goes into the docs, because a user may not expect a switch to move the gateway's subscription, and the running session may keep A until it reads the login again.
 
 ### 6. Claude Code and `autoCompactWindowsCache`
 
@@ -123,16 +118,17 @@ Settles the R label on the `Claude Code-credentials-<8 hex>` item in `.claude/ru
 - [ ] Repeat with `CLAUDE_CONFIG_DIR` set to the default directory, `$HOME/.claude`. llm-router PR 126 says the name is suffixed even then.
 - [ ] Relabel the fact to M with the Claude Code version.
 
-### 10. llm-router's `$HOME` fix, once built
+### 10. llm-router's `$HOME` fix
 
-Owned by the llm-router project. Listed here so multipass's dependency on it is not lost.
+Owned by the llm-router project, and built in v9.0.0 (finding 11). Listed here so multipass's dependency on it is checked on a real run.
 
 - [ ] With a profile whose settings file is directly in the home folder, apply it. Pass: `~/.claude.json` is byte-identical before and after.
 - [ ] Repeat with the home folder reached through a symlink.
 
 ## Not a test: decisions waiting on Jason
 
-- Whether llm-router takes Claude Code's refresh lock around its refresh and write-back. The llm-router session raised it as a task of its own on 2026-11-22. Multipass builds no workaround until that is decided.
+- Decided 2026-11-22, shipped in llm-router v9.0.0: llm-router forwards the login and no longer refreshes or writes it back, so it takes no refresh lock.
+- Whether `doctor` should warn on an `ANTHROPIC_BASE_URL` or `ANTHROPIC_CUSTOM_HEADERS` line in `~/.claude/settings.json` (finding 12).
 - Whether to remove `~/.claude/.claude.json` and its two `.llmr-*` copies from Jason's Mac. Nothing reads them under v8.
 - Whether `llmr` should report its port, profile id and Desktop data folder in a machine-readable form. Until it does, a custom gateway port makes `list` and `current` say "gateway not running" (`bin/claude-multipass:1116`, a marked shortcut).
 
@@ -141,21 +137,21 @@ Owned by the llm-router project. Listed here so multipass's dependency on it is 
 - Write the row in the table below.
 - Tests 1 and 2: remove "not yet checked against a real llmr launch" from the script comment, the help page and `docs/claude-multipass.md`, in a PR, since the script changes.
 - Tests 3, 5 and 7: correct or extend `README.md` and `docs/claude-multipass.md` to match what was seen.
-- Tests 4 and 7 failing: that is a bug report for llm-router or a new guard here. Stop and decide with Jason.
+- Test 7 failing: that is a bug report for llm-router or a new guard here. Stop and decide with Jason.
 - Test 9: relabel in `.claude/rules/desktop-internals.md` and `docs/research.md`.
 - When every row is filled, move this file to `completed/`.
 
 ## Results
 
 | Test | Date | Versions (llmr, claude, Desktop, multipass) | Result |
-| ---- | ---- | ------------------------------------------- | ------ |
-| 1    |      |                                             |        |
-| 2    |      |                                             |        |
-| 3    |      |                                             |        |
-| 4    |      |                                             |        |
-| 5    |      |                                             |        |
-| 6    |      |                                             |        |
-| 7    |      |                                             |        |
-| 8    |      |                                             |        |
-| 9    |      |                                             |        |
-| 10   |      |                                             |        |
+| --- | --- | --- | --- |
+| 1 |  |  |  |
+| 2 |  |  |  |
+| 3 |  |  |  |
+| 4 |  |  | retired 2026-11-24 |
+| 5 |  |  |  |
+| 6 |  |  |  |
+| 7 |  |  |  |
+| 8 |  |  |  |
+| 9 |  |  |  |
+| 10 |  |  |  |

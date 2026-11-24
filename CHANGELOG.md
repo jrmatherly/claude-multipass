@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- The help page and the docs now say that llm-router v9.0.0 or later stores no copy of the terminal login: a profile in Claude login mode forwards the login `claude` sends, so its subscription is the account the terminal is on.
+
 ## 0.15.3 (2026-11-22)
 
 - A switch now reads and rewrites the terminal login under the lock Claude Code takes for its own writes, so a login for an MCP server saved during a switch is no longer lost.
