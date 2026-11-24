@@ -370,6 +370,11 @@ ${bold}Commands${reset}
                        order: CLAUDE_CODE_USE_BEDROCK, _VERTEX or _FOUNDRY,
                        ANTHROPIC_AUTH_TOKEN, ANTHROPIC_API_KEY, apiKeyHelper in
                        settings.json, CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_PROFILE.
+                       Each name is read from the env block of
+                       ~/.claude/settings.json first, which Claude Code
+                       applies over the shell's value. An ANTHROPIC_BASE_URL
+                       is reported too: it sends requests to a gateway and
+                       leaves the terminal login as the credential.
                        One ok:, warn: or fail: line per check; exits 1 on any
                        fail:. Reads no Keychain and no network. Without a
                        working jq it skips the config and token checks and
@@ -1593,10 +1598,22 @@ usage_object() {
   esac
 }
 
+# Where Claude Code gets a variable: status 1 when unset, else a clause for the
+# message, empty for the shell. The env block of the user's settings.json is
+# written over the shell's value, so it wins and "" there unsets the variable.
+doctor_env_source() {
+  local value
+  if value=$(jq -er --arg k "$1" '.env[$k] | strings' "$cli_home/settings.json" 2> /dev/null); then
+    [[ -n $value ]] && printf ' in the env block of %s' "$cli_home/settings.json"
+  else
+    [[ -n ${!1:-} ]]
+  fi
+}
+
 # One line per check, in a fixed order, no Keychain and no network. Exits 1
 # when any fail: line was printed.
 doctor_report() {
-  local status=0 tool mode meta dir name file logins set_aside legacy pid var creds_home unchecked='' jq_works=''
+  local status=0 tool mode meta dir name file logins set_aside legacy pid var where creds_home unchecked='' jq_works=''
   jq -n 1 > /dev/null 2>&1 && jq_works=1
   if [[ ! -f $config ]]; then
     echo "fail: config: no $config (open Claude Desktop once first)"
@@ -1661,10 +1678,12 @@ doctor_report() {
       elif jq -e '.apiKeyHelper | type == "string" and length > 0' "$cli_home/settings.json" > /dev/null 2>&1; then
         echo "warn: apiKeyHelper is set in $cli_home/settings.json; it overrides the terminal login"
       fi
-    elif [[ -n ${!var:-} ]]; then
-      echo "warn: $var is set; it overrides the terminal login"
+    elif where=$(doctor_env_source "$var"); then
+      echo "warn: $var is set$where; it overrides the terminal login"
     fi
   done
+  # Alone it moves the requests, not the login (Claude Code's gateway docs).
+  ! where=$(doctor_env_source ANTHROPIC_BASE_URL) || echo "warn: ANTHROPIC_BASE_URL is set$where; requests go to that endpoint, on the terminal login unless an override is set"
   command -v claude > /dev/null || echo "warn: claude: not on PATH; the terminal login is not verified after a switch"
   # Defined and empty, the storage variable selects the default, as Claude Code does.
   creds_home=${CLAUDE_SECURESTORAGE_CONFIG_DIR-${CLAUDE_CONFIG_DIR:-}}

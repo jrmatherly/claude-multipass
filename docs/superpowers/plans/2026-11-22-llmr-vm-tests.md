@@ -28,7 +28,7 @@ llm-router released v9.0.0 after the review. Read in its source at tag `v9.0.0` 
 
 10. **read.** Finding 2 no longer holds. The `claude-code` local provider is 36 lines that register a `Claude Code API` provider and bind a pass-through hook (`packages/core/src/agents/local-providers/claude-code.ts`). It reads no Keychain item, refreshes nothing and writes nothing back. Its own description: it forwards the login Claude Code sends, only from a Claude Code profile in Claude login mode, and stores nothing.
 11. **read.** The `$HOME` case of finding 4 is fixed. `writeClaudeCodeAutoCompactWindowsCache` returns before the write when `isClaudeCodeAccountFile` says the file is `.claude.json` in the home folder, with symlinks and letter case resolved (`packages/core/src/profiles/service.ts:2412`, `packages/core/src/agents/claude-code/environment.ts:55`).
-12. **read.** Finding 9 has a third auth mode beside the helper and WIF modes. In `claude-login` mode LLMR writes its gateway key into `ANTHROPIC_CUSTOM_HEADERS` (header `x-llmr-api-key`) and removes its own `apiKeyHelper` (`service.ts:2895`, `:1599`). `doctor` reads neither `ANTHROPIC_CUSTOM_HEADERS` nor `ANTHROPIC_BASE_URL`, so it does not warn for such a profile.
+12. **read.** Finding 9 has a third auth mode beside the helper and WIF modes. In `claude-login` mode LLMR writes its gateway key into `ANTHROPIC_CUSTOM_HEADERS` (header `x-llmr-api-key`) and removes its own `apiKeyHelper` (`service.ts:2895`, `:1599`). `doctor` reported nothing for such a profile until it learned to read `ANTHROPIC_BASE_URL` and the `env` block of `settings.json` (2026-11-24).
 
 ## Before the first test
 
@@ -128,7 +128,6 @@ Owned by the llm-router project, and built in v9.0.0 (finding 11). Listed here s
 
 ## Not a test: decisions waiting on Jason
 
-- Whether `doctor` should warn on an `ANTHROPIC_BASE_URL` or `ANTHROPIC_CUSTOM_HEADERS` line in `~/.claude/settings.json` (finding 12).
 - Whether to remove `~/.claude/.claude.json` and its two `.llmr-*` copies from Jason's Mac. Nothing reads them under v8.
 - Whether `llmr` should report its port, profile id and Desktop data folder in a machine-readable form. Until it does, a custom gateway port makes `list` and `current` say "gateway not running" (`bin/claude-multipass:1154`, a marked shortcut).
 
