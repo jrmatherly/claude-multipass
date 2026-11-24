@@ -287,13 +287,17 @@ ${bold}Commands${reset}
                        and the terminal's saved login, so a switch between
                        claude.ai accounts can swap that login under it too.
                        Its requests still go to LLMR's gateway, because LLMR
-                       writes its gateway settings into that file. Any other
-                       profile gets a Claude home of its own. If llmr fails,
-                       or no LLMR Desktop
-                       appears within 10 s, Desktop relaunches on the
-                       claude.ai login and switch exits 1. Switching away
-                       quits Desktop (that this ends LLMR's instance is not
-                       yet checked against a real llmr launch) and
+                       writes its gateway settings into that file. In
+                       llm-router v9.0.0 or later LLMR stores no copy of
+                       that login: a System default or shared-home profile
+                       in Claude login mode forwards the login claude sends,
+                       so its subscription is the account the terminal is
+                       on. Any other profile gets a Claude home of its own
+                       and forwards that home's login. If llmr fails, or no
+                       LLMR Desktop appears within 10 s, Desktop relaunches
+                       on the claude.ai login and switch exits 1. Switching
+                       away quits Desktop (that this ends LLMR's instance is
+                       not yet checked against a real llmr launch) and
                        relaunches the claude.ai login, also when the target
                        is the account the Desktop folder still holds. An
                        existing claude.ai profile under <name> stops it; add
